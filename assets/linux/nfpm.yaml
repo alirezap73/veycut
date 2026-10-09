@@ -1,25 +1,25 @@
-# Concat's Linux packages: one description for the .deb and the .rpm.
+# VeyCut's Linux packages: one description for the .deb and the .rpm.
 #
 # Built by build-app.yml with nfpm from the staged folder the AppImage is
 # also made of, so every Linux bundle ships the same files. The program lives
-# whole under /opt/concat - the binary finds its libraries in lib/ beside
+# whole under /opt/veycut - the binary finds its libraries in lib/ beside
 # itself, by rpath, and nothing else on the system has to line up - with
 # a launcher on the path, a desktop entry and an icon where the desktop
 # looks for them. The version and architecture are handed in as
 # environment; the files are named relative to the staged folder, which
 # is where nfpm is run from:
 #
-#   cd stage/Concat-0.2.6-linux-x86_64
-#   VERSION=0.2.6 NFPM_ARCH=amd64 nfpm package -f ../../assets/linux/nfpm.yaml -p deb -t ..
-name: concat
+#   cd stage/VeyCut-0.1.0-linux-x86_64
+#   VERSION=0.1.0 NFPM_ARCH=amd64 nfpm package -f ../../assets/linux/nfpm.yaml -p deb -t ..
+name: veycut
 arch: ${NFPM_ARCH}
 platform: linux
 version: ${VERSION}
 section: video
 priority: optional
-maintainer: Concat contributors <jub0trd@gmail.com>
-vendor: Concat contributors
-homepage: https://github.com/jub0t/Concat
+maintainer: alirezap73 <alirezap73@users.noreply.github.com>
+vendor: VeyCut contributors
+homepage: https://github.com/alirezap73/veycut
 license: AGPL-3.0-or-later
 description: |
   Free and open source video editor.
@@ -28,27 +28,27 @@ description: |
 
 contents:
   - src: concat
-    dst: /opt/concat/concat
+    dst: /opt/veycut/concat
     file_info:
       mode: 0755
   - src: lib/*
-    dst: /opt/concat/lib/
+    dst: /opt/veycut/lib/
   - src: pkg/concat
-    dst: /usr/bin/concat
+    dst: /usr/bin/veycut
     file_info:
       mode: 0755
   - src: pkg/concat.desktop
-    dst: /usr/share/applications/concat.desktop
+    dst: /usr/share/applications/veycut.desktop
   - src: concat.png
-    dst: /usr/share/icons/hicolor/256x256/apps/concat.png
+    dst: /usr/share/icons/hicolor/256x256/apps/veycut.png
   - src: LICENSE
-    dst: /usr/share/doc/concat/LICENSE
+    dst: /usr/share/doc/veycut/LICENSE
   - src: THIRD_PARTY_NOTICES.md
-    dst: /usr/share/doc/concat/THIRD_PARTY_NOTICES.md
+    dst: /usr/share/doc/veycut/THIRD_PARTY_NOTICES.md
   - src: LICENSE-EXCEPTIONS.md
-    dst: /usr/share/doc/concat/LICENSE-EXCEPTIONS.md
+    dst: /usr/share/doc/veycut/LICENSE-EXCEPTIONS.md
   - src: SOURCE-NOTICES.md
-    dst: /usr/share/doc/concat/SOURCE-NOTICES.md
+    dst: /usr/share/doc/veycut/SOURCE-NOTICES.md
 
 # What the binary loads from the system rather than from lib/: the
 # toolkit the file dialogs use, sound, fonts and OpenGL. Named as each

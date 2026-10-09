@@ -504,8 +504,8 @@ jobs:
           Type=Application
           Name=VeyCut
           Comment=Video editor
-          Exec=concat
-          Icon=concat
+          Exec=veycut
+          Icon=veycut
           Categories=AudioVideo;Video;
           Terminal=false
           StartupWMClass=concat
@@ -565,12 +565,12 @@ jobs:
           docker run --rm --env CONCAT_VERSION="$pkgver" \
             -v "$work:/pkg" -w /pkg "$image" /pkg/build.sh
 
-          mv "$work"/concat-*.pkg.tar.zst "stage/$name.pkg.tar.zst"
+          mv "$work"/veycut-*.pkg.tar.zst "stage/$name.pkg.tar.zst"
           rm -rf "$work"
           ls -l stage
 
       # The folder three ways. A .deb and an .rpm, from one description in
-      # assets/linux/nfpm.yaml: the program whole under /opt/concat, a
+      # assets/linux/nfpm.yaml: the program whole under /opt/veycut, a
       # launcher on the path, a desktop entry and an icon. And an AppImage:
       # the folder as an AppDir, one file that runs on any distribution
       # with the toolkit installed, which every desktop has. All three from
@@ -589,9 +589,9 @@ jobs:
           # What the packages add over the folder: the launcher, and a
           # desktop entry that names the program by its installed path.
           mkdir -p "$STAGE/pkg"
-          printf '#!/bin/sh\nexec /opt/concat/concat "$@"\n' > "$STAGE/pkg/concat"
+          printf '#!/bin/sh\nexec /opt/veycut/concat "$@"\n' > "$STAGE/pkg/concat"
           chmod +x "$STAGE/pkg/concat"
-          sed 's|^Exec=concat|Exec=/opt/concat/concat %U|' "$STAGE/concat.desktop" > "$STAGE/pkg/concat.desktop"
+          sed 's|^Exec=veycut|Exec=/opt/veycut/concat %U|' "$STAGE/concat.desktop" > "$STAGE/pkg/concat.desktop"
 
           curl -fsSL --retry 5 --retry-all-errors -o nfpm.tar.gz \
             "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_$( [ "${{ matrix.arch }}" = x86_64 ] && echo x86_64 || echo arm64 ).tar.gz"
@@ -618,13 +618,14 @@ jobs:
           for lib in libxkbcommon-x11.so.0 libxcb-xkb.so.1; do
             cp -L "$(ldconfig -p | awk -v lib="$lib" '$1 == lib { print $NF; exit }')" "$appdir/usr/bin/lib/$lib"
           done
-          cp "$STAGE/concat.desktop" "$appdir/concat.desktop"
-          cp "$STAGE/concat.desktop" "$appdir/usr/share/applications/concat.desktop"
-          cp "$STAGE/concat.png" "$appdir/concat.png"
-          cp "$STAGE/concat.png" "$appdir/usr/share/icons/hicolor/256x256/apps/concat.png"
+          cp "$STAGE/concat.desktop" "$appdir/veycut.desktop"
+          cp "$STAGE/concat.desktop" "$appdir/usr/share/applications/veycut.desktop"
+          cp "$STAGE/concat.png" "$appdir/veycut.png"
+          cp "$STAGE/concat.png" "$appdir/usr/share/icons/hicolor/256x256/apps/veycut.png"
           mkdir -p "$appdir/usr/share/doc/veycut"
           cp "$STAGE/LICENSE" "$STAGE/LICENSE-EXCEPTIONS.md" "$STAGE/SOURCE-NOTICES.md" "$STAGE/THIRD_PARTY_NOTICES.md" "$appdir/usr/share/doc/veycut/"
-          ln -s concat.png "$appdir/.DirIcon"
+          ln -s veycut.png "$appdir/.DirIcon"
+          ln -s concat "$appdir/usr/bin/veycut"
           ln -s usr/bin/concat "$appdir/AppRun"
           curl -fsSL --retry 5 --retry-all-errors -o appimagetool \
             "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage"
