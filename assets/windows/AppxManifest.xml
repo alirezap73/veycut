@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Concat's MSIX manifest, for the Microsoft Store.
+  VeyCut's MSIX manifest, for the Microsoft Store.
 
   build-app.yml fills the {Braced} words in and packs the staged folder
   (the one the .exe and .msi are made of) with this beside it and the
@@ -33,7 +33,7 @@
     <Resource Language="en-us" />
   </Resources>
   <Applications>
-    <Application Id="Concat" Executable="concat.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="VeyCut" Executable="concat.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="{DisplayName}"
                           Description="Video editor"
                           BackgroundColor="transparent"

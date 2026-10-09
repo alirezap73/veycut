@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Concat's Windows Installer package, the .msi beside the Inno Setup .exe.
+  VeyCut's Windows Installer package, the .msi beside the Inno Setup .exe.
 
   Built by build-app.yml with WiX from the staged folder the .exe is made
   of, so the two installers ship the same files. The .exe is the
@@ -8,9 +8,9 @@
   Group Policy, Intune, winget - and it installs for the machine, into
   Program Files, with a Start menu entry and a clean uninstall. Handed in:
 
-    wix build -arch x64 -d Version=0.2.6 -d Root=C:\...\Concat
-              -d Stage=C:\...\stage\Concat-0.2.6-windows-x86_64
-              -o stage\Concat-0.2.6-windows-x86_64.msi assets\windows\concat.wxs
+    wix build -arch x64 -d Version=0.1.0 -d Root=C:\...\VeyCut
+              -d Stage=C:\...\stage\VeyCut-0.1.0-windows-x86_64
+              -o stage\VeyCut-0.1.0-windows-x86_64.msi assets\windows\concat.wxs
 
   Root is the repository: WiX resolves a source path against where it is
   run from, not against this file.
@@ -18,27 +18,27 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <!-- One upgrade code for the life of the product, so a newer .msi
        replaces an older one rather than sitting beside it. -->
-  <Package Name="Concat"
-           Manufacturer="Concat contributors"
+  <Package Name="VeyCut"
+           Manufacturer="VeyCut contributors"
            Version="$(var.Version)"
-           UpgradeCode="6C4D5D8E-9B2A-4F3B-8E1C-5A7D2B9F0C11"
+           UpgradeCode="84575DA3-57B0-4AF8-AC33-5ADEF466E857"
            Scope="perMachine"
            Language="1033">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Concat is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of VeyCut is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Icon Id="concat.ico" SourceFile="$(var.Root)\assets\icons\concat.ico" />
     <Property Id="ARPPRODUCTICON" Value="concat.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/jub0t/Concat" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/alirezap73/veycut" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Concat" />
+      <Directory Id="INSTALLFOLDER" Name="VeyCut" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ShortcutFolder" Name="Concat" />
+      <Directory Id="ShortcutFolder" Name="VeyCut" />
     </StandardDirectory>
 
-    <Feature Id="Main" Title="Concat" Level="1">
+    <Feature Id="Main" Title="VeyCut" Level="1">
       <ComponentGroupRef Id="Program" />
       <ComponentRef Id="StartMenu" />
     </Feature>
@@ -48,15 +48,15 @@
       <Files Include="$(var.Stage)\**" />
     </ComponentGroup>
 
-    <Component Id="StartMenu" Directory="ShortcutFolder" Guid="2F0B7C51-6E4D-4A1B-9C3E-8D5F1A2B3C44">
+    <Component Id="StartMenu" Directory="ShortcutFolder" Guid="EFF1E6B3-1DAA-4042-BB4A-597E080C7E9A">
       <Shortcut Id="StartMenuShortcut"
-                Name="Concat"
+                Name="VeyCut"
                 Description="Video editor"
                 Target="[INSTALLFOLDER]concat.exe"
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="concat.ico" />
       <RemoveFolder Id="RemoveShortcutFolder" On="uninstall" />
-      <RegistryValue Root="HKCU" Key="Software\Concat" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\VeyCut" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
     </Component>
   </Package>
 </Wix>
