@@ -1,6 +1,6 @@
 # VeyCut — وی‌کات
 
-A native video editor based on [Concat](https://github.com/jub0t/Concat), being adapted for vertical videos and subtitle editing. Product repository: https://github.com/alirezap73/veycut. This repository is a source candidate; it has no verified installer release yet.
+VeyCut is a native video editor with vertical project presets and subtitle editing. Product repository: https://github.com/alirezap73/veycut. This repository is a source candidate; it has no verified installer release yet.
 
 ## Current changes
 
@@ -13,7 +13,7 @@ A native video editor based on [Concat](https://github.com/jub0t/Concat), being 
 - Caption appearance choices preserving the selected font and wrapping inside 82% of the frame width.
 - Bounded subtitle reads and atomic file replacement.
 
-The existing editor, media engine, effects and local AI features come from Concat. OpenCut and Donkey code has not been merged into this fork. See [the preserved upstream README](README.upstream.md) for the upstream feature list, downloads and original project links; those downloads are upstream builds.
+The editor includes a timeline, media engine, effects and local AI features. See the attribution section below for the source origin.
 
 ## Verification status
 
@@ -42,4 +42,4 @@ SRT files must be UTF-8 and at most 1 MiB. Timestamps are supported through 99:5
 
 ## Attribution and license
 
-Based on Concat commit `63f263349433d55c710df2ce1d0618be1ebde1e4` (0.2.6). Original copyright and third-party notices are retained. See [LICENSE](LICENSE), [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) and [TRADEMARK.md](TRADEMARK.md). The modified product must use its own name and icon before distribution. The inherited upstream release workflow is restricted to the upstream repository until fork packaging is implemented.
+Derived from [Concat](https://github.com/jub0t/Concat) commit `63f263349433d55c710df2ce1d0618be1ebde1e4` (0.2.6). Original copyright and third-party notices are retained. [The preserved upstream README](README.upstream.md) documents the original project; its downloads are upstream builds. See [LICENSE](LICENSE), [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) and [TRADEMARK.md](TRADEMARK.md). The modified product must use its own name and icon before distribution. The inherited upstream release workflow is restricted to the upstream repository until fork packaging is implemented.
