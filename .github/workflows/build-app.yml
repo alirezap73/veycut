@@ -405,11 +405,13 @@ jobs:
             <key>NSHighResolutionCapable</key><true/>
             <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
             <key>LSApplicationCategoryType</key><string>public.app-category.video</string>
-            <key>NSHumanReadableCopyright</key><string>AGPL-3.0-or-later. See THIRD_PARTY_NOTICES.md.</string>
+            <key>NSHumanReadableCopyright</key><string>AGPL-3.0-or-later. See SOURCE-NOTICES.md and THIRD_PARTY_NOTICES.md.</string>
             <key>NSMicrophoneUsageDescription</key><string>VeyCut records voiceovers from your microphone.</string>
           </dict>
           </plist>
           PLIST
+
+          cp LICENSE LICENSE-EXCEPTIONS.md SOURCE-NOTICES.md THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
 
           # Every non-system dylib the binary (and those dylibs) load, copied
           # in and re-pointed at @executable_path/../Frameworks.
@@ -508,7 +510,7 @@ jobs:
           Terminal=false
           StartupWMClass=concat
           DESKTOP
-          cp LICENSE THIRD_PARTY_NOTICES.md "stage/$name/"
+          cp LICENSE LICENSE-EXCEPTIONS.md SOURCE-NOTICES.md THIRD_PARTY_NOTICES.md "stage/$name/"
           # The binary must resolve every library from the folder alone.
           # The whole ldd report goes to the public summary when it does
           # not, so the failure names the library instead of just a step.
@@ -620,6 +622,8 @@ jobs:
           cp "$STAGE/concat.desktop" "$appdir/usr/share/applications/concat.desktop"
           cp "$STAGE/concat.png" "$appdir/concat.png"
           cp "$STAGE/concat.png" "$appdir/usr/share/icons/hicolor/256x256/apps/concat.png"
+          mkdir -p "$appdir/usr/share/doc/veycut"
+          cp "$STAGE/LICENSE" "$STAGE/LICENSE-EXCEPTIONS.md" "$STAGE/SOURCE-NOTICES.md" "$STAGE/THIRD_PARTY_NOTICES.md" "$appdir/usr/share/doc/veycut/"
           ln -s concat.png "$appdir/.DirIcon"
           ln -s usr/bin/concat "$appdir/AppRun"
           curl -fsSL --retry 5 --retry-all-errors -o appimagetool \
@@ -678,7 +682,7 @@ jobs:
           Copy-Item "$env:FFMPEG_DIR\bin\*.dll" "stage\$name\"
           # The sherpa-onnx runtime, set aside by the download step above.
           Copy-Item "$env:SHERPA_DLL_DIR\*.dll" "stage\$name\"
-          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md "stage\$name\"
+          Copy-Item LICENSE, LICENSE-EXCEPTIONS.md, SOURCE-NOTICES.md, THIRD_PARTY_NOTICES.md "stage\$name\"
           # The installer, from that folder: Inno Setup, which the x64
           # image carries and the ARM image is given. See
           # assets/windows/concat.iss.

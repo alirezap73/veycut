@@ -26,4 +26,6 @@ package() {
 
   install -Dm644 "$stage/LICENSE" "$pkgdir/usr/share/licenses/concat/LICENSE"
   install -Dm644 "$stage/THIRD_PARTY_NOTICES.md" "$pkgdir/usr/share/licenses/concat/THIRD_PARTY_NOTICES.md"
+  install -Dm644 "$stage/LICENSE-EXCEPTIONS.md" "$pkgdir/usr/share/licenses/concat/LICENSE-EXCEPTIONS.md"
+  install -Dm644 "$stage/SOURCE-NOTICES.md" "$pkgdir/usr/share/licenses/concat/SOURCE-NOTICES.md"
 }

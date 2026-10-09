@@ -45,6 +45,10 @@ contents:
     dst: /usr/share/doc/concat/LICENSE
   - src: THIRD_PARTY_NOTICES.md
     dst: /usr/share/doc/concat/THIRD_PARTY_NOTICES.md
+  - src: LICENSE-EXCEPTIONS.md
+    dst: /usr/share/doc/concat/LICENSE-EXCEPTIONS.md
+  - src: SOURCE-NOTICES.md
+    dst: /usr/share/doc/concat/SOURCE-NOTICES.md
 
 # What the binary loads from the system rather than from lib/: the
 # toolkit the file dialogs use, sound, fonts and OpenGL. Named as each
