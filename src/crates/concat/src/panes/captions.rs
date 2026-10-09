@@ -59,7 +59,7 @@ pub enum CaptionsMsg {
     SrtLoaded {
         result: Result<Vec<Cue>, String>,
         look: CaptionLook,
-        base: Option<TextStyle>,
+        base: Option<Box<TextStyle>>,
     },
     /// The transcriber's worker reporting where it is, in percent.
     Progress(i32),
@@ -128,7 +128,7 @@ impl CaptionsPane {
                     return;
                 }
                 let look = self.look();
-                let base = studio.prefs.title_style.clone();
+                let base = studio.prefs.title_style.clone().map(Box::new);
                 let offset = if self.srt_at_playhead {
                     f64::from(studio.playhead.max(0.0))
                 } else {
@@ -153,7 +153,7 @@ impl CaptionsPane {
                     let commands = cues
                         .into_iter()
                         .map(|cue| {
-                            caption_clip(cue.text, cue.start, cue.duration, look, base.as_ref())
+                            caption_clip(cue.text, cue.start, cue.duration, look, base.as_deref())
                         })
                         .collect();
                     if studio.apply(Command::Batch { commands }).is_some() {
