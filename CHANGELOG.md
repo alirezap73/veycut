@@ -8,4 +8,4 @@ Applied VeyCut desktop branding, a new icon, separate app-data identity, an own-
 
 Locally verified project logic and subtitle file behavior. Modified GUI compilation, Persian shaping, video export and clean-machine installation remain unverified. No installer has been released. Windows/Linux/mobile packaging remains under review.
 
-Source origin: Concat 0.2.6; existing timeline, media engine, effects and local AI features are inherited. Original notices and licensing are preserved.
+Source and license notices: [SOURCE-NOTICES.md](SOURCE-NOTICES.md).

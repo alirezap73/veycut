@@ -13,7 +13,7 @@ VeyCut is a native video editor with vertical project presets and subtitle editi
 - Caption appearance choices preserving the selected font and wrapping inside 82% of the frame width.
 - Bounded subtitle reads and atomic file replacement.
 
-The editor includes a timeline, media engine, effects and local AI features. See the attribution section below for the source origin.
+The editor includes a timeline, media engine, effects and local AI features. Source and license notices are linked below.
 
 ## Verification status
 
@@ -40,6 +40,6 @@ For full native validation, use GitHub Actions to avoid a large local build. See
 
 SRT files must be UTF-8 and at most 1 MiB. Timestamps are supported through 99:59:59,999. Cue duration must be at least 1/60 second. Overlaps and multiline text are preserved. Inline markup stays literal. Export rejects blank separator lines inside a caption instead of silently corrupting the file. SRT contains text and timing, not font or appearance information.
 
-## Attribution and license
+## License
 
-Derived from [Concat](https://github.com/jub0t/Concat) commit `63f263349433d55c710df2ce1d0618be1ebde1e4` (0.2.6). Original copyright and third-party notices are retained. [The preserved upstream README](README.upstream.md) documents the original project; its downloads are upstream builds. See [LICENSE](LICENSE), [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) and [TRADEMARK.md](TRADEMARK.md). The modified product must use its own name and icon before distribution. The inherited upstream release workflow is restricted to the upstream repository until fork packaging is implemented.
+Released under AGPL-3.0-or-later. Original copyright and third-party notices are retained. See [LICENSE](LICENSE), [source notices](SOURCE-NOTICES.md), [additional permissions](LICENSE-EXCEPTIONS.md) and [trademark notices](TRADEMARK.md).
