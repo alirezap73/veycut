@@ -1,5 +1,7 @@
 # VeyCut — وی‌کات
 
+<img src="assets/icons/veycut.svg" width="72" height="72" alt="VeyCut icon">
+
 VeyCut is a native video editor with vertical project presets and subtitle editing. Product repository: https://github.com/alirezap73/veycut. This repository is a source candidate; it has no verified installer release yet.
 
 ## Current changes
@@ -17,11 +19,11 @@ The editor includes a timeline, media engine, effects and local AI features. Sou
 
 ## Verification status
 
-Locally passed: 123 project tests, including 10 subtitle tests, and 4 standalone subtitle-file tests. Translation inventory for all 14 languages and targeted formatting/lint checks passed. The modified GUI has not been built or visually tested. Persian text persistence is tested; Persian shaping is not yet verified.
+Locally passed: 123 project tests, including 10 subtitle tests, and 4 standalone subtitle-file tests. Translation inventory for all 14 languages and targeted formatting/lint checks passed. The modified GUI has no verified installer or visual runtime test yet. Persian text persistence is tested; Persian shaping is not yet verified.
 
-Run **Fork development checks** in GitHub Actions for the lightweight checks, then **Fork full validation** for native GUI and engine checks through the existing cross-platform CI. **VeyCut macOS candidate** runs validation and builds an Apple silicon test artifact. These workflows do not publish a release. They have been prepared but have not yet run on GitHub.
+Run **Fork development checks** in GitHub Actions for the lightweight checks, then **Fork full validation** for native GUI and engine checks through the existing cross-platform CI. **VeyCut macOS candidate** runs validation and builds an Apple silicon test artifact. These workflows do not publish a release. [Development checks passed 178 tests](https://github.com/alirezap73/veycut/actions/runs/37945579298). Follow [GitHub Actions](https://github.com/alirezap73/veycut/actions) for the native validation results.
 
-The source version is 0.1.0. Desktop UI labels, app icons, app-data identity, update destination and macOS bundle metadata now use VeyCut. Windows/Linux/mobile packaging needs further review before distribution.
+The source version is 0.1.0. Desktop UI labels, app icons, app-data identity, update destination, macOS bundle metadata, Windows installer identities and Linux package namespaces now use VeyCut. Desktop installers still need build and installation verification; mobile packaging remains under review.
 
 ## Build and test
 
