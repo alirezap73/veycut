@@ -1,0 +1,446 @@
+# How Concat works
+
+A map of the engine and the window for someone who wants to change one part
+without reading the rest. Every section names the crate and the file to open
+when the picture is not enough. Diagrams are Mermaid, which GitHub renders.
+
+Concat is a video editor in Rust. The engine is a set of crates with no window
+in them; the window is a Slint application over that engine; a command-line
+tool and a socket server drive the same engine through the same API the
+window uses. One document format, one command set, one renderer, three ways
+in.
+
+## 1. The crates and who depends on whom
+
+Every arrow points one way: nothing lower knows the window exists, and the
+engine's core knows nothing about FFmpeg.
+
+```mermaid
+graph BT
+    core["concat-core<br/>time, arena, timeline, frame, shader types<br/>std only, builds for wasm"]
+    project["concat-project<br/>the document: model, commands, undo, serde"]
+    media["concat-media<br/>FFmpeg: probe, decode, encode, pool, prefetch, hardware"]
+    effects["concat-effects<br/>packages: manifest + WGSL, catalogue, budgets"]
+    render["concat-render<br/>FramePlan, the GPU compositor, scopes, SSIM"]
+    vision["concat-vision<br/>cutout masks, brushes"]
+    text["concat-text<br/>title rasteriser"]
+    export["concat-export<br/>document to engine timeline; render loop; preview"]
+    host["concat-host<br/>Session, projects, playback, monitor, proxies, scheduler, jobs"]
+    speech["concat-speech<br/>whisper and Kokoro models"]
+    api["concat-api<br/>one dispatcher: every verb as JSON"]
+    server["concat-server<br/>JSON-RPC lines, gRPC, tokens"]
+    cli["concat-cli"]
+    window["concat<br/>the Slint window"]
+    android["concat-android"]
+    perf["concat-perf<br/>the performance table"]
+
+    project --> core
+    media --> core
+    effects --> core
+    effects --> project
+    render --> core
+    render --> effects
+    vision --> core
+    vision --> project
+    export --> media
+    export --> render
+    export --> vision
+    export --> project
+    host --> export
+    host --> text
+    speech --> host
+    speech --> media
+    api --> host
+    server --> api
+    cli --> server
+    window --> server
+    window --> speech
+    android --> window
+    perf --> host
+```
+
+`concat-core` and `concat-project` build for `wasm32`, which CI checks; the
+FFmpeg boundary is `concat-media` and nothing else links it.
+
+## 2. From the document to a pixel
+
+A clip exists in three shapes on its way to the screen, and each crossing is
+one function in one file.
+
+```mermaid
+flowchart LR
+    doc["Project<br/>(concat-project::model)<br/>f64 seconds, string ids,<br/>keys as fractions"]
+    flat["Vec&lt;ExportClip&gt;<br/>(concat-export::flatten)<br/>one list, tracks by index,<br/>transitions resolved"]
+    tl["core::Timeline<br/>(concat-export::resolve)<br/>Rational time, arena ids,<br/>quantised to the frame grid"]
+    plan["FramePlan<br/>(concat-render::plan_frame)<br/>what is on screen at t:<br/>media, source time, placement,<br/>opacity, blend, per layer"]
+    filled["FramePlan, filled<br/>(concat-export)<br/>+ decoded picture, effects<br/>resolved for t, treatments"]
+    gpu["WgpuCompositor<br/>GPU, or software adapter"]
+    enc["Encoder<br/>(concat-media)"]
+    tex["a texture on the<br/>window's device"]
+
+    doc -- "flatten_timeline" --> flat
+    flat -- "build_timeline" --> tl
+    tl -- "plan_frame(t)" --> plan
+    plan -- "decode + passes_at" --> filled
+    filled --> gpu
+    gpu --> enc
+    gpu --> tex
+```
+
+- **The document** (`concat-project/src/model.rs`) is what a person edits and
+  what is saved. Times are seconds, ids are strings, and every keyframe is a
+  fraction of its clip's length. Every change goes through a `Command`
+  (`commands/`), and the `Editor` (`editor.rs`) keeps undo as snapshots that
+  share whatever a command did not touch.
+- **Flatten and resolve** (`concat-export/src/flatten.rs`, `resolve.rs`) turn
+  the document into the engine's `Timeline`: rational time, quantised to the
+  frame grid so `f64` equality is exact, plus the per-clip facts the model has
+  no field for (decode sizes, filter chains, cutout jobs, layer treatments).
+- **The plan** (`concat-render/src/plan.rs`) is pure: no files, no pixels. It
+  says what is visible at one instant and where. The export fills it with the
+  decoded picture, the effects resolved for that instant, and the treatments
+  live over the stack, and hands the whole thing to a compositor, which takes
+  a `FramePlan` and nothing else.
+- **The working space** is linear light on Rec. 709 primaries, extended (a
+  value may be negative, a colour outside Rec. 709, or above one, a
+  highlight), half floats, with 1.0 the white of an SDR picture: the layout
+  Windows calls scRGB and Apple extended linear sRGB. A frame is converted
+  into it on the GPU as it is uploaded and out of it once, at the resolve
+  (`concat-render/src/gpu.rs`, `COPY_SHADER`); blending, opacity and fades
+  happen in light, as in Resolve and Final Cut. A Rec. 2020 source - an
+  iPhone's HLG, HDR10's PQ - is decoded deep (`DecodeOptions::deep`: sixteen
+  bits a channel, its own signal, no CPU tone map) wherever its frame goes
+  straight to the GPU, and converted as it uploads (`DEEP_SHADER`): the
+  transfer undone, the primaries brought to Rec. 709's, and, on an SDR
+  timeline, conformed to it by BT.2390's roll-off. On an HDR timeline it
+  keeps its light above white (`FramePlan::output`), and the resolve rolls
+  the whole frame off for an SDR screen instead, with the same maths. An
+  HDR file (`Compositor::deliver_hdr`) is resolved instead into its signal
+  on Rec. 2020 - HLG for a 1000-nit display, or PQ - as sixteen-bit
+  integers, read back as RGBA64 and written by `Encoder::create_hdr`: HEVC
+  or AV1 in ten bits, BT.2020 tags, and for PQ the mastering display and
+  the MaxCLL and MaxFALL measured as it is written. A clip with a cutout
+  keeps the eight-bit tone map in the decoder.
+- The scopes (`concat-render/src/scopes.rs`) count the monitor's canvas in
+  a compute pass as it is drawn (`WgpuCompositor::render_texture_scoped`),
+  its light before anything is clipped: the display level on an SDR
+  timeline, nits on PQ's scale on an HDR one. The counts come back without
+  the window waiting (`take_scope`, polled), are drawn on the CPU, and are
+  shown in the Scopes pane (`concat/ui/workspace/scopes-pane.slint`).
+- **One compositor.** The GPU one draws every frame, the monitor's and the
+  export's; a machine without a GPU runs it on the platform's software
+  adapter (WARP on Windows, lavapipe on Linux), and a machine with neither
+  is told so. The CPU compositor that was the reference is kept in the tests
+  alone (`concat-render/src/reference.rs`), the oracle the parity suite
+  (`concat-render/src/gpu/tests.rs`) holds the GPU's geometry, masks,
+  transitions and blending to at a structural similarity above 0.99,
+  blending in light as the GPU does; effects are the GPU's alone, held to
+  their packages' probes. Geometry (crop, fit, centre, scale, turn) and
+  weighing (fades folded into a scale and offset, wipes into edges, mask,
+  opacity) are computed once in the plan.
+
+The export and the monitor put a clip's crop and flips into the plan
+(`resolve::planned_geometry`); the decoder delivers the whole picture, at the
+scale that fits the part the crop keeps, and the clip's effects run over the
+picture as it is cropped and flipped. The fades to a colour and the wipes are
+`TransitionShape`s on
+the clip, turned into the plan's `transitions` at each instant from the
+clip's own time, so the monitor draws them exactly as the export does.
+
+## 3. Effects
+
+An effect is a folder under `concat-effects/packages/`: a manifest
+(`effect.toml`, `format = 2`) naming its knobs, and a WGSL shader
+(`effect.wgsl`) declaring a `Params` struct and `fn effect(uv)`, drawn on the
+GPU in light. A sound filter is an FFmpeg chain template instead. The
+picture packages written for format 1 - the gamma-encoded contract, and
+chains run on the CPU - were ported or retired (phase 2, step 5); a
+project's link to a retired one opens as the package that stands in for it
+where one does (`[[replaces]]`, `Editor::upgrade_links`), and otherwise
+stays in its clip, not installed, named in a notice as the project opens.
+
+```mermaid
+flowchart TD
+    pkg["package folder<br/>effect.toml + effect.wgsl"]
+    cat["Catalogue<br/>(concat-effects::catalogue)<br/>parsed, validated, kept"]
+    pass["ShaderPass<br/>package id, compiled source,<br/>params bytes laid out to the struct,<br/>values by key, intensity, LUT,<br/>stages before the last"]
+    gpu["GPU: the shader runs<br/>params as a uniform buffer"]
+
+    pkg --> cat
+    cat -- "shader_passes_at(effects, t)" --> pass
+    pass --> gpu
+```
+
+At load, `concat-effects/src/shader.rs` stitches the host's prelude round the
+package body, parses and validates it with naga, reads the `Params` layout for
+the uniform buffer, and refuses a shader that binds anything the host did not
+declare or loops without a break. A look-up table larger than 65 a side is
+refused too, and a binding declared as anything other than what the host
+puts there, and a chain that names a file other than its own `{lut}`. When
+the window loads the user's packages it runs each one's shader once on the
+GPU over a 512-pixel picture against a three-second timeout
+(`Catalogue::install_with`, `WgpuCompositor::trial_at`) and leaves out one
+that fails; a pipeline the driver refuses at draw time is caught in an
+error scope and the pass skipped, never an uncaptured error.
+
+A format 2 package may draw in several passes. Each `[[wgsl.pass]]` names a
+picture, `fn <target>(uv)` draws it, and every pass after it - `effect`, the
+last, among them - reads it through `<target>_at(uv)` and measures it with
+`<target>_texel()`; the pictures are bound in group 0 after the layer, and a
+pass that reads a picture not drawn before it is refused at load. A
+picture's `shrink` is two expressions over the knobs, rounded down to a
+power of two up to 64, so a blur is drawn across and down at a fraction of
+the layer's pixels (`concat.gaussian-blur`, `concat.glow`). The pass carries
+its stages (`concat_core::Stage`); `WgpuCompositor::run_stages` draws them
+in one submission into pictures claimed from the pool and handed on from
+one package to the next of a layer's stack, and only the last pass mixes by
+intensity. A blur or an average reads the layer through
+`sample_premultiplied`, which weighs each pixel by its alpha before pixels
+are mixed, so a transparent pixel's colour never bleeds; the motion blur
+(a coarse Gaussian, then straight lines between its samples) and the zoom
+blur (three passes of sixteen scales, 4096 in all) are held to direct sums
+in concat-render's suite.
+
+A format 2 shader works in light (`space = "linear"`, the default), in the
+display encoding (`"display"`, the colour looks), or in log (`"log"`,
+ACEScct), and every result is held to what half floats store. The colour
+tools share the scene-linear library: exposure in stops, `contrast` in
+stops about middle grey, `white_balance` as a Bradford adaptation along the
+Planckian locus. A `.cube` imported as a look (`concat_effects::looks`) is a
+format 2 filter reading its table through `look()`, which carries a level
+past the table's ends, in the display encoding or, for a table made for
+ACEScct, in log; tables are kept in floats and uploaded as half floats.
+Looks an earlier build imported as format 1 are rewritten onto this when
+the window loads its packages.
+
+Knobs are numbers in the document (`AppliedFilter::params`), and two kinds
+are several: a `wheel` is its puck, `<key>.x` and `<key>.y`, and its master,
+`<key>.m`, keyed together as one knob; a `curve` is up to eight points,
+`<key>.<n>.x` and `<key>.<n>.y`, which the catalogue lays into the shader
+with the slopes that keep it from overshooting (`grade_wheels`,
+`grade_curves`). The window draws them with widgets of their own
+(`concat/ui/inspector/grading.slint`) in the Adjust tab and in the effect
+stack, and edits them through `concat/src/grading.rs`. A `color` knob is
+RGBA packed into one number, red in the top byte, unpacked into a
+`vec4<f32>` for the shader and drawn in the effect stack as a swatch that
+opens the picker (`ColourKnobData`); the chroma key's is its screen colour.
+
+## 4. Decoding, caching and scheduling
+
+Export decodes every frame once, in order, with one decoder per clip. Everything
+interactive goes through the pool and the scheduler.
+
+```mermaid
+flowchart LR
+    transport["transport<br/>(playback, scrub)"]
+    cursor["Cursor {time, direction, rate}"]
+    sched["Prefetcher<br/>(concat-media::prefetch)<br/>a few threads, one queue,<br/>Playback > Filmstrip > Artwork > Proxy"]
+    pool["ReaderPool<br/>(concat-media::pool)<br/>source cache: (file, level, frame)<br/>treated cache: + crop, fit, chain<br/>warm readers"]
+    dec["Decoder<br/>software, or the platform's hardware<br/>(hardware.rs), falling back once"]
+    proxy["proxy<br/>(concat-host::proxy)<br/>quarter-size H.264 of anything<br/>larger than HD, in cache/proxy"]
+
+    transport --> cursor --> sched
+    sched -- "frames ahead, held until passed" --> pool
+    pool --> dec
+    proxy -- "adopted for a moving picture" --> pool
+    sched -- "written once, on the proxy lane" --> proxy
+```
+
+- **The source cache** is keyed by the file, the level it was decoded at (the
+  file's own size halved as long as it still covers what was asked for) and
+  the frame index, and nothing else. The crop, the fit and the effect chain
+  are applied to the cached picture on the way out and kept in a second,
+  smaller cache, so turning a knob costs a filter per frame and a scrub back
+  over covered ground costs a lookup.
+- **The scheduler** is one per process (`concat_host::scheduler()`). The
+  monitor's frames and the frames ahead of the playhead come first, then the
+  lanes' filmstrips, the bin's artwork and proxies, on two to four threads
+  with one always kept clear of background work, so an import of twenty files
+  never runs twenty decoders at once.
+- **Hardware decode** (`concat-media/src/hardware.rs`) is a process-wide
+  preference the Settings switch sets: VideoToolbox on a Mac, D3D11VA on
+  Windows, MediaCodec on Android, VAAPI only when named. Any failure falls back
+  to software, logged once.
+- **Audio** for playback (`concat-host/src/playback.rs`) is decoded per clip
+  span to a WAV in the project's cache and memory-mapped; the mixer reads
+  those.
+
+## 5. The window
+
+The window is one Slint tree published from Rust. The controller is `Studio`
+(`concat/src/studio.rs`); each pane owns its state and is changed only by its
+own messages.
+
+```mermaid
+sequenceDiagram
+    participant Slint
+    participant lib as lib.rs (callbacks)
+    participant Studio as Studio::handle
+    participant Pane as pane.update(msg, &mut Studio)
+    participant Worker
+    Slint->>lib: callback (a click, an edit)
+    lib->>Studio: handle(Msg::Pane(msg))
+    Studio->>Pane: take the pane out, update
+    Pane->>Worker: spawn(work, then)
+    Worker-->>Studio: on_ui(|studio| studio.handle(Msg::Pane(done)))
+    Studio->>Slint: publish(): every pane's data(), rows synced by diff
+```
+
+- **Panes** (`concat/src/panes/`): export, settings, captions, speech, relink,
+  project sheet, launch form, media bin, monitor, timeline view. Each is
+  `state + Msg + update + data`. The pane is taken out of the studio for the
+  duration of `update`, so it can be handed the rest of the window without
+  borrowing itself twice; a result that arrives after its project closed is
+  dropped in one place.
+- **What stays on the controller:** the gestures (a clip dragged or
+  trimmed; a picture moved on the stage; a brush stroke), because one gesture
+  spans the lanes and the stage over an *echo* of the document, a clone the
+  pointer mutates and commits as one command on release. Moving those is the
+  next cut of `studio.rs`.
+- **Publishing** rebuilds each pane's Slint data on every event; row models go
+  through `sync`, which diffs against the last published rows. The lanes
+  report their width, and the controller publishes only the clips that
+  intersect the visible window plus one screen either side.
+- **The monitor** asks the controller for the flattened clips with titles,
+  auditions and the brush tint, and draws them on the window's own wgpu
+  device (`concat/src/gpu.rs`), so a frame is a texture Slint samples with no
+  readback. Drawing happens on the event-loop thread only; decoding on a
+  worker.
+- **The launch screen** (`concat/ui/start.slint`) is a launcher: a rail of
+  verbs, and beside it the projects this machine has opened, as a grid
+  whose first card starts a new one. The new-project form is a sheet over
+  the window, `NewProjectDialog`, held at the window root with the other
+  sheets and opened by that card or the rail's first verb. The screen takes
+  three shapes by width — the rail with its words, the rail as icons only,
+  or the phone shape, where the rail's verbs sit beside the heading and the
+  sheet's labels sit over their values. The form's frame is a shape and a
+  size rather than a fixed list; `frame_size` in `studio.rs` is the one
+  place that turns the pair into pixels.
+- **The phone shell** (`concat/ui/phone/`) is what the editor is on Android
+  and iOS - `platform::phone`, and `CONCAT_PHONE=1` on a desk for working
+  on it - in place of the title strip and the dock, never beside them. One
+  screen held upright: a top bar, the monitor, a transport, the lanes with
+  the playhead held at their middle (`TimelinePane::centred`: the view is
+  a fact about the playhead and follows every seek, zoom and resize), and
+  a bar of tools that is the library's pages with nothing selected and the
+  clip's verbs with a clip selected. A tool with more to say opens a sheet
+  over the lanes holding the same inspector page or library shelf the desk
+  shows, on a column that scrolls under a finger. The lanes' `finger` mode
+  makes a drag on the floor or the ruler a scrub and a tap on an empty
+  lane a release. Everything reads and reports through the `Editor`
+  global as the seats do; there is no phone-only state on the Rust side
+  beyond those two flags.
+
+## 6. The document, undo and the file
+
+```mermaid
+flowchart LR
+    cmd["Command"] --> validate["run(&mut Project)<br/>clamps in Clip::tidy"]
+    validate --> snap["snapshot<br/>Arc-shared: only the touched<br/>timeline's clips are copied"]
+    snap --> undo["undo stack, depth 200<br/>a gesture is one step"]
+    file["concat.json<br/>version + document"] -- "serde, unknown fields kept" --> migrate["doc::migrate<br/>one version step at a time"] --> tidy["tidy pass"] --> proj["Project"]
+    proj -- "derive Serialize" --> file
+```
+
+- Commands live in `concat-project/src/commands/` by group (clip, keys, audio,
+  tracks, timelines, media). Every clip is built by `Clip::blank` and clamped
+  by `Clip::tidy`; there is one place clamps live.
+- Keys stay on their instant of the picture through split, trim, freeze and
+  merge by re-anchoring the fractions in those commands, so the document
+  stays version 1.
+- Selecting or moving a timeline is view state and does not enter undo.
+- Each timeline has a colour it is output in (`VideoSettings::color_space`:
+  SDR, HLG or PQ; left out of the document for SDR), and each media item the
+  one its probe read from the file's tags. `Editor::follow_first_hdr` turns
+  an SDR timeline HLG when a command puts its first HDR clip on it, in that
+  command's undo step; the Modify sheet sets it back or to PQ.
+
+## 7. The API and the three doors
+
+```mermaid
+flowchart LR
+    window["the window"] -- "Remote page: embeds a server" --> hub
+    window -- "its own Session" --> host
+    cli["concat-cli"] --> api
+    json["JSON-RPC lines<br/>TCP or a Unix socket"] --> hub
+    grpc["gRPC (feature)"] --> hub
+    hub["Hub: one thread,<br/>every caller in turn"] --> api["Api<br/>(concat-api)"]
+    api --> host["Session, jobs, export<br/>(concat-host)"]
+```
+
+`Server::start` (`concat-server/src/lib.rs`) mints a token when none is
+configured, on loopback too, and every connection presents it first; the
+comparison is constant-time. `version` reports `capabilities` so a client can
+tell what a build serves before calling. The CLI prints the token it serves
+with; the window's Remote page shows it.
+
+The window is not a client of its own API. Its Remote page embeds a
+server whose `Api` has sessions of its own; what the two share is the
+export slot, so one export at a time holds across them, and a register
+of open project folders (`concat_api::OpenProjects`), so neither opens
+a folder the other is editing. The API writes only under its roots
+(`Config::roots`, the home folder by default) and bounds what a caller
+may ask for; the JSON transport caps line length, connections and the
+time to present a token.
+
+## 8. Testing and measuring
+
+| Suite | Where | What it holds |
+|---|---|---|
+| Unit tests (`cargo test --workspace` prints the count) | every crate | the arithmetic, the commands, the reader, the plan |
+| Export end to end | `concat-host/tests/export.rs` | every edit a person can make exports, through real `Session` commands over synthetic media, read back; crashes hard on purpose |
+| Parity | `concat-render/src/gpu/tests.rs` | the GPU against the tests' CPU oracle by SSIM, one plan per feature |
+| Hostile packages | `concat-effects/src/shader.rs` tests | the unbounded loop, the extra binding, the oversized table are refused |
+| Locales | `concat/src/i18n.rs` tests | every shipped locale covers the inventory `scripts/locales.py` writes |
+| Performance | `cargo run -p concat-perf --release [--check]` | planning, undo, the document, decode, scrub, compositing, export, each against a budget; the quick ones also run under `cargo test` |
+
+## 9. Where to look
+
+| To change | Open |
+|---|---|
+| what a clip can be | `concat-project/src/model.rs` |
+| what an edit does | `concat-project/src/commands/` |
+| the file format | `concat-project/src/doc.rs` |
+| how a frame is planned | `concat-render/src/plan.rs` |
+| how it is drawn | `concat-render/src/compositor.rs`, `gpu.rs`, `scopes.rs` |
+| an effect | `concat-effects/packages/<id>/` |
+| decoding, the cache | `concat-media/src/decode.rs`, `pool.rs`, `prefetch.rs`, `hardware.rs` |
+| the export loop | `concat-export/src/lib.rs` (`render_picture`), `resolve.rs` |
+| the monitor | `concat-host/src/preview.rs`, `concat/src/panes/monitor.rs` |
+| a sheet or a pane | `concat/src/panes/<name>.rs` and `concat/ui/` |
+| the gestures | `concat/src/studio.rs` |
+| the API's verbs | `concat-api/src/message.rs`, `lib.rs` |
+| the server | `concat-server/src/lib.rs`, `json.rs`, `grpc.rs`, `token.rs` |
+| a number that matters | `concat-perf/src/main.rs` |
+
+## 10. Known gaps
+
+- The gestures and the stage still live on the controller.
+- `ExportClip` remains the CLI and API wire type and the title rasteriser's
+  output.
+- The GPU compositor's layer pool is also its source-texture cache: a frame
+  uploaded stays in its texture until the texture is wanted for something
+  else, least recently drawn first, within `POOL_BUDGET` (512 MB) and
+  `POOL_TEXTURES` (1024), so a scrub back over ground the monitor showed
+  finds its frames on the device (`WgpuCompositor::upload`, by frame id). The
+  CPU frame pool is `concat-media/src/pool.rs`.
+- Zero-copy hardware frames (IOSurface into wgpu) are not done; a hardware
+  frame is transferred to memory first, and the libavfilter stage between
+  the download and the upload (rotation, fit, crop, colour range, RGBA) would
+  have to move to the GPU with it.
+- Filmstrips are one image per media item drawn as up to 120 tile images per
+  clip, and waveforms one path per clip drawn twice; one texture per track
+  per zoom level is not done, and the Slint repaint itself is not measured
+  (`SLINT_DEBUG_PERFORMANCE` needs the window).
+- Enhance runs one restoration model (`concat-vision/src/enhance.rs`) through
+  ONNX Runtime on every platform. The OS scalers (VideoToolbox's
+  `VTFrameProcessor` on macOS 26 and iOS 26, the Windows App SDK's video
+  super-resolution) belong behind the same enhanced-copy job as a per-platform
+  fast path at its per-frame step (`concat-host/src/enhance.rs`, the
+  `enhancer.enhance` call), never as a second feature. Frame interpolation
+  does not fit that step: it changes the frame count and the encoder's rate.
+- A package's passes draw pictures at most the layer's size
+  (`[[wgsl.pass]]` `shrink`), and the last draws the layer's size: a GPU
+  upscaler package (FSR 1.0, Anime4K, both MIT with WGSL ports) needs a
+  pass that writes a larger picture than it reads, and a layer whose size
+  can change on its way through its effects.

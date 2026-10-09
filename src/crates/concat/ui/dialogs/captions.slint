@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+
+// Captions: what the tray's Captions tool opens.
+//
+// Two sheets in one, and which is decided before it opens rather than
+// asked. With a clip that has sound selected, the words are that clip's:
+// through the transcriber, cut to the words' own timing. Otherwise they
+// are a script typed here, one title per sentence at reading pace, laid
+// down from the playhead. Asking would only invite the wrong answer - a
+// silent video sent to the transcriber - so the selection decides. Then
+// where the lines sit and how big they are, and one button. While it runs
+// the sheet is the progress report: a transcription knows how far through
+// the sound it is, so it gets a real bar and not a sweep. The language is
+// the transcriber's to work out.
+
+export struct CaptionsSheetData {
+    open: bool,
+    /// The selected clip has sound, and the sheet transcribes it.
+    from-sound: bool,
+    text: string,
+    /// Row in the installed transcriber list.
+    model: int,
+    /// 0 Bottom, 1 Centre, 2 Top
+    placement: int,
+    /// 0 Small, 1 Medium, 2 Large
+    size: int,
+    /// 0 title preference, 1 box, 2 outline.
+    appearance: int,
+    /// 0 timeline start, 1 playhead, used only for imported SRT.
+    srt-origin: int,
+    running: bool,
+    /// 0..1
+    progress: float,
+    /// A transcriber model is installed.
+    ready: bool,
+    /// Why the last run failed, when it did.
+    message: string,
+}
+
+export component CaptionsDialog inherits Modal {
+    in property <CaptionsSheetData> data;
+    /// The installed transcriber models, by name.
+    in property <[string]> models;
+
+    callback text-edited(text: string);
+    callback model-changed(index: int);
+    callback placement-changed(index: int);
+    callback size-changed(index: int);
+    callback appearance-changed(index: int);
+    callback begin();
+    callback cancel();
+    callback import-srt();
+    callback export-srt();
+    callback srt-origin-changed(index: int);
+
+    property <bool> from-sound: root.data.from-sound;
+
+    open: root.data.open;
+    title: I18n.t("captions.captions");
+    glyph: Glyph.text-mark;
+    surface-width: 480px;
+    dismissable: !root.data.running;
+
+    // The script being typed, held apart from `data.text` the way the Field
+    // primitive holds its draft: a TextInput's binding is dropped on the
+    // first keystroke, so the sheet re-seeds it when it opens and never
+    // while it is being typed into.
+    property <string> draft;
+    /// The script has the caret. Kept up here because the box lives under
+    /// an `if`, and nothing outside one can reach into it.
+    property <bool> typing;
+    changed data => {
+        if (!root.typing) {
+            root.draft = root.data.text;
+        }
+    }
+    init => { root.draft = root.data.text; }
+
+    VerticalLayout {
+        if !root.data.running && root.from-sound: DialogSection {
+            first: true;
+            title: I18n.t("common.transcriber");
+
+            DialogRow {
+                label: I18n.t("common.model");
+                Select {
+                    options: root.models;
+                    current: root.data.model;
+                    placeholder: I18n.t("common.noneInstalled");
+                    enabled: root.models.length > 0;
+                    changed(index) => { root.model-changed(index); }
+                }
+            }
+
+            if !root.data.ready: Text {
+                text: I18n.t("captions.downloadTranscriberModelFirst");
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+        }
+
+        if !root.data.running && !root.from-sound: DialogSection {
+            first: true;
+            title: I18n.t("common.script");
+
+            Rectangle {
+                height: 104px;
+                border-radius: Theme.r;
+                background: Theme.well;
+                border-width: 1px;
+                border-color: script.has-focus ? Theme.accent : Theme.line;
+                clip: true;
+
+                script := TextInput {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    height: parent.height - 16px;
+                    text <=> root.draft;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    single-line: false;
+                    wrap: word-wrap;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    changed has-focus => { root.typing = self.has-focus; }
+                    edited => { root.text-edited(self.text); }
+                    // Home and End are unbound in Slint on macOS and would
+                    // walk up to the window's playhead shortcuts.
+                    key-pressed(event) => {
+                        if (event.text == Key.Home) {
+                            self.set-selection-offsets(0, 0);
+                            return accept;
+                        }
+                        if (event.text == Key.End) {
+                            self.set-selection-offsets(1000000000, 1000000000);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                if root.draft == "" && !script.has-focus: Text {
+                    x: 10px;
+                    y: 8px;
+                    text: I18n.t("captions.typeWordsPutScreen");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-lg;
+                }
+            }
+        }
+
+        if !root.data.running: DialogSection {
+            title: I18n.t("captions.captions");
+
+            DialogRow {
+                label: I18n.t("captions.placement");
+                SegmentedControl {
+                    options: [I18n.t("common.bottom"), I18n.t("captions.centre"), I18n.t("common.top")];
+                    current: root.data.placement;
+                    changed(index) => { root.placement-changed(index); }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("common.size");
+                SegmentedControl {
+                    options: [I18n.t("common.small"), I18n.t("common.medium"), I18n.t("common.large")];
+                    current: root.data.size;
+                    changed(index) => { root.size-changed(index); }
+                }
+            }
+
+            Text {
+                text: root.from-sound
+                    ? I18n.t("captions.oneTitlePerPhrase")
+                    : I18n.t("captions.oneTitlePerSentence");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+            DialogRow {
+                label: I18n.t("captions.style");
+                SegmentedControl {
+                    options: [I18n.t("captions.styleInherited"), I18n.t("captions.styleBox"), I18n.t("captions.styleOutline")];
+                    current: root.data.appearance;
+                    changed(index) => { root.appearance-changed(index); }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            if root.data.message != "": Rectangle {
+                border-radius: Theme.r;
+                background: Theme.danger-soft;
+
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+
+                    VerticalLayout {
+                        alignment: start;
+                        Icon { glyph: Glyph.close; size: 13px; tint: Theme.danger; }
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.data.message;
+                        color: Theme.danger;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    VerticalLayout {
+                        alignment: start;
+                        CopyChip { text: root.data.message; }
+                    }
+                }
+            }
+
+            if root.data.running: HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.progress < 0.02 ? I18n.t("captions.loadingTheModel") : I18n.t("captions.transcribing");
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "\{Math.round(root.data.progress * 100)}%";
+                    color: Theme.fg-muted;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.data.running: Progress { value: root.data.progress; }
+
+            if root.data.running: HorizontalLayout {
+                alignment: start;
+                Button {
+                    label: I18n.t("common.cancel");
+                    glyph: Glyph.close;
+                    ghost: true;
+                    clicked => { root.cancel(); }
+                }
+            }
+
+            if !root.data.running: HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    block: true;
+                    label: I18n.t("captions.importSrt");
+                    clicked => { root.import-srt(); }
+                }
+                Button {
+                    block: true;
+                    label: I18n.t("captions.exportSrt");
+                    clicked => { root.export-srt(); }
+                }
+            }
+
+            if !root.data.running: DialogRow {
+                label: I18n.t("captions.srtStart");
+                SegmentedControl {
+                    options: [I18n.t("captions.timelineStart"), I18n.t("settings.playhead")];
+                    current: root.data.srt-origin;
+                    changed(index) => { root.srt-origin-changed(index); }
+                }
+            }
+
+            if !root.data.running: Text {
+                text: I18n.t("captions.srtTimingHint");
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            if !root.data.running: Button {
+                block: true;
+                primary: true;
+                large: true;
+                glyph: Glyph.text-mark;
+                label: root.from-sound ? I18n.t("captions.generateCaptions") : I18n.t("captions.addCaptions");
+                enabled: root.from-sound ? root.data.ready : root.draft != "";
+                clicked => { root.begin(); }
+            }
+        }
+    }
+}

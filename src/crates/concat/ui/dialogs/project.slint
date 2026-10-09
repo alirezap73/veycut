@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, DialogRow, DialogSection, Field, Modal } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+import { NumberField } from "../primitives/number-field.slint";
+
+// The project sheet: what the Details panel's Modify button opens.
+//
+// The facts a project is made of - its name, and its timeline's frame, rate
+// and colour - on one short form, applied together. The folder is stated and not editable:
+// a project is its folder, and moving one is a job for the file manager.
+
+export struct ProjectSheetData {
+    open: bool,
+    name: string,
+    folder: string,
+    /// The timeline whose frame and rate the Output section edits: the
+    /// active one, named so the sheet never looks like it is setting the
+    /// whole project's.
+    timeline: string,
+    /// Row in the frame list; one past its six rows is Custom.
+    size: int,
+    /// Row in the rate list; one past its eleven rows is Custom.
+    rate: int,
+    /// The frame and rate as numbers, for the custom fields.
+    custom-width: float,
+    custom-height: float,
+    custom-fps: float,
+    /// The rate as the fraction it is kept as: "24000/1001".
+    rate-readout: string,
+    /// Row in the colour list: SDR, HDR HLG, HDR PQ.
+    color-space: int,
+}
+
+export component ProjectDialog inherits Modal {
+    in property <ProjectSheetData> data;
+
+    callback name-edited(name: string);
+    callback size-changed(index: int);
+    callback rate-changed(index: int);
+    callback custom-width-edited(width: float);
+    callback custom-height-edited(height: float);
+    callback custom-fps-edited(fps: float);
+    callback color-space-changed(index: int);
+    callback apply();
+
+    open: root.data.open;
+    title: I18n.t("project.project");
+    glyph: Glyph.settings;
+    surface-width: 440px;
+
+    VerticalLayout {
+        DialogSection {
+            first: true;
+            title: I18n.t("common.name");
+
+            DialogRow {
+                Field {
+                    value: root.data.name;
+                    placeholder: I18n.t("common.untitledProject");
+                    edited(text) => { root.name-edited(text); }
+                }
+            }
+
+            // The folder under the field, whole: the one fact here that
+            // cannot be changed, and the one most worth being able to read.
+            Text {
+                text: root.data.folder;
+                color: Theme.fg-dim;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+        }
+
+        DialogSection {
+            // Named for the timeline it sets, because it sets only that one:
+            // a second cut keeps its own frame whatever is picked here.
+            title: I18n.t1("project.output", root.data.timeline);
+
+            // The same six frames the monitor's picker offers, in the same
+            // order, so the two controls can never disagree about what a
+            // row means; then Custom, for any frame at all.
+            DialogRow {
+                label: I18n.t("common.frame");
+                Select {
+                    current: root.data.size;
+                    options: ["1920 × 1080", "3840 × 2160", "1080 × 1920",
+                        "1080 × 1080", "1440 × 1080", "2560 × 1080", I18n.t("common.custom")];
+                    details: ["16:9", "16:9 4K", "9:16", "1:1", "4:3", "21:9", ""];
+                    changed(index) => { root.size-changed(index); }
+                }
+            }
+
+            // Each side even and within 16 to 8192: Rust rounds what is
+            // typed to the nearest frame the project can hold.
+            if root.data.size == 6: DialogRow {
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    NumberField {
+                        value: root.data.custom-width;
+                        minimum: 16;
+                        maximum: 8192;
+                        step: 2;
+                        unit: "W";
+                        changed(value) => { root.custom-width-edited(value); }
+                    }
+
+                    Text {
+                        text: "×";
+                        color: Theme.fg-dim;
+                        vertical-alignment: center;
+                    }
+
+                    NumberField {
+                        value: root.data.custom-height;
+                        minimum: 16;
+                        maximum: 8192;
+                        step: 2;
+                        unit: "H";
+                        changed(value) => { root.custom-height-edited(value); }
+                    }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("common.frameRate");
+                Select {
+                    current: root.data.rate;
+                    // The same ladder the launch sheet offers, in the same
+                    // order: `RATES` in studio.rs.
+                    options: ["10 fps", "20 fps", "23.976 fps", "24 fps", "25 fps",
+                        "29.97 fps", "30 fps", "48 fps", "50 fps", "59.94 fps", "60 fps",
+                        I18n.t("common.custom")];
+                    changed(index) => { root.rate-changed(index); }
+                }
+            }
+
+            // From 1 to 240, kept as the exact fraction beside it: 23.976
+            // is 24000/1001, as a camera records it.
+            if root.data.rate == 11: DialogRow {
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    NumberField {
+                        value: root.data.custom-fps;
+                        minimum: 1;
+                        maximum: 240;
+                        step: 1;
+                        precision: 3;
+                        unit: "fps";
+                        changed(value) => { root.custom-fps-edited(value); }
+                    }
+
+                    Text {
+                        horizontal-stretch: 0;
+                        text: root.data.rate-readout;
+                        color: Theme.fg-dim;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // What the timeline is output in. A timeline turns HDR (HLG) on
+            // its first HDR clip; this is where it is set back, or to PQ.
+            DialogRow {
+                label: I18n.t("common.color");
+                Select {
+                    current: root.data.color-space;
+                    options: ["SDR", "HDR (HLG)", "HDR (PQ)"];
+                    details: ["Rec. 709", "Rec. 2020", "Rec. 2020"];
+                    changed(index) => { root.color-space-changed(index); }
+                }
+            }
+
+            if root.data.color-space > 0: Text {
+                text: I18n.t("project.hdrMonitorNote");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        VerticalLayout {
+            padding: 14px;
+
+            Button {
+                block: true;
+                primary: true;
+                large: true;
+                glyph: Glyph.check;
+                label: I18n.t("common.apply");
+                enabled: root.data.name != "";
+                clicked => { root.apply(); }
+            }
+        }
+    }
+}

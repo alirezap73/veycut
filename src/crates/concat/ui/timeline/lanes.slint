@@ -1,0 +1,1843 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { Wave } from "../primitives/wave.slint";
+import { Theme } from "../theme/theme.slint";
+import { Fmt, Payload } from "../util.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { ClipData, ClipKind, DropData, TimelineTool, TrackData } from "model.slint";
+import { ContextMenu, MenuItemData } from "../primitives/context-menu.slint";
+
+// The lanes: the ruler, the banded track stack, the clips on it, the playhead
+// and the two band gestures.
+//
+// A scene graph, not one painted surface hit-tested by hand. That costs an
+// element per clip and buys the hit testing: a clip carries its own
+// TouchArea, so there is no `clipAt(x, y)` to keep in step with the renderer,
+// and no way for the two to disagree about where a clip is.
+//
+// Everything is positioned from *seconds*: `px-per-second` is the only bridge,
+// so zooming and panning are one property change rather than a model rewrite.
+// Nothing is culled beyond `visible` — a project this size does not need it,
+// and a windowing scheme is worth writing the day one does.
+
+// ── what a kind looks like ───────────────────────────────────────────────────
+
+// The two colours and the mark a clip wears, by kind. A global rather than
+// three properties on `Clip`, because the drop ghost is not a Clip and still
+// has to be painted as the clip it is about to become — and a ghost that is
+// the wrong colour is worse than no ghost.
+global Paint {
+    public pure function mark(kind: ClipKind) -> color {
+        return kind == ClipKind.audio ? Theme.kind-audio
+            : kind == ClipKind.image ? Theme.kind-image
+            : kind == ClipKind.text ? Theme.kind-text
+            : kind == ClipKind.filter ? Theme.kind-filter
+            : kind == ClipKind.shape ? Theme.kind-shape
+            : Theme.kind-video;
+    }
+    public pure function well(kind: ClipKind) -> color {
+        return kind == ClipKind.audio ? Theme.kind-audio-well
+            : kind == ClipKind.image ? Theme.kind-image-well
+            : kind == ClipKind.text ? Theme.kind-text-well
+            : kind == ClipKind.filter ? Theme.kind-filter-well
+            : kind == ClipKind.shape ? Theme.kind-shape-well
+            : Theme.kind-video-well;
+    }
+    public pure function badge(kind: ClipKind) -> Glyph {
+        return kind == ClipKind.audio ? Glyph.music
+            : kind == ClipKind.image ? Glyph.image
+            : kind == ClipKind.text ? Glyph.text-mark
+            : kind == ClipKind.filter ? Glyph.filter
+            : kind == ClipKind.shape ? Glyph.shapes
+            : Glyph.film;
+    }
+}
+
+// The fade ramps over one region of a clip. The shaded wedge is the part
+// being taken away and the bright line is the envelope itself - the shape
+// every editor draws, because it reads as "this much is being attenuated".
+// Drawn at the foot of a picture clip's body, over the whole of a sound's,
+// and over the whole bar of a filter layer, which is all bar.
+component Ramps inherits Rectangle {
+    in property <float> fade-in;
+    in property <float> fade-out;
+    in property <length> px-per-second;
+    /// The wedges' height; they sit at the foot of this element.
+    in property <length> ramp-h: root.height;
+
+    if root.fade-in > 0: Rectangle {
+        x: 0;
+        y: parent.height - root.ramp-h;
+        width: Math.min(parent.width, root.fade-in * root.px-per-second);
+        height: root.ramp-h;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 1;
+            viewbox-height: 1;
+            fit: fill;
+            fill: Theme.fade-shade;
+            commands: "M 0 0 L 1 0 L 0 1 Z";
+        }
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 1;
+            viewbox-height: 1;
+            fit: fill;
+            stroke: Theme.fade-edge;
+            stroke-width: 1px;
+            commands: "M 0 1 L 1 0";
+        }
+    }
+
+    if root.fade-out > 0: Rectangle {
+        x: parent.width - self.width;
+        y: parent.height - root.ramp-h;
+        width: Math.min(parent.width, root.fade-out * root.px-per-second);
+        height: root.ramp-h;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 1;
+            viewbox-height: 1;
+            fit: fill;
+            fill: Theme.fade-shade;
+            commands: "M 0 0 L 1 0 L 1 1 Z";
+        }
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 1;
+            viewbox-height: 1;
+            fit: fill;
+            stroke: Theme.fade-edge;
+            stroke-width: 1px;
+            commands: "M 0 0 L 1 1";
+        }
+    }
+}
+
+// ── one clip ─────────────────────────────────────────────────────────────────
+
+component Clip inherits Rectangle {
+    in property <ClipData> item;
+    in property <length> px-per-second;
+    in property <length> viewport-width: 1920px;
+    in property <TimelineTool> tool;
+    /// how close to an edge counts as grabbing it
+    in property <length> edge-grab: 6px;
+
+    /// A press landed: the caller resolves the selection before any drag.
+    callback pressed(additive: bool, edge: int);
+    /// A press with the split tool: cut here, `x` into the clip.
+    callback split-at(x: length);
+    /// The volume line dragged to `gain` - linear, 1 being unity, 2 the
+    /// top of the band - while the drag lasts.
+    callback volume-dragged(gain: float);
+    /// Window-space delta since the press: seconds across, pixels down. Not
+    /// lanes down — the lanes differ in height, so which row a drag has
+    /// reached is a question only the side holding the heights can answer.
+    callback dragged(seconds: float, pixels: length);
+    /// Where the pointer is across the clip while it drags, for the lanes
+    /// to scroll when it reaches their edge.
+    callback pointer-at(x: length);
+    callback released();
+    /// A press and release that never travelled, on the body rather than
+    /// an edge: a click, at this x in the clip. The playhead goes there.
+    callback clicked(x: length);
+    callback context-requested();
+    /// The pointer over this clip, at this x in it, and then not. For the
+    /// preview axis: a hover belongs to the surface under the pointer, and
+    /// the lanes' floor cannot hear through a clip.
+    callback hovered(x: length);
+    callback hover-ended();
+
+    property <color> mark: Paint.mark(root.item.kind);
+    property <color> well: Paint.well(root.item.kind);
+    property <Glyph> badge: Paint.badge(root.item.kind);
+
+    /// The coloured name strip; the rest of the clip is its body. A title
+    /// is all strip: its name is its words, and a body under it would show
+    /// the same words a second time in a taller clip. A filter layer is all
+    /// strip too - one bar, the look's mark before its name - since it has
+    /// no picture and no sound to show under a header. A shape is all strip
+    /// for the title's reason: its name says what it is.
+    property <bool> all-strip: root.item.kind == ClipKind.text
+        || root.item.kind == ClipKind.filter
+        || root.item.kind == ClipKind.shape;
+    property <length> header-h: root.all-strip ? root.height : 17px;
+    /// An all-strip clip wears its kind's mark before its name, the way a
+    /// look or a title is told from a sound on the lanes at a glance.
+    property <bool> marked: root.all-strip;
+    property <length> text-x: root.marked ? 22px : 7px;
+    /// The `fx` chip: a square sized to the strip it sits in, capped so a
+    /// tall filter bar wears a rounded square and not a tall pill. A video
+    /// header is too short for a square the word fits, so there it keeps
+    /// the width it always had and stays a little wider than tall.
+    property <length> chip: Math.min(root.header-h - 5px, 20px);
+    property <length> chip-w: Math.max(root.chip, 14px);
+    property <length> body-h: Math.max(0px, root.height - root.header-h);
+    /// The sound band at the foot of a video clip: its file's waveform
+    /// under its frames, a third of the body and never a sliver, and there
+    /// whether or not the file has sound - a silent file shows the empty
+    /// band, so a video that has gone quiet is tellable from one that
+    /// never spoke. https://github.com/jub0t/Concat/issues/137
+    property <bool> banded: root.item.kind == ClipKind.video;
+    property <length> band-h: root.banded
+        ? Math.clamp(root.body-h * 0.34, 8px, 30px)
+        : 0px;
+    /// What the frames get: the body less the band.
+    property <length> frames-h: Math.max(0px, root.body-h - root.band-h);
+    /// A fade on a picture clip is shaded in a band at the foot instead of
+    /// over the whole body: the fade is an *audio* property, and shading the
+    /// picture would say it fades to black. Sound shades its whole body; a
+    /// filter layer's ramp is the whole layer coming up, and it shades its
+    /// whole bar.
+    property <length> fade-h: root.item.kind == ClipKind.audio ? root.body-h : root.body-h * 0.45;
+
+    /// -1 body, 0 leading edge, 1 trailing edge, 2 transition duration handle
+    property <bool> has-transition: root.item.transition-duration > 0;
+    property <length> transition-w: Math.max(18px, root.item.transition-duration * root.px-per-second);
+    property <length> half-w: root.transition-w / 2;
+    property <bool> trans-btn-hover: false;
+    property <bool> trans-btn-drag: false;
+    property <bool> left-handle-hover: false;
+    property <bool> left-handle-drag: false;
+    property <bool> right-handle-hover: false;
+    property <bool> right-handle-drag: false;
+
+    property <bool> show-tooltip: root.has-transition
+        && (root.trans-btn-hover || root.trans-btn-drag
+            || root.right-handle-hover || root.right-handle-drag
+            || root.left-handle-hover || root.left-handle-drag);
+    property <bool> trans-active: root.trans-btn-hover || root.trans-btn-drag
+        || root.right-handle-hover || root.right-handle-drag
+        || root.left-handle-hover || root.left-handle-drag;
+
+    property <int> edge-at: (root.has-transition && touch.mouse-x < root.edge-grab) ? -1
+        : touch.mouse-x < root.edge-grab ? 0
+        : touch.mouse-x > root.width - root.edge-grab ? 1
+        : -1;
+
+    pure function format-seconds(s: float) -> string {
+        let rounded = Math.round(s * 100);
+        let sec = Math.floor(rounded / 100);
+        let hundredths = Math.mod(rounded, 100);
+        return "\{sec}.\{hundredths < 10 ? "0" : ""}\{hundredths}s";
+    }
+    /// Its lane is locked. Rust refuses the gestures either way; this is so
+    /// the clip says why before you try, rather than feeling broken.
+    in property <bool> locked;
+
+    // Neither `opacity` nor a rounded `clip` here, however much both would
+    // suit. A clip element is as wide as its clip is long: ten minutes at
+    // the default zoom is 12000px. `opacity` with children makes Slint
+    // flatten the element into an offscreen layer that size in every
+    // renderer. (A rounded `clip` did the same under FemtoVG; Skia, the one
+    // renderer now, clips a rounded rect in place.) The GPU refuses
+    // a texture past its limit - 8192 on the wgpu defaults - and the window
+    // dies on the frame that draws it. The body and the filmstrip clip
+    // themselves (square, so a scissor and not a layer); the outline is
+    // drawn over the children below, and a locked lane dims through the
+    // scrim after it.
+    border-radius: Theme.r-sm;
+    background: root.well;
+
+    // ── body ─────────────────────────────────────────────────────────────
+    Rectangle {
+        x: 0;
+        y: root.header-h;
+        width: parent.width;
+        height: root.body-h;
+        clip: true;
+
+        // The audio envelope. The commands arrive normalised into a 1x1 box
+        // and `fit: fill` stretches that onto whatever width the clip has;
+        // Rust rebuilds the string with a column a pixel at each step of
+        // the zoom, from the peaks at the level that fits the column, so
+        // zooming in reveals the buckets rather than stretching a shape.
+        // The bars stand on the clip's floor, as tall as the level under
+        // them, and the part of a bar over the hot line is drawn again in
+        // the hot colour on top: a level meter laid along the clip, so a
+        // stretch that is too loud is seen without being heard. The path
+        // is at unity and the clip's volume scales its height here, so a
+        // volume drag moves the picture without a new path from Rust.
+        if root.item.wave != "" && !root.banded: Wave {
+            x: root.item.wave-from * parent.width;
+            y: 0;
+            width: root.item.wave-span * parent.width;
+            height: parent.height;
+            commands: root.item.wave;
+            gain: root.item.volume;
+            tint: Theme.wave;
+        }
+
+        // The floor the bars stand on.
+        if root.item.wave != "" && !root.banded: Rectangle {
+            x: 0;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: Theme.wave-centre;
+        }
+
+        // The filmstrip. Tiles are the strip's frames at the body's height,
+        // and each tile shows the frame under the midpoint of as much of it
+        // as is in the clip: the clip covers `span` of the footage from
+        // `start`, so a tile a fraction f along the clip wants the frame at
+        // start + span * f. Every tile is one Image with a source clip, so
+        // a zoom changes how many tiles there are and which frame each
+        // picks, never the picture itself.
+        //
+        // The midpoint of the *visible* part, not of the tile. The last
+        // tile runs past the clip's edge, and a clip narrower than one tile
+        // is all last tile: measured to the tile's own middle, a
+        // two-second clip in a 210px tile asked for the frame at 1.09 of
+        // its length, which clamped to the strip's final slice, and every
+        // clip at that zoom showed the same last frame - or nothing. What
+        // you see is the frame under the middle of what you see.
+        //
+        // Drawn at any width. A clip narrower than a tile shows the left
+        // of one frame, cut where the clip ends - a sliver of the picture
+        // is still the picture, and the well it would leave showing is not.
+        if root.item.strip.frames > 0 && root.width > 0px: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: root.banded ? root.frames-h : parent.height;
+            clip: true;
+
+            property <length> tile-w: Math.max(4px,
+                self.height * root.item.strip.frame-width / Math.max(1, root.item.strip.height));
+
+            // Window tiles to the visible screen area so zooming in never leaves
+            // all tiles off-screen to the left (fixes #156):
+            property <length> vis-start: Math.min(root.width, Math.max(0px, -root.x));
+            property <length> vis-end: Math.max(0px, Math.min(root.width, -root.x + root.viewport-width));
+            property <int> first-tile: Math.max(0, Math.floor(self.vis-start / self.tile-w));
+            property <int> total-tiles: Math.max(1, Math.ceil(root.width / self.tile-w));
+            property <int> tiles: self.vis-end <= self.vis-start ? 0
+                : Math.max(0, Math.min(Math.min(120, self.total-tiles - self.first-tile),
+                    Math.ceil((self.vis-end - self.vis-start) / self.tile-w) + 1));
+
+            /// The fraction of the clip under the middle of tile `i`'s
+            /// visible part.
+            pure function at(i: int) -> float {
+                return (i * self.tile-w + Math.min(self.width, (i + 1) * self.tile-w))
+                    / 2 / Math.max(1px, self.width);
+            }
+
+            for j in self.tiles: Image {
+                x: (parent.first-tile + j) * parent.tile-w;
+                y: 0;
+                width: parent.tile-w;
+                height: parent.height;
+                source: root.item.strip.image;
+                image-fit: fill;
+                source-clip-x: Math.clamp(
+                    Math.floor(root.item.strip.frames
+                        * (root.item.strip.start + root.item.strip.span * parent.at(parent.first-tile + j))),
+                    0, root.item.strip.frames - 1) * root.item.strip.frame-width;
+                source-clip-y: 0;
+                source-clip-width: root.item.strip.frame-width;
+                source-clip-height: root.item.strip.height;
+            }
+        }
+
+        // Before the frames arrive, a picture clip shows its kind's mark the
+        // way a bin card does — faint and large, so it reads as a placeholder
+        // and not as a badge.
+        if (root.item.kind == ClipKind.video || root.item.kind == ClipKind.image)
+            && root.item.strip.frames == 0 && root.width > 40px: Icon {
+            x: (parent.width - self.width) / 2;
+            y: ((root.banded ? root.frames-h : parent.height) - self.height) / 2;
+            glyph: root.badge;
+            size: Math.min(22px, (root.banded ? root.frames-h : parent.height) - 6px);
+            tint: root.mark.with-alpha(0.3);
+        }
+
+        // The sound band under a video's frames: a hairline off the frames,
+        // the waveform when the file has sound and its peaks have come, the
+        // centre line either way. In the video's blue, well and wave both:
+        // the band is part of the video clip, and green would say there
+        // was a sound clip here.
+        if root.banded && root.band-h > 0px: Rectangle {
+            x: 0;
+            y: root.frames-h;
+            width: parent.width;
+            height: root.band-h;
+            background: Theme.kind-video-well.with-alpha(0.55);
+            clip: true;
+
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: 1px;
+                background: Theme.line;
+            }
+
+            if root.item.wave != "": Wave {
+                x: root.item.wave-from * parent.width;
+                y: 1px;
+                width: root.item.wave-span * parent.width;
+                height: parent.height - 1px;
+                commands: root.item.wave;
+                gain: root.item.volume;
+                tint: Theme.wave-video;
+            }
+
+            // The floor the bars stand on.
+            Rectangle {
+                x: 0;
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: Theme.wave-centre;
+            }
+        }
+
+        // The fade ramps, at the foot of the body.
+        Ramps {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            fade-in: root.item.fade-in;
+            fade-out: root.item.fade-out;
+            px-per-second: root.px-per-second;
+            ramp-h: root.fade-h;
+        }
+
+
+    }
+
+    // ── header ───────────────────────────────────────────────────────────
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: root.header-h;
+        // The corners the clip's own rounding used to cut; an all-strip clip
+        // is the whole bar, so it takes the foot's two as well.
+        border-top-left-radius: Theme.r-sm;
+        border-top-right-radius: Theme.r-sm;
+        border-bottom-left-radius: root.all-strip ? Theme.r-sm : 0px;
+        border-bottom-right-radius: root.all-strip ? Theme.r-sm : 0px;
+        background: root.mark;
+
+        if root.marked && root.width > 20px: Icon {
+            x: 6px;
+            y: (parent.height - self.height) / 2;
+            glyph: root.badge;
+            size: 11px;
+            tint: Theme.clip-ink;
+        }
+
+        if root.width > 30px: Text {
+            x: root.text-x;
+            y: 0;
+            width: parent.width - root.text-x - 7px
+                - (root.item.fx && root.width > 60px ? root.chip-w + 6px : 0px);
+            height: parent.height;
+            text: root.item.name;
+            color: Theme.clip-ink;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // A filter layer's ramps run over its whole bar; see Ramps.
+        if root.item.kind == ClipKind.filter: Ramps {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            fade-in: root.item.fade-in;
+            fade-out: root.item.fade-out;
+            px-per-second: root.px-per-second;
+        }
+
+        // An `fx` chip when effects are live on the clip, so a styled clip is
+        // tellable from a plain one without opening a panel.
+        if root.item.fx && root.width > 60px: Rectangle {
+            x: parent.width - self.width - 4px;
+            y: (parent.height - self.height) / 2;
+            width: root.chip-w;
+            height: root.chip;
+            border-radius: Theme.r-xs;
+            background: Theme.clip-chip;
+
+            Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                text: "fx";
+                color: Theme.clip-ink;
+                // Not a step of the scale: it is sized to the chip it is
+                // centred in, the way a glyph is, and moves with that and not
+                // with the type - 9px in a video header's 12px chip, up to
+                // 11px in a filter bar's 20px one.
+                font-size: Math.max(9px, root.chip * 0.55);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // ── outline ──────────────────────────────────────────────────────────
+    //
+    // Over the children, because they are over it: the header and the
+    // filmstrip both span the whole element, and the `clip` this bar used
+    // to have was what held them inside its border. Childless, so no layer.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        border-radius: Theme.r-sm;
+        border-width: root.item.selected ? 2px : 1px;
+        border-color: root.item.selected ? Theme.accent : root.mark;
+    }
+
+    // ── locked ───────────────────────────────────────────────────────────
+    //
+    // What `opacity: 0.55` used to say, said by a veil over the bar instead:
+    // one childless rectangle, which Slint paints straight onto the frame.
+    // The lane at the complementary alpha, so the clip fades toward what it
+    // sits on as the opacity did, in either theme - `Theme.scrim` is black
+    // and would invert the effect on the light one.
+    if root.locked: Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        border-radius: Theme.r-sm;
+        background: Theme.lane.with-alpha(0.45);
+    }
+
+    // ── the gesture ──────────────────────────────────────────────────────
+    //
+    // The delta is taken in window coordinates — `absolute-position + mouse-x`
+    // — and not as `mouse-x - pressed-x`. A clip moves as it is dragged, so a
+    // local delta is measured against its own moving origin and cancels
+    // itself out; the drag stalls after the first frame. Same reasoning, and
+    // the same fix, as the workspace splitters.
+    touch := TouchArea {
+        enabled: !root.locked;
+        mouse-cursor: root.tool == TimelineTool.split ? MouseCursor.crosshair
+            : root.edge-at >= 0 ? MouseCursor.ew-resize : MouseCursor.grab;
+
+        changed mouse-x => {
+            if (self.has-hover && !self.pressed) { root.hovered(self.mouse-x); }
+        }
+        changed has-hover => {
+            if (!self.has-hover) { root.hover-ended(); }
+        }
+
+        pointer-event(event) => {
+            // The right button opens the menu and does nothing else — it must
+            // not also start a move, or the menu would appear over a clip that
+            // had already jumped. On the release, not the press: a press
+            // holds the pointer for this area until the button comes up, and
+            // a menu that opens under a held button is a menu whose first
+            // click goes to the wrong element.
+            if (event.button == PointerEventButton.right) {
+                if (event.kind == PointerEventKind.up) {
+                    root.context-requested();
+                }
+                return;
+            }
+            if (event.kind == PointerEventKind.down
+                && event.button == PointerEventButton.left) {
+                // The split tool cuts where the press lands and starts no
+                // gesture: nothing is selected or moved by it.
+                if (root.tool == TimelineTool.split) {
+                    root.split-at(self.mouse-x);
+                    return;
+                }
+                self.origin-x = self.absolute-position.x + self.mouse-x;
+                self.origin-y = self.absolute-position.y + self.mouse-y;
+                self.travelled = false;
+                self.on-edge = root.edge-at >= 0;
+                root.pressed(event.modifiers.shift || event.modifiers.control
+                    || event.modifiers.meta, root.edge-at);
+            } else if (event.kind == PointerEventKind.up
+                || event.kind == PointerEventKind.cancel) {
+                // Only a release ends it. Slint delivers `move` here too, so a
+                // plain `else` would end the gesture the moment it began.
+                root.released();
+                if (event.kind == PointerEventKind.up && !self.travelled && !self.on-edge
+                    && root.tool == TimelineTool.select) {
+                    root.clicked(self.mouse-x);
+                }
+            }
+        }
+
+        moved => {
+            // Past a few pixels it is a drag, not a click, and the playhead
+            // stays where it was.
+            if (Math.abs(self.absolute-position.x + self.mouse-x - self.origin-x) > 4px
+                || Math.abs(self.absolute-position.y + self.mouse-y - self.origin-y) > 4px) {
+                self.travelled = true;
+            }
+            if (root.tool == TimelineTool.select) {
+                root.pointer-at(self.mouse-x);
+                root.dragged(
+                    (self.absolute-position.x + self.mouse-x - self.origin-x)
+                        / root.px-per-second,
+                    self.absolute-position.y + self.mouse-y - self.origin-y);
+            }
+        }
+
+        property <length> origin-x;
+        property <length> origin-y;
+        property <bool> travelled;
+        property <bool> on-edge;
+    }
+
+    // ── the volume line ───────────────────────────────────────────────────
+    //
+    // A line across the sound - the whole body of a sound clip, the band
+    // under a video's frames - at the clip's gain: the middle is unity,
+    // the top is twice, the floor is silence. Dragged, it sets the volume
+    // without a trip to the inspector, the way every phone editor's does.
+    // Over the clip's own touch area, so the grab is the line's.
+    property <bool> sounded: root.item.kind == ClipKind.audio || root.banded;
+    /// The sound's top and height within the clip.
+    property <length> sound-top: root.header-h + (root.banded ? root.frames-h : 0px);
+    property <length> sound-h: root.banded ? root.band-h : root.body-h;
+    /// The gain shown: the drag's while a drag lasts, the clip's otherwise.
+    property <bool> volume-live;
+    /// The pointer is on the line; kept here, since the line, its grab
+    /// and its label are each their own conditional element.
+    property <bool> volume-hover;
+    property <float> drag-gain;
+    property <float> shown-gain: root.volume-live ? root.drag-gain : root.item.volume;
+    property <length> volume-y: root.sound-top
+        + root.sound-h * (1 - Math.clamp(root.shown-gain, 0, 2) / 2);
+
+    if root.sounded && root.sound-h >= 12px && !root.locked: Rectangle {
+        x: 0;
+        y: root.volume-y - 1px;
+        width: parent.width;
+        height: (root.volume-hover || root.volume-live) ? 2px : 1px;
+        // White, not the accent: the accent is the selection's, and a
+        // line in it on every sound read as every sound being selected.
+        background: Colors.white;
+        opacity: (root.volume-hover || root.volume-live) ? 1.0 : 0.7;
+    }
+
+    if root.sounded && root.sound-h >= 12px && !root.locked: volume-grab := TouchArea {
+        x: 0;
+        y: root.volume-y - 5px;
+        width: parent.width;
+        height: 10px;
+        mouse-cursor: MouseCursor.ns-resize;
+
+        property <length> origin-y;
+        property <float> origin-gain;
+
+        changed has-hover => { root.volume-hover = self.has-hover; }
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down
+                && event.button == PointerEventButton.left) {
+                self.origin-y = self.absolute-position.y + self.mouse-y;
+                self.origin-gain = root.item.volume;
+                root.drag-gain = root.item.volume;
+                root.volume-live = true;
+            } else if (event.kind == PointerEventKind.up
+                || event.kind == PointerEventKind.cancel) {
+                root.volume-live = false;
+            }
+        }
+        moved => {
+            if (root.volume-live && root.sound-h > 0px) {
+                // Pixels down are gain off, two gains the height of the
+                // sound; unity snaps, so the line finds 100% by feel.
+                let gain = Math.clamp(self.origin-gain
+                    - (self.absolute-position.y + self.mouse-y - self.origin-y)
+                        / root.sound-h * 2, 0, 2);
+                root.drag-gain = Math.abs(gain - 1) < 0.04 ? 1 : gain;
+                root.volume-dragged(root.drag-gain);
+            }
+        }
+    }
+
+    // What the line is at, while it is held or hovered.
+    if root.sounded && root.sound-h >= 12px && !root.locked
+        && (root.volume-live || root.volume-hover): Rectangle {
+        x: 6px;
+        y: Math.max(root.header-h, root.volume-y - self.height - 4px);
+        width: volume-label.preferred-width + 10px;
+        height: 16px;
+        border-radius: Theme.r-sm;
+        background: Colors.white;
+
+        volume-label := Text {
+            x: 5px;
+            height: parent.height;
+            text: "\{Math.round(root.shown-gain * 100)} %";
+            color: Colors.black;
+            font-family: Theme.font-technical;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── the transition overlay & cut seam controls ────────────────────────
+    //
+    // Centered symmetrically across the cut seam (x = 0):
+    // spans from x: -root.half-w to x: root.half-w.
+    // Rendered on top of `touch` so the seam button and slider handles receive
+    // direct, unhindered pointer events for 1:1 real-time drag adjustments.
+    if root.has-transition && root.width > 10px: Rectangle {
+        x: -root.half-w;
+        y: 0;
+        width: root.transition-w;
+        height: parent.height;
+
+        // Translucent duration wash across the seam
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            background: (root.trans-active || root.item.transition-selected)
+                ? Theme.accent.with-alpha(0.18)
+                : Theme.transition-out.with-alpha(0.15);
+        }
+
+        // Top and bottom accent guide borders
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: 1px;
+            background: (root.trans-active || root.item.transition-selected)
+                ? Theme.accent
+                : Theme.transition-in.with-alpha(0.4);
+        }
+        Rectangle {
+            x: 0;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: (root.trans-active || root.item.transition-selected)
+                ? Theme.accent
+                : Theme.transition-in.with-alpha(0.4);
+        }
+
+        // Center cut seam line
+        Rectangle {
+            x: root.half-w;
+            y: 0;
+            width: 1px;
+            height: parent.height;
+            background: Theme.line-strong.with-alpha(0.5);
+        }
+
+        // A press anywhere on the wash picks the transition, not the clip
+        // under it: the wash is the transition, drawn. Under the handles
+        // and the seam button, which are declared after it.
+        TouchArea {
+            enabled: !root.locked;
+            mouse-cursor: MouseCursor.pointer;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    root.pressed(false, 2);
+                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    root.released();
+                }
+            }
+        }
+    }
+
+    // ── Left draggable slider handle (at x: -root.half-w) ─────────────────
+    if root.has-transition && root.width > 10px: Rectangle {
+        x: -root.half-w - 5.5px;
+        y: 0;
+        width: 14px;
+        height: parent.height;
+
+        // 3px wide rounded vertical handle bar
+        Rectangle {
+            x: 5.5px;
+            y: 3px;
+            width: 3px;
+            height: parent.height - 6px;
+            border-radius: 1.5px;
+            background: (root.left-handle-hover || root.left-handle-drag)
+                ? Theme.accent
+                : Theme.transition-in;
+        }
+
+        // Tactile grip indicator pill
+        Rectangle {
+            x: 4.5px;
+            y: (parent.height - 12px) / 2;
+            width: 5px;
+            height: 12px;
+            border-radius: 2px;
+            background: (root.left-handle-hover || root.left-handle-drag)
+                ? Theme.accent
+                : Theme.transition-in;
+
+            // Grip slits
+            Rectangle {
+                x: 1px;
+                y: 3px;
+                width: 3px;
+                height: 1px;
+                background: #00000059;
+            }
+            Rectangle {
+                x: 1px;
+                y: 7px;
+                width: 3px;
+                height: 1px;
+                background: #00000059;
+            }
+        }
+
+        left-touch := TouchArea {
+            enabled: !root.locked;
+            mouse-cursor: MouseCursor.ew-resize;
+            property <length> origin-x;
+            property <length> origin-y;
+            property <bool> is-dragging: false;
+
+            changed has-hover => {
+                root.left-handle-hover = self.has-hover;
+            }
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    self.origin-x = self.absolute-position.x + self.mouse-x;
+                    self.origin-y = self.absolute-position.y + self.mouse-y;
+                    self.is-dragging = true;
+                    root.left-handle-drag = true;
+                    root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2);
+                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    self.is-dragging = false;
+                    root.left-handle-drag = false;
+                    root.released();
+                }
+            }
+
+            moved => {
+                if (self.is-dragging && root.tool == TimelineTool.select) {
+                    let delta-x = self.absolute-position.x + self.mouse-x - self.origin-x;
+                    root.dragged(
+                        (-2.0 * delta-x) / root.px-per-second,
+                        self.absolute-position.y + self.mouse-y - self.origin-y);
+                }
+            }
+        }
+    }
+
+    // ── Right draggable slider handle (at x: root.half-w - 3px) ───────────
+    if root.has-transition && root.width > 10px: Rectangle {
+        x: root.half-w - 8.5px;
+        y: 0;
+        width: 14px;
+        height: parent.height;
+
+        // 3px wide rounded vertical handle bar
+        Rectangle {
+            x: 5.5px;
+            y: 3px;
+            width: 3px;
+            height: parent.height - 6px;
+            border-radius: 1.5px;
+            background: (root.right-handle-hover || root.right-handle-drag)
+                ? Theme.accent
+                : Theme.transition-in;
+        }
+
+        // Tactile grip indicator pill
+        Rectangle {
+            x: 4.5px;
+            y: (parent.height - 12px) / 2;
+            width: 5px;
+            height: 12px;
+            border-radius: 2px;
+            background: (root.right-handle-hover || root.right-handle-drag)
+                ? Theme.accent
+                : Theme.transition-in;
+
+            // Grip slits
+            Rectangle {
+                x: 1px;
+                y: 3px;
+                width: 3px;
+                height: 1px;
+                background: #00000059;
+            }
+            Rectangle {
+                x: 1px;
+                y: 7px;
+                width: 3px;
+                height: 1px;
+                background: #00000059;
+            }
+        }
+
+        right-touch := TouchArea {
+            enabled: !root.locked;
+            mouse-cursor: MouseCursor.ew-resize;
+            property <length> origin-x;
+            property <length> origin-y;
+            property <bool> is-dragging: false;
+
+            changed has-hover => {
+                root.right-handle-hover = self.has-hover;
+            }
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    self.origin-x = self.absolute-position.x + self.mouse-x;
+                    self.origin-y = self.absolute-position.y + self.mouse-y;
+                    self.is-dragging = true;
+                    root.right-handle-drag = true;
+                    root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2);
+                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    self.is-dragging = false;
+                    root.right-handle-drag = false;
+                    root.released();
+                }
+            }
+
+            moved => {
+                if (self.is-dragging && root.tool == TimelineTool.select) {
+                    let delta-x = self.absolute-position.x + self.mouse-x - self.origin-x;
+                    root.dragged(
+                        (2.0 * delta-x) / root.px-per-second,
+                        self.absolute-position.y + self.mouse-y - self.origin-y);
+                }
+            }
+        }
+    }
+
+    // ── Floating duration tooltip pill ───────────────────────────────────
+    if root.show-tooltip: Rectangle {
+        x: -self.width / 2;
+        y: -20px;
+        width: dur-text.preferred-width + 12px;
+        height: 18px;
+        border-radius: 4px;
+        background: #18181c;
+        border-width: 1px;
+        border-color: (root.right-handle-drag || root.left-handle-drag || root.trans-btn-drag)
+            ? Theme.accent
+            : Theme.line-strong;
+
+        dur-text := Text {
+            x: 6px;
+            y: (parent.height - self.height) / 2;
+            text: root.format-seconds(root.item.transition-duration);
+            color: (root.right-handle-drag || root.left-handle-drag || root.trans-btn-drag)
+                ? Theme.accent
+                : Theme.fg;
+            font-size: 10px;
+            font-weight: 600;
+        }
+    }
+
+    // ── Sleek transition seam button [ ⧗ ] ────────────────────────────────
+    if root.has-transition: Rectangle {
+        x: -11px;
+        y: (parent.height - 22px) / 2;
+        width: 22px;
+        height: 22px;
+
+        // Subtle accent glow when selected
+        if root.item.transition-selected: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            border-radius: 5px;
+            background: Theme.accent.with-alpha(0.25);
+        }
+
+        trans-btn := Rectangle {
+            x: 2px;
+            y: 2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            background: (root.trans-btn-hover || root.item.transition-selected)
+                ? Theme.field-hover
+                : #1e1e24;
+            border-width: (root.trans-btn-hover || root.item.transition-selected) ? 2px : 1px;
+            border-color: (root.trans-btn-hover || root.item.transition-selected)
+                ? Theme.accent
+                : Theme.line-strong;
+
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                glyph: Glyph.transition;
+                size: 12px;
+                tint: (root.trans-btn-hover || root.item.transition-selected) ? Theme.accent : Theme.fg;
+            }
+
+            trans-btn-touch := TouchArea {
+                enabled: !root.locked;
+                mouse-cursor: self.is-dragging ? MouseCursor.ew-resize : MouseCursor.pointer;
+                property <length> origin-x;
+                property <length> origin-y;
+                property <bool> is-dragging: false;
+
+                changed has-hover => {
+                    root.trans-btn-hover = self.has-hover;
+                }
+
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                        self.origin-x = self.absolute-position.x + self.mouse-x;
+                        self.origin-y = self.absolute-position.y + self.mouse-y;
+                        self.is-dragging = true;
+                        root.trans-btn-drag = true;
+                        root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2);
+                    } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                        self.is-dragging = false;
+                        root.trans-btn-drag = false;
+                        root.released();
+                    }
+                }
+
+                moved => {
+                    if (self.is-dragging && root.tool == TimelineTool.select) {
+                        let delta-x = self.absolute-position.x + self.mouse-x - self.origin-x;
+                        root.dragged(
+                            (2.0 * delta-x) / root.px-per-second,
+                            self.absolute-position.y + self.mouse-y - self.origin-y);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── the lanes ────────────────────────────────────────────────────────────────
+
+export component Lanes inherits Rectangle {
+    in property <[TrackData]> tracks;
+    in property <[ClipData]> clips;
+    in property <TimelineTool> tool: TimelineTool.select;
+    in property <float> playhead;
+    /// The selected clip's keys as instants; see `Editor.key-marks`.
+    in property <[float]> key-marks;
+    in property <float> frame-rate: 30;
+    /// Seconds at the left edge of the lanes.
+    in property <float> scroll-left;
+    /// Hand tool: wheel and drag pan time instead of scrolling the stack.
+    in property <bool> pan-mode: false;
+    /// The preview axis: a hairline follows the pointer across the lanes
+    /// and the monitor shows the frame under it. Off, the lanes say nothing
+    /// about where the pointer is.
+    in property <bool> preview-axis: false;
+    /// The zoom: seconds covered by one pixel.
+    in property <float> seconds-per-pixel: 0.05;
+    in property <length> track-scroll;
+    in property <length> ruler-height: 28px;
+    /// How close to a clip's edge counts as taking hold of it. A pointer
+    /// finds six pixels; a finger wants more.
+    in property <length> edge-grab: 6px;
+    /// The lanes are driven by a finger: a phone. The floor and the ruler
+    /// are then one surface for one gesture - a drag along the cut scrubs,
+    /// the lanes sliding under a playhead Rust holds at their middle, and a
+    /// drag down the stack scrolls it - and a tap on an empty lane clears
+    /// the selection, as an empty band does. No band is drawn: there is no
+    /// modifier to add with and no pointer to aim a marquee by. Off, the
+    /// floor draws a band and the ruler scrubs where it is pressed, as on
+    /// a desk.
+    in property <bool> finger: false;
+
+    callback scrubbed(seconds: float);
+    /// A ruler diamond dragged from one instant to another.
+    callback key-mark-moved(from: float, to: float);
+    /// The preview axis: the pointer is over the lanes at this instant,
+    /// and then - a beat after it last was - it is not.
+    callback hovered(seconds: float);
+    callback hover-ended();
+    /// A press on an empty stretch of lane, before the band it may become.
+    callback floor-pressed();
+
+    /// Where the pointer is, for the preview axis, and whether it is here
+    /// at all. Every surface reports through `hover-at` - the floor, the
+    /// ruler, the hand's pane, each clip - because a hover belongs to the
+    /// surface under the pointer and nothing listens through them.
+    property <length> hover-x;
+    property <bool> hover-on;
+
+    function hover-at(x: length) {
+        // Tracked for the preview axis, and for the razor's edge below;
+        // only the axis moves the monitor.
+        if (!root.preview-axis && root.tool != TimelineTool.split) {
+            return;
+        }
+        hover-off-timer.running = false;
+        root.hover-x = x;
+        root.hover-on = true;
+        if (root.preview-axis) {
+            root.hovered(Math.max(0, root.seconds-at(x)));
+        }
+    }
+    /// A beat later, not at once: the pointer crossing from a clip to the
+    /// floor leaves one surface before it reaches the next, and the
+    /// monitor snapping back to the playhead in between would read as a
+    /// glitch. A hover that arrives inside the beat cancels it.
+    function hover-off() {
+        if (root.hover-on) {
+            hover-off-timer.running = true;
+        }
+    }
+    callback clip-pressed(id: string, additive: bool, edge: int);
+    /// The split tool pressed a clip: cut it at `seconds` on the timeline.
+    callback clip-split(id: string, seconds: float);
+    /// A clip's volume line dragged to `gain`.
+    callback clip-volume(id: string, gain: float);
+    callback clip-dragged(seconds: float, pixels: length);
+    callback clip-released();
+    /// Right-click on a clip. The caller fills the menu and bumps `menu-token`;
+    /// where it opens is decided here, because only this side knows where the
+    /// pointer was.
+    callback clip-context(id: string);
+    callback menu-selected(id: string);
+
+    in property <[MenuItemData]> menu-items;
+    in property <length> menu-height;
+    in property <int> menu-token;
+
+    /// The token, but only for the Lanes that asked.
+    ///
+    /// `menu-token` is one number for the whole window, and a bump on it used
+    /// to open every menu bound to it. That was exactly one menu while there
+    /// was exactly one timeline; a second timeline seat makes it two, and the
+    /// one that was not right-clicked opens at the corner of itself, because
+    /// the position was only set on the one that was. So the pane that asked
+    /// says so, and only its own token moves.
+    property <bool> asked;
+    property <int> own-token;
+    changed menu-token => {
+        if (root.asked) {
+            root.asked = false;
+            root.own-token = root.menu-token;
+        }
+    }
+    /// A band closed over this box. Committed on release rather than live:
+    /// selecting as the band sweeps looks busy and makes a mistaken sweep hard
+    /// to back out of.
+    callback band-selected(from-seconds: float, to-seconds: float,
+        from-y: length, to-y: length, additive: bool);
+    callback scrolled(seconds: float);
+    callback track-scrolled(pixels: length);
+    callback zoomed(factor: float, anchor-seconds: float);
+
+    /// A drag from the library is over the lanes at this moment and this
+    /// place. Asked on every move of it, because the answer — the ghost below
+    /// — is where the drop would land, and that has to be recomputed as the
+    /// pointer travels.
+    callback drag-hovered(payload: string, seconds: float, y: length);
+    /// Released here. Same three arguments: the drop is the hover, committed.
+    callback dropped(payload: string, seconds: float, y: length);
+    /// The answer to the last hover. `active` is also the verdict — false is
+    /// how the drag is refused, and the cursor says so.
+    in property <DropData> drop;
+
+    property <length> px-per-second: 1px / Math.max(root.seconds-per-pixel, 0.000001);
+    property <length> lanes-h: Math.max(0px, root.height - root.ruler-height);
+    /// x of a moment, in the lanes' own coordinates
+    pure function at(seconds: float) -> length {
+        return (seconds - root.scroll-left) * root.px-per-second;
+    }
+    // ── a finger on the lanes ─────────────────────────────────────────
+    //
+    // Which way a press went is decided once it has travelled far enough to
+    // say, and then held: a drag that wanders a little does not change jobs
+    // halfway. 0 is undecided - a tap, if it lets go like that - 1 is along
+    // the cut, 2 is down the stack.
+    property <int> finger-axis;
+    /// The playhead when the finger landed: what the drag is measured from,
+    /// so a view that has moved since does not double the distance.
+    property <float> finger-playhead;
+    property <length> finger-x;
+    property <length> finger-y;
+    property <length> finger-last-y;
+
+    function finger-down(x: length, y: length) {
+        root.finger-axis = 0;
+        root.finger-playhead = root.playhead;
+        root.finger-x = x;
+        root.finger-y = y;
+        root.finger-last-y = y;
+    }
+    /// The finger is at (`x`, `y`) now. `down-too` allows the vertical
+    /// job: the floor scrolls the stack, the ruler does not.
+    function finger-moved(x: length, y: length, down-too: bool) {
+        if (root.finger-axis == 0) {
+            if (Math.abs(x - root.finger-x) > 6px) {
+                root.finger-axis = 1;
+            } else if (down-too && Math.abs(y - root.finger-y) > 6px) {
+                root.finger-axis = 2;
+            }
+        }
+        if (root.finger-axis == 1) {
+            // The cut follows the finger: dragging it right brings earlier
+            // material under the playhead.
+            root.scrubbed(Math.max(0,
+                root.finger-playhead - (x - root.finger-x) / root.px-per-second));
+        } else if (root.finger-axis == 2) {
+            root.track-scrolled(root.finger-last-y - y);
+            root.finger-last-y = y;
+        }
+    }
+
+    // ── scrolling at the edge ─────────────────────────────────────────
+    // A scrub or a clip drag that reaches the lanes' edge scrolls the view
+    // that way, a dozen pixels a tick, and re-reports the pointer so the
+    // playhead or the clip keeps up (#101). What is pressed says which
+    // report to repeat.
+    property <bool> scrubbing;
+    property <bool> clip-dragging;
+    property <length> pointer-x;
+    property <float> drag-seconds;
+    property <length> drag-pixels;
+    /// `scroll-left` when the clip was pressed; see the clip's `dragged`.
+    property <float> press-scroll;
+    property <length> edge-zone: 40px;
+    property <bool> at-edge: (root.scrubbing || root.clip-dragging)
+        && (root.pointer-x < root.edge-zone || root.pointer-x > root.width - root.edge-zone);
+
+    edge-scroll := Timer {
+        interval: 16ms;
+        running: root.at-edge;
+        triggered => {
+            root.scrolled(Math.max(0, root.scroll-left
+                + (root.pointer-x < root.edge-zone ? -12 : 12) * root.seconds-per-pixel));
+            if (root.scrubbing) {
+                root.scrubbed(Math.max(0, root.seconds-at(root.pointer-x)));
+            } else {
+                root.clip-dragged(root.drag-seconds + (root.scroll-left - root.press-scroll), root.drag-pixels);
+            }
+        }
+    }
+
+    pure function seconds-at(x: length) -> float {
+        return root.scroll-left + x / root.px-per-second;
+    }
+    /// Pixels down the stack, from a y inside the lane area — which is what
+    /// the band and the drop target both send, since which row a y lands on
+    /// is the caller's to resolve. Both start at the foot of the ruler, so
+    /// their local y needs only the scroll adding to it.
+    pure function stack-y(y: length) -> length {
+        return y + root.track-scroll;
+    }
+    /// The top of a row inside the lane area, scroll included.
+    pure function row-y(row: int) -> length {
+        return root.ruler-height + root.tracks[row].top - root.track-scroll;
+    }
+
+    // The ruler's tick ladder, from Rust. Zero means unbound, which draws no
+    // ticks rather than dividing by it.
+    property <float> tick: Fmt.tick-interval(root.seconds-per-pixel);
+    property <float> first-tick: root.tick > 0
+        ? Math.ceil(root.scroll-left / root.tick) * root.tick : 0;
+
+    background: Theme.lane;
+    clip: true;
+
+    // Ancestor of everything below, so a wheel the clips do not handle bubbles
+    // up to here. A sibling would not see it.
+    wheel := TouchArea {
+        scroll-event(event) => {
+            // Hand tool: any wheel pans time, no modifier needed.
+            if (root.pan-mode) {
+                root.scrolled(Math.max(0, root.scroll-left
+                    - event.delta-y / root.px-per-second));
+                return EventResult.accept;
+            }
+            if (event.modifiers.control || event.modifiers.meta) {
+                // Proportional to the gesture rather than a fixed notch per
+                // event. A trackpad sends a stream of small deltas, and a flat
+                // 1.15 on each one slammed through the whole zoom range in a
+                // gesture; scaling the factor by the distance travelled makes
+                // a pinch feel like it is pulling the ruler apart.
+                //
+                // Negated because Slint's delta-y is positive scrolling *up*,
+                // and up is zoom in, which means a *smaller* seconds-per-pixel.
+                //
+                // Clamped so one enormous delta — some mice send a whole
+                // page — cannot jump several octaves in a single event.
+                root.zoomed(
+                    Fmt.clamp(Math.pow(1.0025, -event.delta-y / 1px), 0.5, 2.0),
+                    root.seconds-at(self.mouse-x));
+                return EventResult.accept;
+            }
+            // A trackpad's horizontal axis pans time, and its vertical axis
+            // scrolls the stack, which is what a plain wheel means in every
+            // other list. Shift turns a wheel's one axis into the pan, since
+            // a wheel has no horizontal axis of its own.
+            //
+            // Both axes out of the one event, not whichever showed up. A
+            // two-finger swipe is never exactly vertical, and the old rule
+            // sent the whole event sideways on any x at all, so most of a
+            // vertical swipe's y was thrown away: the stack crept and
+            // stuttered while the ruler twitched underneath it. A diagonal
+            // swipe now moves diagonally, the way it does on a page.
+            if (event.modifiers.shift) {
+                root.scrolled(Math.max(0, root.scroll-left
+                    - (event.delta-x != 0px ? event.delta-x : event.delta-y)
+                        / root.px-per-second));
+                return EventResult.accept;
+            }
+            if (event.delta-x != 0px) {
+                root.scrolled(Math.max(0, root.scroll-left
+                    - event.delta-x / root.px-per-second));
+            }
+            if (event.delta-y != 0px) {
+                root.track-scrolled(-event.delta-y);
+            }
+            return EventResult.accept;
+        }
+
+        // ── banded lanes ─────────────────────────────────────────────────
+        for track[row] in root.tracks: Rectangle {
+            x: 0;
+            y: root.ruler-height + track.top - root.track-scroll;
+            width: parent.width;
+            height: track.height;
+            background: Math.mod(row, 2) == 0 ? Theme.lane : Theme.lane-alt;
+            visible: self.y + track.height > root.ruler-height && self.y < root.height;
+
+            Rectangle {
+                x: 0;
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: Theme.line;
+            }
+        }
+
+        // The grid: one rule per ruler tick, so a clip edge can be read
+        // against the ruler without following it all the way up there. Same
+        // ladder, same positions — they are the same `tick`.
+        for step in 64: Rectangle {
+            property <float> seconds: root.first-tick + step * root.tick;
+
+            x: root.at(self.seconds);
+            y: root.ruler-height;
+            width: 1px;
+            height: root.lanes-h;
+            background: Theme.grid;
+            // Nothing before the start of the cut: a centred view begins
+            // half a screen before it, and that half is empty ground.
+            visible: root.tick > 0 && self.seconds >= 0
+                && self.x >= 0px && self.x < parent.width;
+        }
+
+        // Declared before the clips, so each clip takes its own press and what
+        // is left is the empty lane — which starts a band.
+        band := TouchArea {
+            x: 0;
+            y: root.ruler-height;
+            width: parent.width;
+            height: root.lanes-h;
+
+            property <bool> drawing;
+            property <bool> additive;
+            property <length> from-x;
+            property <length> from-y;
+            property <length> to-x;
+            property <length> to-y;
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.floor-pressed();
+                    self.additive = event.modifiers.shift;
+                    self.from-x = self.mouse-x;
+                    self.from-y = self.mouse-y;
+                    self.to-x = self.mouse-x;
+                    self.to-y = self.mouse-y;
+                    if (root.finger) {
+                        root.finger-down(self.mouse-x, self.mouse-y);
+                    } else {
+                        self.drawing = true;
+                    }
+                } else if (event.kind == PointerEventKind.up
+                    || event.kind == PointerEventKind.cancel) {
+                    if (self.drawing) {
+                        self.drawing = false;
+                        // A press that never travelled is a click, not a
+                        // band: the playhead goes where it landed, as on
+                        // the ruler. The empty band still clears the
+                        // selection below.
+                        if (event.kind == PointerEventKind.up
+                            && Math.abs(self.to-x - self.from-x) <= 4px
+                            && Math.abs(self.to-y - self.from-y) <= 4px) {
+                            root.scrubbed(Math.max(0, root.seconds-at(self.from-x)));
+                        }
+                        root.band-selected(
+                            root.seconds-at(Math.min(self.from-x, self.to-x)),
+                            root.seconds-at(Math.max(self.from-x, self.to-x)),
+                            root.stack-y(Math.min(self.from-y, self.to-y)),
+                            root.stack-y(Math.max(self.from-y, self.to-y)),
+                            self.additive);
+                    } else if (root.finger && root.finger-axis == 0
+                        && event.kind == PointerEventKind.up) {
+                        // A tap on an empty lane: the playhead goes there,
+                        // and the empty band a press that never moved would
+                        // have closed clears the selection.
+                        root.scrubbed(Math.max(0, root.seconds-at(self.from-x)));
+                        root.band-selected(
+                            root.seconds-at(self.from-x), root.seconds-at(self.from-x),
+                            root.stack-y(self.from-y), root.stack-y(self.from-y),
+                            false);
+                    }
+                }
+            }
+
+            moved => {
+                self.to-x = self.mouse-x;
+                self.to-y = self.mouse-y;
+                if (root.finger && self.pressed) {
+                    root.finger-moved(self.mouse-x, self.mouse-y, true);
+                }
+            }
+
+            changed mouse-x => {
+                if (self.has-hover && !self.pressed) { root.hover-at(self.mouse-x); }
+            }
+            changed has-hover => {
+                if (!self.has-hover) { root.hover-off(); }
+            }
+        }
+
+        // ── the clips ────────────────────────────────────────────────────
+        for entry in root.clips: Clip {
+            x: root.at(entry.start);
+            // Both from the lane it sits on, so a clip follows its row's
+            // height without a second copy of it to keep in step.
+            y: root.row-y(entry.row) + 4px;
+            width: Math.max(2px, entry.duration * root.px-per-second);
+            height: Math.max(2px, root.tracks[entry.row].height - 10px);
+            visible: self.x + self.width > 0 && self.x < root.width
+                && self.y + self.height > root.ruler-height && self.y < root.height;
+
+            item: entry;
+            px-per-second: root.px-per-second;
+            viewport-width: parent.width;
+            tool: root.tool;
+            edge-grab: root.edge-grab;
+            // Read back through the lane the clip sits on rather than carried
+            // on the clip: locking is a property of the lane, and copying it
+            // onto every clip would be one more thing to keep in step.
+            locked: root.tracks[entry.row].locked;
+
+            pressed(additive, edge) => {
+                root.press-scroll = root.scroll-left;
+                root.clip-dragging = true;
+                root.clip-pressed(entry.id, additive, edge);
+            }
+            split-at(x) => {
+                root.clip-split(entry.id, entry.start + x / root.px-per-second);
+            }
+            volume-dragged(gain) => { root.clip-volume(entry.id, gain); }
+            // The clip reports its delta from the press; a view that has
+            // scrolled since then is added, so the clip stays under the
+            // pointer while the edge scrolls it along.
+            dragged(seconds, pixels) => {
+                root.drag-seconds = seconds;
+                root.drag-pixels = pixels;
+                root.clip-dragged(seconds + (root.scroll-left - root.press-scroll), pixels);
+            }
+            pointer-at(x) => { root.pointer-x = self.x + x; }
+            released => {
+                root.clip-dragging = false;
+                root.clip-released();
+            }
+            // Click anywhere on the timeline and the playhead goes there,
+            // a clip included: it is selected and the playhead lands on it.
+            clicked(x) => { root.scrubbed(Math.max(0, root.seconds-at(self.x + x))); }
+            hovered(x) => { root.hover-at(self.x + x); }
+            hover-ended => { root.hover-off(); }
+            context-requested => {
+                // Captured before the round trip: by the time the items come
+                // back the pointer may have moved, and a menu that opens away
+                // from the click reads as a misfire. `asked` goes up first for
+                // the same reason — the call below publishes before it
+                // returns, so the token can arrive inside it.
+                menu.request-x = wheel.mouse-x;
+                menu.request-y = wheel.mouse-y;
+                root.asked = true;
+                root.clip-context(entry.id);
+            }
+        }
+
+        // ── the band being drawn ─────────────────────────────────────────
+        if band.drawing: Rectangle {
+            x: Math.min(band.from-x, band.to-x);
+            y: root.ruler-height + Math.min(band.from-y, band.to-y);
+            width: Math.max(band.from-x, band.to-x) - Math.min(band.from-x, band.to-x);
+            height: Math.max(band.from-y, band.to-y) - Math.min(band.from-y, band.to-y);
+            background: Theme.accent-soft;
+            border-width: 1px;
+            border-color: Theme.accent;
+        }
+
+        // ── the drop target ──────────────────────────────────────────────
+        //
+        // Declared after the clips, so a drag reaches it before them — but a
+        // TouchArea ignores drag events and a DropArea ignores everything
+        // else, so the two never take each other's. It covers the lanes and
+        // not the ruler: a drop is a placement on a track, and the ruler is
+        // where time is scrubbed.
+        landing := DropArea {
+            x: 0;
+            y: root.ruler-height;
+            width: parent.width;
+            height: root.lanes-h;
+
+            can-drop(event) => {
+                // Rust is asked rather than told: it is the side that knows
+                // how long the media runs, what the payload names, and where
+                // the snap will pull the start to. It answers by publishing
+                // `drop`, which is both the ghost and the verdict — so this
+                // reads its own answer back, one statement later.
+                root.drag-hovered(Payload.text(event.data),
+                    root.seconds-at(event.position.x),
+                    root.stack-y(event.position.y));
+                return root.drop.active ? DragAction.copy : DragAction.none;
+            }
+
+            dropped(event) => {
+                root.dropped(Payload.text(event.data),
+                    root.seconds-at(event.position.x),
+                    root.stack-y(event.position.y));
+                return DragAction.copy;
+            }
+        }
+
+        // ── the ghost ────────────────────────────────────────────────────
+        //
+        // The clip the drop will make, drawn where it will make it. Gated on
+        // `has-drag` as well as on Rust's verdict: a drag that leaves the
+        // lanes gets an Exit and no further hover, so without it the ghost
+        // would sit there after the pointer had gone.
+        if root.drop.active && landing.has-drag: Rectangle {
+            x: root.at(root.drop.start);
+            y: root.row-y(root.drop.row) + 4px;
+            width: Math.max(2px, root.drop.duration * root.px-per-second);
+            height: Math.max(2px, root.tracks[root.drop.row].height - 10px);
+            border-radius: Theme.r-sm;
+            // Alpha in the paints, not `opacity`: it makes Slint flatten
+            // this element into an offscreen layer (as a rounded `clip` did
+            // under FemtoVG, before the app was Skia only), and a
+            // ghost is as wide as the clip it will make - a ten-minute drop
+            // at the default zoom asks for a 12000px texture and the GPU
+            // refuses past 8192. The children stay inside it on their own,
+            // so nothing needs clipping.
+            background: Paint.well(root.drop.kind).with-alpha(0.85);
+            // The accent, not the kind's mark: this is a target, and every
+            // other target in the window — the band, a selected clip — is
+            // outlined in it.
+            border-width: 2px;
+            border-color: Theme.accent.with-alpha(0.85);
+
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: 17px;
+                // The corners the ghost's own rounding used to cut.
+                border-top-left-radius: Theme.r-sm;
+                border-top-right-radius: Theme.r-sm;
+                background: Paint.mark(root.drop.kind).with-alpha(0.85);
+
+                if parent.width > 30px: Text {
+                    x: 7px;
+                    y: 0;
+                    width: parent.width - 14px;
+                    height: parent.height;
+                    text: root.drop.label;
+                    color: Theme.clip-ink.with-alpha(0.85);
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+
+        // ── the ruler ────────────────────────────────────────────────────
+        //
+        // Last, so it paints over any lane scrolled up behind it, and so its
+        // scrub area sits above the band's.
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: root.ruler-height;
+            background: Theme.ruler;
+            clip: true;
+
+            // Fixed count, clipped to the pane. A tick count derived from the
+            // width would tear down and rebuild the whole row on every frame
+            // of a splitter drag; 64 covers any window at the 90px minimum
+            // spacing the ladder guarantees.
+            for step in 64: Rectangle {
+                property <float> seconds: root.first-tick + step * root.tick;
+
+                x: root.at(self.seconds);
+                y: 0;
+                // Wide enough for the label it carries; the mark itself is the
+                // 1px child pinned at this cell's leading edge.
+                width: 64px;
+                height: root.ruler-height;
+                background: Colors.transparent;
+                // And none before the cut starts; see the grid.
+                visible: root.tick > 0 && self.seconds >= 0 && self.x < parent.width;
+
+                Rectangle {
+                    x: 0;
+                    y: parent.height - 7px;
+                    width: 1px;
+                    height: 7px;
+                    background: Theme.line-strong;
+                }
+
+                Text {
+                    x: 5px;
+                    y: 0;
+                    width: parent.width - 7px;
+                    height: parent.height - 7px;
+                    text: Fmt.frames-timecode(parent.seconds, root.frame-rate);
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                x: 0;
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: Theme.line;
+            }
+
+            // The ruler is the scrub strip: pressed and dragged, the playhead
+            // follows. In the lanes a click sends the playhead too, and a
+            // drag draws a band instead — the two gestures share one surface
+            // by whether the pointer travelled.
+            scrub := TouchArea {
+                mouse-cursor: pointer;
+
+                changed mouse-x => {
+                    if (self.has-hover && !self.pressed) { root.hover-at(self.mouse-x); }
+                }
+                changed has-hover => {
+                    if (!self.has-hover) { root.hover-off(); }
+                }
+                pointer-event(event) => {
+                    if (root.finger) {
+                        // The ruler slides with the lanes under a finger;
+                        // a tap on it goes to the instant tapped.
+                        if (event.kind == PointerEventKind.down) {
+                            root.finger-down(self.mouse-x, self.mouse-y);
+                        } else if (event.kind == PointerEventKind.up
+                            && root.finger-axis == 0) {
+                            root.scrubbed(Math.max(0, root.seconds-at(self.mouse-x)));
+                        }
+                        return;
+                    }
+                    if (event.kind == PointerEventKind.down) {
+                        root.scrubbing = true;
+                        root.pointer-x = self.mouse-x;
+                        root.scrubbed(Math.max(0, root.seconds-at(self.mouse-x)));
+                    } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                        root.scrubbing = false;
+                    }
+                }
+                moved => {
+                    if (root.finger) {
+                        if (self.pressed) {
+                            root.finger-moved(self.mouse-x, self.mouse-y, false);
+                        }
+                        return;
+                    }
+                    if (self.pressed) {
+                        root.pointer-x = self.mouse-x;
+                        root.scrubbed(Math.max(0, root.seconds-at(self.mouse-x)));
+                    }
+                }
+            }
+
+            // The selected clip's keys, as diamonds on the ruler's floor:
+            // clicked to go to one, dragged to move every key at that
+            // instant. Only while one clip is selected (#188).
+            for mark in root.key-marks: TouchArea {
+                property <float> drag-to: mark;
+                property <bool> dragging;
+
+                x: root.at(self.dragging ? self.drag-to : mark) - 7px;
+                y: root.ruler-height - 14px;
+                width: 14px;
+                height: 14px;
+                mouse-cursor: pointer;
+
+                Path {
+                    x: 2px;
+                    y: 2px;
+                    width: 10px;
+                    height: 10px;
+                    viewbox-width: 10;
+                    viewbox-height: 10;
+                    commands: "M 5 0.75 L 9.25 5 L 5 9.25 L 0.75 5 Z";
+                    fill: Theme.accent;
+                    stroke: Theme.ruler;
+                    stroke-width: 1px;
+                }
+
+                moved => {
+                    if (self.pressed) {
+                        self.dragging = true;
+                        self.drag-to = Math.max(0,
+                            root.seconds-at(root.at(mark) + self.mouse-x - self.pressed-x));
+                    }
+                }
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                        if (self.dragging && Math.abs(self.drag-to - mark) > 0.0005) {
+                            root.key-mark-moved(mark, self.drag-to);
+                        } else if (event.kind == PointerEventKind.up) {
+                            root.scrubbed(mark);
+                        }
+                        self.dragging = false;
+                    }
+                }
+            }
+        }
+
+        // Last of all, so its surface is over everything. A PopupWindow is its
+        // own layer and escapes this pane's clip, but the element that places
+        // it still has to be able to measure the space it is placing into.
+        menu := ContextMenu {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            items: root.menu-items;
+            menu-height: root.menu-height;
+            token: root.own-token;
+            selected(id) => { root.menu-selected(id); }
+        }
+
+        // ── the preview axis ─────────────────────────────────────────────
+        //
+        // A hairline where the pointer is, over the lanes and the ruler, so
+        // the frame the monitor is showing has a place on the timeline. Dim,
+        // and under the playhead: it is where you are looking, not where the
+        // cut is.
+        hover-off-timer := Timer {
+            interval: 80ms;
+            running: false;
+            triggered => {
+                self.running = false;
+                root.hover-on = false;
+                root.hover-ended();
+            }
+        }
+        if root.preview-axis && root.hover-on: Rectangle {
+            x: root.hover-x;
+            y: 0;
+            width: 1px;
+            height: root.height;
+            background: Theme.fg-dim;
+            visible: self.x >= 0px && self.x <= root.width;
+        }
+
+        // ── the razor's edge ─────────────────────────────────────────────
+        //
+        // Where the split tool will cut: the frame under the pointer, as a
+        // line across the lanes in the accent, so it reads as a blade and
+        // not as the dim hover line. Under the playhead, over the clips.
+        // https://github.com/jub0t/Concat/issues/241
+        if root.tool == TimelineTool.split && root.hover-on: Rectangle {
+            x: root.at(Math.round(root.seconds-at(root.hover-x) * root.frame-rate)
+                / Math.max(1, root.frame-rate));
+            y: 0;
+            width: 1px;
+            height: root.height;
+            background: Theme.accent;
+            visible: self.x >= 0px && self.x <= root.width;
+        }
+
+        // ── the playhead ─────────────────────────────────────────────────
+        //
+        // Over everything, ruler included: it is the one thing that must never
+        // be behind a clip.
+        Rectangle {
+            x: root.at(root.playhead);
+            y: 0;
+            width: 1px;
+            height: root.height;
+            background: Theme.playhead;
+            visible: self.x >= -1px && self.x <= root.width;
+
+            Rectangle {
+                x: -5px;
+                y: 0;
+                width: 11px;
+                height: 9px;
+
+                Path {
+                    width: parent.width;
+                    height: parent.height;
+                    viewbox-width: 1;
+                    viewbox-height: 1;
+                    fit: fill;
+                    fill: Theme.playhead;
+                    commands: "M 0 0 L 1 0 L 0.5 1 Z";
+                }
+            }
+        }
+        // Hand tool: left-drag pans time. Sits at the top of the wheel's
+        // children so it takes the drag before any clip or the band does.
+        if root.pan-mode: pan := TouchArea {
+            mouse-cursor: pointer;
+            property <length> last-x: 0px;
+
+            changed mouse-x => {
+                if (self.has-hover && !self.pressed) { root.hover-at(self.mouse-x); }
+            }
+            changed has-hover => {
+                if (!self.has-hover) { root.hover-off(); }
+            }
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down
+                    && event.button == PointerEventButton.left) {
+                    last-x = self.mouse-x;
+                }
+                if (event.kind == PointerEventKind.move && self.pressed) {
+                    let delta = self.mouse-x - last-x;
+                    root.scrolled(Math.max(0.0, root.scroll-left - delta / root.px-per-second));
+                    last-x = self.mouse-x;
+                }
+                if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    last-x = 0px;
+                }
+            }
+        }
+
+    }
+}

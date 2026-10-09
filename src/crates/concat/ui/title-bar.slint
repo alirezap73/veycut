@@ -1,0 +1,365 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "i18n.slint";
+import { Theme } from "theme/theme.slint";
+import { Glyph, Icon } from "icons.slint";
+import { AddPaneButton, PaneKind } from "workspace/pane-switcher.slint";
+
+// The custom title bar.
+//
+// On macOS the native traffic lights are overlaid: platform.rs hides the real
+// title bar (titlebar_transparent + title_hidden + fullsize_content_view) and
+// this strip leaves room for the lights on the left. Everywhere else the
+// platform's decorations are gone altogether and the strip draws its own
+// minimise, maximise and close at the right, in that order, the way every
+// window on those platforms has them. Everything that is not a control is a
+// drag region — the TouchArea at the bottom of the tree starts a native
+// window drag on press, and controls declared after it take their own
+// presses.
+
+// One of the strip's window buttons. Caption-button proportions rather than
+// the 24px icon buttons beside Settings: wider than tall, flush with the top
+// and right edges of the window, no rounding - a target you can throw the
+// pointer at the corner to hit. Close hovers red, as it does everywhere.
+component WindowButton inherits Rectangle {
+    in property <Glyph> glyph;
+    in property <bool> danger;
+
+    callback clicked();
+
+    width: 46px;
+    background: touch.has-hover
+        ? (root.danger ? Theme.danger : Theme.field)
+        : Colors.transparent;
+
+    animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: root.glyph;
+        size: 12px;
+        weight: 1.6;
+        tint: touch.has-hover
+            ? (root.danger ? Theme.on-scrim : Theme.fg)
+            : Theme.fg-muted;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component MenuLabel inherits Rectangle {
+    in property <string> label;
+    /// this label's menu is the one currently open
+    in property <bool> current;
+
+    callback clicked();
+
+    width: text.preferred-width + 16px;
+    border-radius: Theme.r-sm;
+    background: (root.current || touch.has-hover) ? Theme.field : Colors.transparent;
+
+    animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    text := Text {
+        x: 8px;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: (root.current || touch.has-hover) ? Theme.fg : Theme.fg-muted;
+        font-size: Theme.fs;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component HeaderIconButton inherits Rectangle {
+    in property <Glyph> glyph;
+
+    callback clicked();
+
+    width: 24px;
+    height: 24px;
+    border-radius: Theme.r-sm;
+    background: touch.has-hover ? Theme.field : Colors.transparent;
+
+    animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: root.glyph;
+        size: 14px;
+        tint: touch.has-hover ? Theme.fg : Theme.fg-muted;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component TitleBar inherits Rectangle {
+    in property <string> project-name: I18n.t("common.untitledProject");
+    /// "saved", "saving…" — the little truth beside the name. Empty hides it.
+    in property <string> status: I18n.t("common.saved");
+    /// Leaves room for the traffic lights and drops nothing else; on other
+    /// platforms the strip starts at the left edge.
+    in property <bool> macos: true;
+    /// The launch screen's face: the theme toggle and the window buttons,
+    /// and nothing else. The menus act on a project, the panel picker and
+    /// Export act on an edit, and on this screen there is neither — a strip
+    /// of controls that all refuse is worse than a strip without them.
+    in property <bool> minimal;
+    /// The launch screen is under the strip, which has a ground of its own —
+    /// a deeper one than the editor's. The strip takes that ground rather
+    /// than its usual panel, so the launcher reads as one room and not as a
+    /// dark window with a light lid. See the `launch-` ladder in theme/.
+    in property <bool> deep;
+
+    /// Draw the window buttons at the right: true wherever the platform's
+    /// decorations were taken off, which is everywhere but macOS.
+    in property <bool> own-buttons;
+    /// The window is maximised, so the middle button restores rather than
+    /// maximises and shows the two-squares glyph.
+    in property <bool> maximized;
+
+    callback begin-drag();
+    callback toggle-maximize();
+    callback minimize();
+    callback close();
+    /// A menu was asked for: which one, and where its label sits in the strip,
+    /// so the sheet can hang off it.
+    callback menu-opened(index: int, at-x: length, keyboard: bool);
+    /// Which menu is open, or -1.
+    in property <int> menu: -1;
+    /// A menu asked for from the keyboard (F10, Alt+F/E/V, the arrows in
+    /// an open one): `keyboard-menu` is which, and a change of
+    /// `keyboard-token` is the asking. The label opens itself, since only
+    /// it knows where it is.
+    in property <int> keyboard-menu: -1;
+    in property <int> keyboard-token;
+    callback open-settings();
+    /// A view was picked from the add-panel list.
+    callback add-pane(kind: PaneKind);
+    callback export-clicked();
+
+    height: 32px;
+    // The window's ground, not a panel's: the strip is the frame the panes
+    // float in, and it reads as one with the gutters between them.
+    background: root.deep ? Theme.launch-page : Theme.page;
+
+    property <bool> drag-armed: false;
+    property <length> press-x: 0px;
+    property <length> press-y: 0px;
+
+    // Whatever is not a control drags the window. Declared first so every
+    // control sits above it and takes its own presses; Texts and plain
+    // Rectangles are not hit targets, so presses on them fall through here.
+    drag := TouchArea {
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down
+                && event.button == PointerEventButton.left) {
+                root.drag-armed = true;
+                root.press-x = self.mouse-x;
+                root.press-y = self.mouse-y;
+            } else if (event.kind == PointerEventKind.up
+                || event.kind == PointerEventKind.cancel) {
+                root.drag-armed = false;
+            }
+        }
+        moved => {
+            if (root.drag-armed && self.pressed) {
+                if (Math.abs(self.mouse-x - root.press-x) > 4px
+                    || Math.abs(self.mouse-y - root.press-y) > 4px) {
+                    root.drag-armed = false;
+                    root.begin-drag();
+                }
+            }
+        }
+        double-clicked => {
+            root.drag-armed = false;
+            root.toggle-maximize();
+        }
+    }
+
+    HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        padding-left: root.macos ? 80px : 8px;
+        // No right padding when the strip ends in its own buttons: the close
+        // button belongs in the corner, not eight pixels shy of it.
+        padding-right: root.own-buttons ? 0px : 8px;
+        spacing: 2px;
+
+        // No mark and no wordmark: the strip opens on the menus. A window
+        // does not need to say whose it is on every frame, and the launch
+        // screen's heading already carries the name where it means something.
+
+        // Each label reports its own position rather than a fixed one: they
+        // are sized from their text, so where "View" starts depends on how
+        // long "File" and "Edit" are.
+        if !root.minimal: file := MenuLabel {
+            label: I18n.t("titleBar.file");
+            current: root.menu == 0;
+            clicked => {
+                root.menu-opened(0, file.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 0) {
+                    root.menu-opened(0, file.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+        if !root.minimal: edit := MenuLabel {
+            label: I18n.t("titleBar.edit");
+            current: root.menu == 1;
+            clicked => {
+                root.menu-opened(1, edit.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 1) {
+                    root.menu-opened(1, edit.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+        if !root.minimal: view := MenuLabel {
+            label: I18n.t("titleBar.view");
+            current: root.menu == 2;
+            clicked => {
+                root.menu-opened(2, view.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 2) {
+                    root.menu-opened(2, view.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // Beside Settings, because it is the same sort of thing: neither one
+        // is about the project, both are about the window you are looking at
+        // it through. A seat's own corner button changes or closes that seat;
+        // this is the only place a seat can be brought into existence, which
+        // is why it lives on the window and not in a pane.
+        if !root.minimal: VerticalLayout {
+            alignment: center;
+            AddPaneButton {
+                added(kind) => { root.add-pane(kind); }
+            }
+        }
+
+        // The one control that is on both screens, and the theme's sun and
+        // moon gave it the job when they moved into Settings > Appearance.
+        // Nothing behind this gear needs a project — a theme, a transcriber
+        // model, a voice, a version number are all facts about the
+        // application — so the launch screen has no reason to be shut out of
+        // it, and every reason not to be: it is now the only way through to
+        // the theme.
+        VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.settings;
+                clicked => { root.open-settings(); }
+            }
+        }
+
+        if !root.minimal: VerticalLayout {
+            alignment: center;
+            padding-left: 4px;
+
+            export-button := Rectangle {
+                width: label.width + icon.width + 26px;
+                height: 24px;
+                border-radius: Theme.r-sm;
+                background: export-touch.has-hover ? Theme.accent-hover : Theme.accent;
+
+                animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+                icon := Icon {
+                    x: 9px;
+                    y: (parent.height - self.height) / 2;
+                    glyph: Glyph.export;
+                    size: 12px;
+                    tint: Theme.on-accent;
+                }
+
+                label := Text {
+                    x: icon.x + icon.width + 5px;
+                    y: (parent.height - self.height) / 2;
+                    text: I18n.t("common.export");
+                    color: Theme.on-accent;
+                    font-size: Theme.fs;
+                    font-weight: Theme.weight-title;
+                }
+
+                export-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.export-clicked(); }
+                }
+            }
+        }
+
+        // The window's own buttons, last so they sit flush against the right
+        // edge. Full height of the strip, no vertical centring: a caption
+        // button's target is the whole strip height, corner included.
+        if root.own-buttons: Rectangle { width: 6px; }
+        if root.own-buttons: HorizontalLayout {
+            spacing: 0px;
+            WindowButton {
+                glyph: Glyph.minus;
+                clicked => { root.minimize(); }
+            }
+            WindowButton {
+                glyph: root.maximized ? Glyph.copy : Glyph.maximize;
+                clicked => { root.toggle-maximize(); }
+            }
+            WindowButton {
+                glyph: Glyph.close;
+                danger: true;
+                clicked => { root.close(); }
+            }
+        }
+    }
+
+    // Centre: the project name, placed against the whole strip rather than
+    // laid out, so it stays centred in the window and not in whatever space
+    // the menus leave over.
+    centre := HorizontalLayout {
+        visible: !root.minimal;
+        x: (parent.width - self.preferred-width) / 2;
+        y: 0;
+        width: self.preferred-width;
+        height: parent.height;
+        spacing: 6px;
+
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.project-name;
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.status;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+            }
+        }
+    }
+}

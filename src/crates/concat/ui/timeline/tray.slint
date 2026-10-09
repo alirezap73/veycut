@@ -1,0 +1,492 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { IconButton } from "../primitives/panel.slint";
+import { LevelMeter } from "../primitives/level-meter.slint";
+import { TimelineTool } from "model.slint";
+
+// The timeline's tool tray.
+//
+// The tool set: add-track first, then undo and redo, then the three edit
+// actions, then snapping, then the tools a clip's sound and words need
+// - captions, a spoken title, detaching the sound - and the view controls
+// pushed to the far end. The metrics: 40px
+// tall, 4px between buttons, an 18px hairline with 4px of air on each side
+// between groups. Tight, without crowding a 26px button.
+//
+// The sound and word tools sit on the bar rather than behind a menu,
+// because a menu is where a tool goes to not be found. They are marks like
+// every other button here, and what names them is the tip: a sentence
+// saying what the press will do, which reads better on hover than a word
+// beside the mark reads at rest. Captions and Speak open whatever is
+// selected - each has a source of its own to fall back on - and the tip
+// says which. Detach is greyed rather than absent when the selection
+// cannot use it, because a greyed button with a tip answers "why not" and
+// an absent one only asks it.
+//
+// A disabled Merge carries the reason it is blocked, because a button that
+// greys out without saying why leaves you guessing at the rule:
+// `merge-blocked-because` is accepted and becomes the button's label, which
+// is its accessible name and where a tooltip reads from.
+//
+// Undo and redo are on the bar for whoever edits with a mouse or a finger
+// and never learns ⌘Z: the shortcut is in the tip, and the button greys
+// out when the history has nothing that way, the same truth the Edit menu
+// tells. https://github.com/jub0t/Concat/issues/154
+
+component Divider inherits Rectangle {
+    width: 9px;
+
+    Rectangle {
+        x: 4px;
+        y: (parent.height - self.height) / 2;
+        width: 1px;
+        height: 18px;
+        background: Theme.line;
+    }
+}
+
+// The tray's button: an IconButton whose mark is bright at rest. The muted
+// default is for a row that must not compete with what it sits beside; this
+// row sits on its own strip under the lanes, where a muted mark reads as
+// switched off, and a switched-off one has nothing dimmer left to be.
+component TrayButton inherits IconButton {
+    idle: Theme.fg;
+}
+
+// One row of the add menu and its submenu: a word, a mark at the end.
+component MenuItem inherits Rectangle {
+    in property <string> text;
+    in property <Glyph> trailing: Glyph.none;
+    out property <bool> hovered: touch.has-hover;
+
+    callback clicked();
+
+    height: 26px;
+    border-radius: Theme.r-sm;
+    background: touch.has-hover ? Theme.field-hover : Colors.transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 6px;
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            vertical-alignment: center;
+        }
+
+        if root.trailing != Glyph.none: VerticalLayout {
+            alignment: center;
+            Icon { glyph: root.trailing; size: 12px; tint: Theme.fg-muted; }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// The plus at the head of the tray: a menu whose first row adds a lane,
+// and whose submenu, opened by hovering that row, says where - on top of
+// the stack or under it. A click on the row itself adds on top, as the
+// plus always did.
+component AddMenu inherits Rectangle {
+    callback add-track(bottom: bool);
+
+    width: 26px;
+    height: 26px;
+
+    property <length> row-h: 26px;
+
+    TrayButton {
+        glyph: Glyph.plus;
+        label: I18n.t("tray.addTrack");
+        icon-size: 14px;
+        clicked => { list.show(); }
+    }
+
+    list := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: 168px;
+        height: root.row-h + 8px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Theme.raised;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            border-radius: Theme.r;
+
+            VerticalLayout {
+                padding: 4px;
+                alignment: start;
+
+                add := MenuItem {
+                    text: I18n.t("tray.addTrack");
+                    trailing: Glyph.chevron-right;
+                    clicked => {
+                        sub.close();
+                        list.close();
+                        root.add-track(false);
+                    }
+                    changed hovered => {
+                        if (self.hovered) {
+                            sub.show();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Beside the row it belongs to, overlapping the menu's edge by a
+        // hair so the pointer crosses no gap on its way in.
+        sub := PopupWindow {
+            x: parent.width - 4px;
+            y: 0;
+            width: 156px;
+            height: 2 * root.row-h + 8px;
+            close-policy: close-on-click-outside;
+
+            Rectangle {
+                background: Theme.raised;
+                border-width: 1px;
+                border-color: Theme.line-strong;
+                border-radius: Theme.r;
+
+                VerticalLayout {
+                    padding: 4px;
+                    alignment: start;
+
+                    MenuItem {
+                        text: I18n.t("tray.addTrackTop");
+                        clicked => {
+                            sub.close();
+                            list.close();
+                            root.add-track(false);
+                        }
+                    }
+                    MenuItem {
+                        text: I18n.t("tray.addTrackBottom");
+                        clicked => {
+                            sub.close();
+                            list.close();
+                            root.add-track(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component TimelineTray inherits Rectangle {
+    in property <TimelineTool> tool: TimelineTool.select;
+    in property <bool> snap: true;
+    in property <bool> magnetic: false;
+    in property <bool> pan-mode: false;
+    /// Trim follow: the playhead rides a clip edge while it is dragged.
+    in property <bool> trim-follow: false;
+    /// The preview axis: the monitor follows the pointer across the lanes.
+    in property <bool> preview-axis: false;
+    in property <int> selected-count;
+    /// A transition is selected on its own: the trash takes it off.
+    in property <bool> transition-selected;
+    /// Whether the history has a step that way. Rust's answer, read from
+    /// the editor after every change, so the buttons never guess.
+    in property <bool> can-undo;
+    in property <bool> can-redo;
+    /// Empty when the selection can be merged; otherwise why it cannot.
+    in property <string> merge-blocked-because;
+    /// What the selection offers the sound and word tools. Each is one
+    /// clip's worth of truth, decided by Rust; see the Editor global.
+    in property <bool> sound-selected;
+    in property <bool> title-selected;
+    /// What the selection offers the picture verbs behind one mark: a
+    /// picture to mirror or turn, and one the playhead is inside, to
+    /// freeze. Rust's answers, like the two above.
+    in property <bool> picture-selected;
+    in property <bool> freezable;
+    /// A voiceover take is running: the record button reads Stop, in red,
+    /// with the take's level beside it.
+    in property <bool> recording;
+    in property <float> record-level;
+
+    callback tool-changed(tool: TimelineTool);
+    callback snap-changed(snap: bool);
+    callback magnetic-changed(on: bool);
+    callback pan-changed(on: bool);
+    callback trim-follow-changed(on: bool);
+    callback preview-axis-changed(on: bool);
+    /// The chevron beside the preview axis: open its menu under the button
+    /// at this x, in the tray's coordinates. The pane hosts the menu; see
+    /// there for why.
+    callback axis-menu-requested(x: length);
+    /// The mark over freeze, mirror and rotate: open its menu under the
+    /// button at this x, hosted by the pane like the axis menu.
+    callback transform-menu-requested(x: length);
+    callback undo();
+    callback redo();
+    callback split();
+    callback merge();
+    callback delete-selected();
+    callback captions();
+    callback speak();
+    callback record-voiceover();
+    /// Add a lane: on top of the stack, or with `bottom` under it.
+    callback add-track(bottom: bool);
+    callback fit();
+    callback zoom(factor: float);
+
+    height: 40px;
+    background: Theme.panel;
+
+    Rectangle {
+        x: 0;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.line;
+    }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        spacing: 4px;
+
+        AddMenu {
+            add-track(bottom) => { root.add-track(bottom); }
+        }
+
+        Divider { }
+
+        TrayButton {
+            glyph: Glyph.undo;
+            label: I18n.t1("tray.undo", @keys(Control + Z).to-string());
+            icon-size: 16px;
+            enabled: root.can-undo;
+            clicked => { root.undo(); }
+        }
+        TrayButton {
+            glyph: Glyph.redo;
+            label: I18n.t1("tray.redo", @keys(Control + Shift + Z).to-string());
+            icon-size: 16px;
+            enabled: root.can-redo;
+            clicked => { root.redo(); }
+        }
+
+        Divider { }
+
+        // One way to cut: at the playhead. The razor that cut where you
+        // clicked is gone - two tools for one edit, and the playhead is
+        // already where you were looking.
+        TrayButton {
+            glyph: Glyph.split;
+            label: I18n.t1("tray.splitAtPlayhead", @keys(Control + B).to-string());
+            icon-size: 16px;
+            clicked => { root.split(); }
+        }
+        // And the razor, a tool rather than a verb: on, a click on a clip
+        // cuts it where the pointer is. B turns it on and off.
+        // https://github.com/jub0t/Concat/issues/241
+        TrayButton {
+            glyph: Glyph.razor;
+            label: I18n.t("tray.splitTool");
+            icon-size: 16px;
+            checked: root.tool == TimelineTool.split;
+            clicked => {
+                root.tool-changed(root.tool == TimelineTool.split
+                    ? TimelineTool.select : TimelineTool.split);
+            }
+        }
+        TrayButton {
+            glyph: Glyph.merge;
+            // The reason a blocked Merge is blocked rides on the button rather
+            // than being spelled out beside it. This tree has no tooltip yet,
+            // so `label` — the accessible name, and where a tooltip will read
+            // from — is the honest place to park it. A permanent caption in
+            // the tray would answer a question nobody had asked yet.
+            label: root.merge-blocked-because == "" ? "Merge selected"
+                : root.merge-blocked-because;
+            enabled: root.merge-blocked-because == "";
+            icon-size: 16px;
+            clicked => { root.merge(); }
+        }
+        TrayButton {
+            glyph: Glyph.trash;
+            label: I18n.t("tray.deleteSelected");
+            danger: true;
+            icon-size: 16px;
+            enabled: root.selected-count > 0 || root.transition-selected;
+            clicked => { root.delete-selected(); }
+        }
+
+        // The count of a multiple selection, in the accent so it reads as a
+        // fact about the selection rather than another control.
+        if root.selected-count > 1: Text {
+            width: 16px;
+            text: "\{root.selected-count}";
+            color: Theme.accent;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        // Freeze, mirror and rotate behind one mark: three verbs about the
+        // selected clip's picture, and a tray has no room for three more
+        // buttons. The mark and the chevron both open the menu, set flush
+        // like the preview axis pair so they read as one control.
+        verbs := HorizontalLayout {
+            spacing: 0;
+
+            TrayButton {
+                glyph: Glyph.mirror-rotate;
+                label: I18n.t("tray.freezeMirrorRotateSelected");
+                icon-size: 16px;
+                enabled: root.selected-count > 0;
+                clicked => { root.transform-menu-requested(verbs.x); }
+            }
+            TrayButton {
+                width: 16px;
+                glyph: Glyph.chevron-down;
+                label: I18n.t("tray.freezeMirrorRotateSelected");
+                icon-size: 11px;
+                enabled: root.selected-count > 0;
+                clicked => { root.transform-menu-requested(verbs.x); }
+            }
+        }
+
+        Divider { }
+
+        TrayButton {
+            glyph: Glyph.hand;
+            label: I18n.t("tray.panTool");
+            icon-size: 16px;
+            checked: root.pan-mode;
+            clicked => { root.pan-changed(!root.pan-mode); }
+        }
+        // Beside the hand: while an edge is dragged the playhead rides it,
+        // so the monitor shows the frame the cut lands on.
+        TrayButton {
+            glyph: Glyph.trim-follow;
+            label: I18n.t("tray.playerFollowsResizePlayhead");
+            icon-size: 16px;
+            checked: root.trim-follow;
+            clicked => { root.trim-follow-changed(!root.trim-follow); }
+        }
+
+        Divider { }
+
+        TrayButton {
+            glyph: Glyph.magnet;
+            label: I18n.t("common.snapToEdges");
+            icon-size: 16px;
+            checked: root.snap;
+            clicked => { root.snap-changed(!root.snap); }
+        }
+        // The magnetic timeline, beside the snap it is so often mistaken
+        // for: snap is where a drag lands, magnetic is that a delete or a
+        // trim leaves no hole. https://github.com/jub0t/Concat/issues/106
+        TrayButton {
+            glyph: Glyph.fold;
+            label: I18n.t("tray.magneticTimelineDeletingTrimming");
+            icon-size: 16px;
+            checked: root.magnetic;
+            clicked => { root.magnetic-changed(!root.magnetic); }
+        }
+
+        Divider { }
+
+        TrayButton {
+            glyph: Glyph.text-mark;
+            label: I18n.t("tray.generateCaptions");
+            icon-size: 16px;
+            clicked => { root.captions(); }
+        }
+        TrayButton {
+            glyph: Glyph.volume;
+            label: I18n.t("tray.textToSpeech");
+            icon-size: 16px;
+            clicked => { root.speak(); }
+        }
+        // A voiceover: the picture rolls from the playhead and the words go
+        // onto a lane under it. The same button stops the take.
+        TrayButton {
+            glyph: root.recording ? Glyph.stop : Glyph.mic;
+            label: root.recording ? I18n.t("tray.stopRecording") : I18n.t("tray.recordVoiceover");
+            icon-size: 16px;
+            idle: root.recording ? Theme.danger : Theme.fg;
+            clicked => { root.record-voiceover(); }
+        }
+        if root.recording: LevelMeter {
+            width: 56px;
+            horizontal-stretch: 0;
+            value: root.record-level;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // The preview axis: the monitor shows the frame under the pointer
+        // as it crosses the lanes, the playhead staying put. The chevron
+        // beside it chooses whether the sound under the pointer plays too.
+        // Where the timecode readout was: the monitor already reads the
+        // playhead, and a second copy here was one more place to glance
+        // between.
+        // One control in two halves, set flush: the mark toggles, the
+        // chevron beside it opens the menu, and no air between them so
+        // they read as a split button and not as two neighbours.
+        axis := HorizontalLayout {
+            spacing: 0;
+
+            TrayButton {
+                glyph: Glyph.axis;
+                label: root.preview-axis
+                    ? I18n.t("tray.turnOffPreviewAxis")
+                    : I18n.t("tray.turnOnPreviewAxis");
+                icon-size: 16px;
+                checked: root.preview-axis;
+                clicked => { root.preview-axis-changed(!root.preview-axis); }
+            }
+            TrayButton {
+                width: 16px;
+                glyph: Glyph.chevron-down;
+                label: I18n.t("tray.previewAxisOptions");
+                icon-size: 11px;
+                clicked => { root.axis-menu-requested(axis.x); }
+            }
+        }
+
+        Divider { }
+
+        TrayButton {
+            glyph: Glyph.fit;
+            label: I18n.t("tray.zoomToFit");
+            icon-size: 15px;
+            clicked => { root.fit(); }
+        }
+        TrayButton {
+            glyph: Glyph.minus;
+            label: I18n.t("common.zoomOut");
+            icon-size: 14px;
+            // Above 1 is out: the factor multiplies seconds-per-pixel, so a
+            // bigger number is more seconds in the same pixel.
+            clicked => { root.zoom(1.4); }
+        }
+        TrayButton {
+            glyph: Glyph.plus;
+            label: I18n.t("common.zoomIn");
+            icon-size: 14px;
+            clicked => { root.zoom(1 / 1.4); }
+        }
+    }
+}

@@ -1,0 +1,19 @@
+id = "studio.social-outline"
+name = "Social caption · Outline"
+language = "Latin"
+order = 21
+offsetY = 0.24
+sample = "Aa"
+
+[style]
+content = "Your caption here"
+fontFamily = "Hanken Grotesk"
+fontWeight = 800
+fontSize = 0.042
+color = "#ffffff"
+align = "center"
+shadow = true
+strokeWidth = 0.003
+strokeColor = "#000000"
+lineHeight = 1.2
+maxWidth = 0.82

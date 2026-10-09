@@ -1,0 +1,757 @@
+name: Build app
+
+# Builds VeyCut - the Slint window, `src/crates/concat` - for every
+# platform and architecture it ships on, each on a runner of that
+# architecture so nothing is cross-compiled, and uploads one artifact per
+# target:
+#
+#   macOS    arm64 (Apple silicon)   x86_64 (Intel)     -> VeyCut-*.dmg
+#   Linux    x86_64                  aarch64            -> VeyCut-*.deb, .rpm, .AppImage, .pkg.tar.zst
+#   Windows  x86_64                  aarch64            -> VeyCut-*-setup.exe, .msi
+#                                                          (+ .msix for the Store, apart)
+#
+# Installers and binaries only: the program is not shipped as an archive
+# of a folder to unpack, so what a person downloads is what they run.
+#
+# Reusable: release.yml calls it on every tag. It is the one place the
+# build environment is described:
+#
+# - The engine links FFmpeg and compiles whisper.cpp in, so a build needs the
+#   FFmpeg 7+ development libraries (headers and import libraries), cmake, a
+#   C++ toolchain and libclang for bindgen. sherpa-onnx is a prebuilt static
+#   library its crate downloads for the target.
+# - Homebrew's FFmpeg serves on macOS and travels with the app: the dylibs
+#   are copied into the bundle and the binary's load paths rewritten, so the
+#   .dmg runs on a Mac with nothing installed. Windows and Linux use a BtbN
+#   `shared` build - headers, import libraries and runtime libraries in one
+#   archive - and the runtime libraries ship beside the binary; on Linux the
+#   binary carries an rpath to find them there.
+# - The app is signed and notarised on macOS when the signing secrets are
+#   set on the repository, and ad-hoc signed when they are not, so a build
+#   from a fork still opens (with Gatekeeper's warning).
+#
+# The six targets are a matrix so one fails without taking the rest down;
+# `fail-fast` is off for the same reason.
+on:
+  workflow_call:
+    inputs:
+      target_matrix:
+        description: JSON platform matrix to build
+        type: string
+        default: '{"include":[{"platform":"macos","arch":"arm64","os":"macos-15","target":"aarch64-apple-darwin","sherpa":"osx-arm64"},{"platform":"macos","arch":"x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","sherpa":"osx-x64"},{"platform":"linux","arch":"x86_64","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","ffmpeg":"linux64","sherpa":"linux-x64","ort":"x64","nfpm":"amd64","appimage":"x86_64"},{"platform":"linux","arch":"aarch64","os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu","ffmpeg":"linuxarm64","sherpa":"linux-aarch64","ort":"aarch64","nfpm":"arm64","appimage":"aarch64"},{"platform":"windows","arch":"x86_64","os":"windows-2022","target":"x86_64-pc-windows-msvc","ffmpeg":"win64","sherpa":"win-x64","inno":"x64compatible","wix":"x64"},{"platform":"windows","arch":"aarch64","os":"windows-11-arm","target":"aarch64-pc-windows-msvc","ffmpeg":"winarm64","sherpa":"win-arm64","inno":"arm64","wix":"arm64"}]}'
+    secrets:
+      APPLE_CERTIFICATE_P12:
+        description: Base64 of a Developer ID Application .p12
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        description: "The identity to sign with, e.g. Developer ID Application: Name (TEAMID)"
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      APPLE_APP_PASSWORD:
+        description: An app-specific password for notarytool
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # BtbN's autobuilds: GPL (x264 in), shared, FFmpeg 8.1, one per arch.
+  FFMPEG_RELEASE: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+  FFMPEG_VERSION: 8.1
+  # ONNX Runtime, for the Linux bundles: the version the ort crate is built
+  # against (see ort-sys's dist table), as Microsoft's own shared build.
+  ORT_VERSION: 1.28.0
+  # And for Intel Macs, which neither ort nor Microsoft build for any more:
+  # the last release Microsoft made for them. The ort crate asks for the
+  # runtime's API 17 and up, which this carries.
+  ORT_INTEL_MAC_VERSION: 1.23.2
+  # The Linux packagers: nfpm for the .deb and .rpm, appimagetool for the
+  # AppImage; and WiX for the Windows .msi.
+  NFPM_VERSION: 2.47.0
+  WIX_VERSION: 6.0.2
+  # Oldest macOS the bundles run on. Apple silicon Macs all run newer than
+  # this; it is the Intel floor.
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+  # ggml (whisper.cpp's kernels) tunes itself to the machine it is built
+  # on unless told otherwise, and these bundles run on other machines: a
+  # runner with AVX-512 or SVE would leave a binary that faults on a CPU
+  # without them. Off, ggml does not probe the runner - but its own
+  # instruction-set switches still default to on, which on x86_64 means
+  # AVX2 with FMA, F16C and BMI2: the whole CPU backend is compiled with
+  # /arch:AVX2 (or -mavx2) and the editor dies at launch with an illegal
+  # instruction on a Sandy Bridge or Ivy Bridge machine, which has AVX
+  # and nothing newer (#193). The baseline is AVX: every x86_64 CPU since
+  # 2011 runs it, and whisper on the CPU is somewhat slower for the rest.
+  # NEON on ARM, where these switches are not read. whisper-rs-sys
+  # forwards every GGML_* variable to CMake as a define.
+  GGML_NATIVE: "OFF"
+  GGML_AVX2: "OFF"
+  GGML_FMA: "OFF"
+  GGML_F16C: "OFF"
+  GGML_BMI2: "OFF"
+
+jobs:
+  app:
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.target_matrix) }}
+    runs-on: ${{ matrix.os }}
+    # The slowest target (Intel macOS, fat LTO) finishes in under half an
+    # hour. A job still running past this is stuck, not slow.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Read the version
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' src/Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building VeyCut $version for ${{ matrix.target }}"
+
+      # ── Linux ──────────────────────────────────────────────────────────
+      # Slint's Skia renderer links fontconfig and freetype; cpal links
+      # ALSA; bindgen needs libclang; whisper.cpp is built by cmake; the
+      # file dialogs link GTK.
+      - name: System libraries (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libgl1-mesa-dev \
+            libgtk-3-dev libasound2-dev libclang-dev cmake libxkbcommon-x11-0
+
+      # Ubuntu's packaged FFmpeg is older than the 7 the engine needs.
+      - name: FFmpeg development libraries (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          url="$FFMPEG_RELEASE/ffmpeg-n$FFMPEG_VERSION-latest-${{ matrix.ffmpeg }}-gpl-shared-$FFMPEG_VERSION.tar.xz"
+          curl -fsSL --retry 5 --retry-all-errors -o ffmpeg.tar.xz "$url"
+          mkdir -p ffmpeg-dev
+          tar -xf ffmpeg.tar.xz -C ffmpeg-dev --strip-components=1
+          {
+            echo "FFMPEG_DIR=$PWD/ffmpeg-dev"
+            echo "LD_LIBRARY_PATH=$PWD/ffmpeg-dev/lib"
+            # The shipped binary finds the libraries beside itself, in lib/.
+            # --disable-new-dtags makes that an old-style DT_RPATH, which is
+            # consulted for *every* object in the process - DT_RUNPATH is
+            # not transitive, so libavformat's own load of libavcodec would
+            # ignore it and the staged binary would not stand alone.
+            echo "RUSTFLAGS=-C link-arg=-Wl,-rpath,\$ORIGIN/lib -C link-arg=-Wl,--disable-new-dtags"
+          } >> "$GITHUB_ENV"
+
+      # ONNX Runtime, the cutout models' runtime. Left to itself ort-sys
+      # downloads a static build and links it in; sherpa-onnx links a
+      # static build of its own, and the two carry the same protobuf, which
+      # the linker refuses as duplicate symbols the moment both are pulled
+      # - every Linux link since the cutout arrived. So on Linux ort links
+      # Microsoft's shared build instead, through ORT_LIB_LOCATION with
+      # dynamic linking preferred, and the library ships in lib/ beside
+      # FFmpeg's, where the rpath above finds it. The Nix package links
+      # the same way against nixpkgs' onnxruntime.
+      - name: ONNX Runtime (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          stem="onnxruntime-linux-${{ matrix.ort }}-$ORT_VERSION"
+          curl -fsSL --retry 5 --retry-all-errors -o onnxruntime.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/$stem.tgz"
+          tar -xzf onnxruntime.tgz
+          test -f "$stem/lib/libonnxruntime.so.$ORT_VERSION"
+          # The tarball carries the soname and the full version; the linker
+          # asks for the bare name.
+          ln -sf "libonnxruntime.so.$ORT_VERSION" "$stem/lib/libonnxruntime.so"
+          {
+            echo "ORT_LIB_LOCATION=$PWD/$stem/lib"
+            echo "ORT_PREFER_DYNAMIC_LINK=1"
+            echo "ORT_DIR=$PWD/$stem"
+          } >> "$GITHUB_ENV"
+
+      # ── macOS ──────────────────────────────────────────────────────────
+      # FFMPEG_DIR, same as the other platforms: ffmpeg-sys honours it ahead
+      # of every fallback, so the build never depends on the runner image
+      # happening to carry a pkg-config that knows about Homebrew - the
+      # arm64 image did not, and the build died in the pkg-config fallback.
+      - name: FFmpeg development libraries (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          set -euo pipefail
+          brew install ffmpeg cmake dylibbundler
+          echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> "$GITHUB_ENV"
+          # ggml's Metal code asks `@available(macOS 15, *)` before using
+          # residency sets. Below that deployment target the question is
+          # answered at run time by ___isPlatformVersionAtLeast, which lives
+          # in clang's compiler-rt - and rustc links with -nodefaultlibs, so
+          # nothing pulls that archive in. Name it on the link line. (A
+          # build on a developer's Mac never sees this: with no deployment
+          # target set, the check is folded away at compile time.)
+          echo "RUSTFLAGS=-C link-arg=$(xcrun clang --print-file-name=libclang_rt.osx.a)" >> "$GITHUB_ENV"
+
+      # ONNX Runtime on an Intel Mac. ort ships no static build for
+      # x86_64-apple-darwin, so the cutout's runtime is Microsoft's shared
+      # one, linked dynamically the way Linux does it, and bundled into
+      # Frameworks by dylibbundler along with FFmpeg's - the install name
+      # is @rpath, so the bundler is told where to look. Apple silicon
+      # keeps ort's static build.
+      - name: ONNX Runtime (Intel macOS)
+        if: matrix.platform == 'macos' && matrix.arch == 'x86_64'
+        run: |
+          set -euo pipefail
+          stem="onnxruntime-osx-x86_64-$ORT_INTEL_MAC_VERSION"
+          curl -fsSL --retry 5 --retry-all-errors -o onnxruntime.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_INTEL_MAC_VERSION/$stem.tgz"
+          tar -xzf onnxruntime.tgz
+          test -f "$stem/lib/libonnxruntime.$ORT_INTEL_MAC_VERSION.dylib"
+          ln -sf "libonnxruntime.$ORT_INTEL_MAC_VERSION.dylib" "$stem/lib/libonnxruntime.dylib"
+          {
+            echo "ORT_LIB_LOCATION=$PWD/$stem/lib"
+            echo "ORT_PREFER_DYNAMIC_LINK=1"
+            echo "ORT_DIR=$PWD/$stem"
+          } >> "$GITHUB_ENV"
+
+      # ── Windows ────────────────────────────────────────────────────────
+      # LLVM: libclang for bindgen on both architectures, and the C/C++
+      # compiler on arm64. Chocolatey's LLVM is x64; the arm64 runner takes
+      # LLVM's own Windows-on-Arm installer. The BtbN zip unpacks to one
+      # top-level folder.
+      #
+      # On arm64 the whole C side is compiled by clang-cl rather than cl:
+      # ggml refuses MSVC for ARM outright (its NEON kernels need clang),
+      # and ring picks clang there on its own. clang-cl speaks cl's command
+      # line and links against the same CRT, so the objects mix with the
+      # rest of the build; the cc crate hands it the Visual Studio
+      # environment, and the cmake crate passes it to CMake - but only
+      # under a Ninja generator, since the Visual Studio generator chooses
+      # the compiler itself. Ninja ships on the runner image. Under Ninja
+      # the cmake crate also writes CMAKE_CXX_FLAGS itself, in place of
+      # CMake's defaults, and those defaults are where /EHsc came from;
+      # clang-cl, unlike cl, rejects `try` outright without it (ggml's
+      # gguf reader uses exceptions). CXXFLAGS travels through the cc
+      # crate into those flags - spelt with a dash, because the build
+      # step runs under Git's bash, whose MSYS layer rewrites a value
+      # that starts with a slash into a Windows path.
+      - name: FFmpeg development libraries (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ("${{ matrix.arch }}" -eq "aarch64") {
+            $llvm = "21.1.0"
+            curl.exe -fsSL --retry 5 --retry-all-errors -o llvm.exe "https://github.com/llvm/llvm-project/releases/download/llvmorg-$llvm/LLVM-$llvm-woa64.exe"
+            Start-Process -Wait -FilePath .\llvm.exe -ArgumentList "/S"
+            "CC=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "CXX=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "CXXFLAGS=-EHsc" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "CMAKE_GENERATOR=Ninja" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            choco install llvm -y --no-progress
+          }
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $url = "$env:FFMPEG_RELEASE/ffmpeg-n$env:FFMPEG_VERSION-latest-${{ matrix.ffmpeg }}-gpl-shared-$env:FFMPEG_VERSION.zip"
+          curl.exe -fsSL --retry 5 --retry-all-errors -o ffmpeg-win.zip "$url"
+          Expand-Archive ffmpeg-win.zip -DestinationPath ffdl
+          $dir = (Get-ChildItem ffdl -Directory | Select-Object -First 1).FullName
+          "FFMPEG_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      # ── sherpa-onnx ────────────────────────────────────────────────────
+      # The prebuilt library the sys crate would otherwise fetch for
+      # itself, fetched here instead and handed over through
+      # SHERPA_ONNX_LIB_DIR. Left to the crate, the download lands inside
+      # target/, where rust-cache's cleanup does not keep it; a restored
+      # cache then replays the build script's answer without the files
+      # it points at, and the crate fails to link the moment anything
+      # makes it recompile. Outside target/, the files are there on every
+      # run. The version is the one the lockfile resolved, so a bump
+      # cannot desynchronise.
+      - name: sherpa-onnx static libraries (macOS and Linux)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(grep -A1 'name = "sherpa-onnx-sys"' src/Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          stem="sherpa-onnx-v$version-${{ matrix.sherpa }}-static-lib"
+          echo "Downloading $stem"
+          curl -fsSL --retry 5 --retry-all-errors -o sherpa.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$version/$stem.tar.bz2"
+          mkdir -p sherpa
+          tar -xjf sherpa.tar.bz2 -C sherpa
+          test -d "sherpa/$stem/lib"
+          echo "SHERPA_ONNX_LIB_DIR=$PWD/sherpa/$stem/lib" >> "$GITHUB_ENV"
+
+      # On Windows it links shared (see concat-speech's manifest for why
+      # static cannot work there), from a directory holding only the
+      # import libraries. The separation matters: when the sys crate's
+      # build script sees DLLs beside the .lib files it tries to copy them
+      # into the "profile directory", located by searching OUT_DIR's
+      # ancestors for one named after $PROFILE - which panics under the
+      # custom `app` profile, whose directory is not called "release". The
+      # DLLs are kept apart and the packaging step ships them beside the
+      # binary.
+      #
+      # The archive is .tar.bz2, and Windows' own tar has no bzip2 of its
+      # own: it pipes through an external decoder, and on the x64 image
+      # that pipe can hang without a word. Python's tarfile unpacks it
+      # in-process. Each command announces itself, so a stall would name
+      # the culprit.
+      - name: sherpa-onnx shared libraries (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = (Select-String -Path src\Cargo.lock -Pattern 'name = "sherpa-onnx-sys"' -Context 0,1).Context.PostContext[0] -replace '.*"(.*)".*', '$1'
+          $stem = "sherpa-onnx-v$version-${{ matrix.sherpa }}-shared-MT-Release-lib"
+          Write-Host "Downloading $stem"
+          curl.exe -fsSL --retry 5 --retry-all-errors -o sherpa.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$version/$stem.tar.bz2"
+          Write-Host "Unpacking"
+          python -c "import tarfile; t = tarfile.open('sherpa.tar.bz2'); t.extractall(**({'filter': 'data'} if hasattr(tarfile, 'data_filter') else {}))"
+          if (-not (Test-Path "$stem\lib")) { throw "$stem\lib is not there after unpacking" }
+          New-Item -ItemType Directory -Force sherpa-libs, sherpa-dlls | Out-Null
+          Copy-Item "$stem\lib\*.lib" sherpa-libs\
+          Copy-Item "$stem\lib\*.dll" sherpa-dlls\
+          "SHERPA_ONNX_LIB_DIR=$PWD\sherpa-libs" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SHERPA_DLL_DIR=$PWD\sherpa-dlls" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # ── Build ──────────────────────────────────────────────────────────
+      # The cache comes after the environment is set, not before: its key
+      # is made from the compiler and linker variables in force (RUSTFLAGS,
+      # CC, CXX, CMAKE_*, and GGML_* added to the default set), so a change
+      # to any of them is a new key rather than a stale target/ served
+      # under the old one.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+          key: ${{ matrix.target }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST GGML
+
+      # The shipping profile: fat LTO, panic=abort, stripped. See the
+      # workspace Cargo.toml for what each knob costs.
+      #
+      # Bash on every platform, teed to a log: raw job logs need a login to
+      # read, but the step summary is public - so on failure the tail of the
+      # build goes there, and a red run explains itself to anyone.
+      - name: Build
+        shell: bash
+        working-directory: src
+        run: |
+          set -o pipefail
+          cargo build --profile app -p concat --target ${{ matrix.target }} 2>&1 | tee build.log
+
+      - name: Build log to the summary (failure only)
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f src/build.log ]; then
+            {
+              echo "### Build failed: ${{ matrix.target }}"
+              echo '```'
+              tail -n 150 src/build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── Package: macOS ─────────────────────────────────────────────────
+      # An .app bundle: the binary, an icon set made from the repository's
+      # PNGs, an Info.plist, and every FFmpeg dylib the binary loads copied
+      # into Frameworks with its load path rewritten, so the bundle depends
+      # on nothing installed.
+      - name: Bundle (macOS)
+        if: matrix.platform == 'macos'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          app=VeyCut.app
+          rm -rf "$app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
+          cp "src/target/${{ matrix.target }}/app/concat" "$app/Contents/MacOS/concat"
+
+          # The icon set Apple wants: each size and its @2x twin.
+          iconset=VeyCut.iconset
+          rm -rf "$iconset"; mkdir "$iconset"
+          icons=assets/icons
+          cp "$icons/concat_logo_16.png"  "$iconset/icon_16x16.png"
+          cp "$icons/concat_logo_32.png"  "$iconset/icon_16x16@2x.png"
+          cp "$icons/concat_logo_32.png"  "$iconset/icon_32x32.png"
+          cp "$icons/concat_logo_64.png"  "$iconset/icon_32x32@2x.png"
+          cp "$icons/concat_logo_128.png" "$iconset/icon_128x128.png"
+          cp "$icons/concat_logo_256.png" "$iconset/icon_128x128@2x.png"
+          cp "$icons/concat_logo_256.png" "$iconset/icon_256x256.png"
+          cp "$icons/concat_logo_512.png" "$iconset/icon_256x256@2x.png"
+          cp "$icons/concat_logo_512.png" "$iconset/icon_512x512.png"
+          iconutil -c icns "$iconset" -o "$app/Contents/Resources/VeyCut.icns"
+
+          cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>VeyCut</string>
+            <key>CFBundleDisplayName</key><string>VeyCut</string>
+            <key>CFBundleIdentifier</key><string>io.github.alirezap73.veycut</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleExecutable</key><string>concat</string>
+            <key>CFBundleIconFile</key><string>VeyCut</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+            <key>LSApplicationCategoryType</key><string>public.app-category.video</string>
+            <key>NSHumanReadableCopyright</key><string>AGPL-3.0-or-later. See THIRD_PARTY_NOTICES.md.</string>
+            <key>NSMicrophoneUsageDescription</key><string>VeyCut records voiceovers from your microphone.</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # Every non-system dylib the binary (and those dylibs) load, copied
+          # in and re-pointed at @executable_path/../Frameworks.
+          dylibbundler -od -b \
+            -x "$app/Contents/MacOS/concat" \
+            -d "$app/Contents/Frameworks" \
+            -p @executable_path/../Frameworks \
+            ${ORT_DIR:+-s "$ORT_DIR/lib"}
+
+          # Nothing outside the bundle may remain: a load path into
+          # Homebrew would break on a Mac without it.
+          if otool -L "$app/Contents/MacOS/concat" | grep -E '/opt/homebrew|/usr/local' ; then
+            echo "the binary still loads libraries from outside the bundle" >&2
+            exit 1
+          fi
+
+      # Signed with the repository's Developer ID when it has one, and
+      # notarised so Gatekeeper opens it without a warning; ad-hoc signed
+      # otherwise, which is what a fork's build gets. Either way the
+      # bundle carries a signature, which macOS insists on for arm64.
+      - name: Sign and notarise (macOS)
+        if: matrix.platform == 'macos'
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          app=VeyCut.app
+          dmg="VeyCut-${VERSION}-macos-${{ matrix.arch }}.dmg"
+          if [ -n "${CERT_P12}" ] && [ -n "${IDENTITY}" ]; then
+            keychain=$RUNNER_TEMP/signing.keychain-db
+            echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security create-keychain -p "" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "" "$keychain"
+            security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
+            security list-keychains -d user -s "$keychain" login.keychain-db
+            # Frameworks first, then the executable, then the bundle: each
+            # signature covers what is beneath it.
+            find "$app/Contents/Frameworks" -name '*.dylib' -exec \
+              codesign --force --options runtime --timestamp -s "$IDENTITY" {} \;
+            # The hardened runtime keeps the microphone shut unless the app
+            # says it records: the voiceover.
+            entitlements="$RUNNER_TEMP/concat.entitlements"
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict><key>com.apple.security.device.audio-input</key><true/></dict></plist>' \
+              > "$entitlements"
+            codesign --force --options runtime --timestamp --entitlements "$entitlements" -s "$IDENTITY" "$app/Contents/MacOS/concat"
+            codesign --force --options runtime --timestamp --entitlements "$entitlements" -s "$IDENTITY" "$app"
+            codesign --verify --deep --strict "$app"
+          else
+            echo "No signing identity: ad-hoc signing."
+            codesign --force --deep -s - "$app"
+          fi
+
+          hdiutil create -volname VeyCut -srcfolder "$app" -ov -format UDZO "$dmg"
+
+          if [ -n "${APPLE_ID}" ] && [ -n "${TEAM_ID}" ] && [ -n "${APP_PASSWORD}" ] && [ -n "${IDENTITY}" ]; then
+            codesign --force --timestamp -s "$IDENTITY" "$dmg"
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$TEAM_ID" \
+              --password "$APP_PASSWORD" --wait
+            xcrun stapler staple "$dmg"
+          fi
+          mkdir -p stage && mv "$dmg" stage/
+
+      # ── Package: Linux ─────────────────────────────────────────────────
+      # The binary, the FFmpeg runtime libraries it loads from lib/ beside
+      # it (the rpath above), a desktop entry and an icon, in one folder.
+      - name: Stage (Linux)
+        if: matrix.platform == 'linux'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="VeyCut-${VERSION}-linux-${{ matrix.arch }}"
+          mkdir -p "stage/$name/lib"
+          cp "src/target/${{ matrix.target }}/app/concat" "stage/$name/concat"
+          cp -a ffmpeg-dev/lib/*.so* "stage/$name/lib/"
+          cp -a "$ORT_DIR"/lib/libonnxruntime.so* "stage/$name/lib/"
+          cp assets/icons/concat_logo_256.png "stage/$name/concat.png"
+          cat > "stage/$name/concat.desktop" <<DESKTOP
+          [Desktop Entry]
+          Type=Application
+          Name=VeyCut
+          Comment=Video editor
+          Exec=concat
+          Icon=concat
+          Categories=AudioVideo;Video;
+          Terminal=false
+          StartupWMClass=concat
+          DESKTOP
+          cp LICENSE THIRD_PARTY_NOTICES.md "stage/$name/"
+          # The binary must resolve every library from the folder alone.
+          # The whole ldd report goes to the public summary when it does
+          # not, so the failure names the library instead of just a step.
+          report=$(env -u LD_LIBRARY_PATH ldd "stage/$name/concat" || true)
+          if grep -i 'not found' <<<"$report"; then
+            {
+              echo "### Unresolved libraries: ${{ matrix.target }}"
+              echo '```'
+              echo "$report"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "$report"
+            echo "the binary does not resolve every library from its own folder" >&2
+            exit 1
+          fi
+
+      # Arch Linux package, from the same folder as the .deb and .rpm.
+      # Arch ships x86_64 only, so aarch64 comes from Arch Linux ARM.
+      - name: Package (Arch Linux)
+        if: matrix.platform == 'linux'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="VeyCut-${VERSION}-linux-${{ matrix.arch }}"
+          pkgver="${VERSION//-/_}"
+          image=archlinux:base-devel
+          if [ "${{ matrix.arch }}" = aarch64 ]; then
+            image=menci/archlinuxarm:base-devel
+          fi
+
+          work="$PWD/arch"
+          rm -rf "$work"
+          mkdir -p "$work"
+          cp assets/arch/PKGBUILD "$work/PKGBUILD"
+          cp -a "stage/$name" "$work/stage"
+
+          cat > "$work/build.sh" <<'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+          owner=$(stat -c '%u:%g' /pkg)
+          useradd -m builder
+          chown -R builder:builder /pkg
+          # PKGEXT named outright: Arch Linux ARM's makepkg.conf still
+          # writes .pkg.tar.xz where Arch's writes .pkg.tar.zst, and the
+          # move below wants one name from both images.
+          su builder -c "env CONCAT_VERSION='$CONCAT_VERSION' CONCAT_STAGE=/pkg/stage PKGDEST=/pkg PKGEXT=.pkg.tar.zst makepkg --noconfirm --nodeps"
+          chown -R "$owner" /pkg
+          SCRIPT
+          chmod 755 "$work/build.sh"
+
+          docker run --rm --env CONCAT_VERSION="$pkgver" \
+            -v "$work:/pkg" -w /pkg "$image" /pkg/build.sh
+
+          mv "$work"/concat-*.pkg.tar.zst "stage/$name.pkg.tar.zst"
+          rm -rf "$work"
+          ls -l stage
+
+      # The folder three ways. A .deb and an .rpm, from one description in
+      # assets/linux/nfpm.yaml: the program whole under /opt/concat, a
+      # launcher on the path, a desktop entry and an icon. And an AppImage:
+      # the folder as an AppDir, one file that runs on any distribution
+      # with the toolkit installed, which every desktop has. All three from
+      # the one staged folder, so they ship the same files - see issue #83.
+      - name: Package (Linux)
+        if: matrix.platform == 'linux'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NFPM_ARCH: ${{ matrix.nfpm }}
+          ARCH: ${{ matrix.appimage }}
+        run: |
+          set -euo pipefail
+          name="VeyCut-${VERSION}-linux-${{ matrix.arch }}"
+          export STAGE="$PWD/stage/$name"
+
+          # What the packages add over the folder: the launcher, and a
+          # desktop entry that names the program by its installed path.
+          mkdir -p "$STAGE/pkg"
+          printf '#!/bin/sh\nexec /opt/concat/concat "$@"\n' > "$STAGE/pkg/concat"
+          chmod +x "$STAGE/pkg/concat"
+          sed 's|^Exec=concat|Exec=/opt/concat/concat %U|' "$STAGE/concat.desktop" > "$STAGE/pkg/concat.desktop"
+
+          curl -fsSL --retry 5 --retry-all-errors -o nfpm.tar.gz \
+            "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_$( [ "${{ matrix.arch }}" = x86_64 ] && echo x86_64 || echo arm64 ).tar.gz"
+          mkdir -p nfpm && tar -xzf nfpm.tar.gz -C nfpm
+          # From inside the folder: nfpm names files relative to where it
+          # runs, and expands no variables in their paths.
+          for kind in deb rpm; do
+            (cd "$STAGE" && "$OLDPWD/nfpm/nfpm" package -f "$OLDPWD/assets/linux/nfpm.yaml" -p "$kind" -t "$OLDPWD/stage/$name.$kind")
+          done
+          rm -r "$STAGE/pkg"
+
+          # The AppDir: the binary and its lib/ under usr/bin, so the
+          # rpath holds; the desktop entry and icon at the root, where
+          # the tool wants them; AppRun is the binary.
+          appdir="$PWD/VeyCut.AppDir"
+          rm -rf "$appdir"
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/icons/hicolor/256x256/apps" "$appdir/usr/share/applications"
+          cp "$STAGE/concat" "$appdir/usr/bin/concat"
+          cp -a "$STAGE/lib" "$appdir/usr/bin/lib"
+          # The X11 keyboard library the window opens by name at start, and
+          # the xcb extension under it: a machine without them panicked
+          # before showing a window, which is how the AppImage catalog's
+          # test saw it. Beside the binary, the rpath finds them.
+          for lib in libxkbcommon-x11.so.0 libxcb-xkb.so.1; do
+            cp -L "$(ldconfig -p | awk -v lib="$lib" '$1 == lib { print $NF; exit }')" "$appdir/usr/bin/lib/$lib"
+          done
+          cp "$STAGE/concat.desktop" "$appdir/concat.desktop"
+          cp "$STAGE/concat.desktop" "$appdir/usr/share/applications/concat.desktop"
+          cp "$STAGE/concat.png" "$appdir/concat.png"
+          cp "$STAGE/concat.png" "$appdir/usr/share/icons/hicolor/256x256/apps/concat.png"
+          ln -s concat.png "$appdir/.DirIcon"
+          ln -s usr/bin/concat "$appdir/AppRun"
+          curl -fsSL --retry 5 --retry-all-errors -o appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage"
+          chmod +x appimagetool
+          # Extract-and-run: the runner has no FUSE to mount the tool with.
+          # No "linux" in its name: every AppImage is for Linux, and the
+          # AppImage catalog's check warns about names that say so.
+          appimage="stage/VeyCut-${VERSION}-${{ matrix.arch }}.AppImage"
+          ./appimagetool --appimage-extract-and-run "$appdir" "$appimage"
+          chmod +x "$appimage"
+
+          rm -r "$STAGE" "$appdir"
+          ls -l stage
+
+      # ── Package: Windows ───────────────────────────────────────────────
+      # Authenticode-signed with the repository's certificate when it has
+      # one - the program, then each installer - so SmartScreen and the
+      # UAC prompt name the publisher instead of warning about an unknown
+      # one; unsigned otherwise, which is what a fork's build gets.
+      - name: Stage (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CERT_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # The identity Partner Center reserved for the app. Unset, no
+          # .msix is made: a fork has no Store listing to make one for.
+          MSSTORE_IDENTITY_NAME: ${{ vars.MSSTORE_IDENTITY_NAME }}
+          MSSTORE_PUBLISHER: ${{ vars.MSSTORE_PUBLISHER }}
+          MSSTORE_PUBLISHER_DISPLAY_NAME: ${{ vars.MSSTORE_PUBLISHER_DISPLAY_NAME }}
+          MSSTORE_DISPLAY_NAME: ${{ vars.MSSTORE_DISPLAY_NAME || 'VeyCut' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $name = "VeyCut-$env:VERSION-windows-${{ matrix.arch }}"
+          $pfx = $null
+          if ($env:CERT_PFX) {
+            $pfx = "$env:RUNNER_TEMP\cert.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_PFX))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw "signtool.exe is not in the Windows SDK" }
+          } else {
+            Write-Host "No signing certificate: the build is unsigned."
+          }
+          function Sign($file) {
+            if (-not $pfx) { return }
+            & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 `
+              /tr http://timestamp.digicert.com /td SHA256 /d VeyCut $file
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed on $file" }
+          }
+          New-Item -ItemType Directory -Force "stage\$name" | Out-Null
+          Copy-Item "src\target\${{ matrix.target }}\app\concat.exe" "stage\$name\"
+          Sign "stage\$name\concat.exe"
+          Copy-Item "$env:FFMPEG_DIR\bin\*.dll" "stage\$name\"
+          # The sherpa-onnx runtime, set aside by the download step above.
+          Copy-Item "$env:SHERPA_DLL_DIR\*.dll" "stage\$name\"
+          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md "stage\$name\"
+          # The installer, from that folder: Inno Setup, which the x64
+          # image carries and the ARM image is given. See
+          # assets/windows/concat.iss.
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Installing Inno Setup"
+            choco install innosetup --no-progress -y | Out-Null
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup is not at $iscc" }
+          & $iscc "/DVersion=$env:VERSION" "/DArch=${{ matrix.inno }}" "/DSuffix=${{ matrix.arch }}" `
+            "/DStage=$PWD\stage\$name" "/DOut=$PWD\stage" assets\windows\concat.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with $LASTEXITCODE" }
+          if (-not (Test-Path "stage\$name-setup.exe")) { throw "stage\$name-setup.exe is not there" }
+          Sign "stage\$name-setup.exe"
+          # And the .msi, with WiX, for the machines an administrator
+          # deploys to. See assets/windows/concat.wxs.
+          dotnet tool install --global wix --version $env:WIX_VERSION | Out-Null
+          # No .wixpdb: everything in stage/ is published, and a debug
+          # database for the installer is nothing a release should carry.
+          wix build -arch ${{ matrix.wix }} -pdbtype none "-d" "Version=$env:VERSION" "-d" "Root=$PWD" "-d" "Stage=$PWD\stage\$name" `
+            -o "stage\$name.msi" assets\windows\concat.wxs
+          if ($LASTEXITCODE -ne 0) { throw "WiX failed with $LASTEXITCODE" }
+          if (-not (Test-Path "stage\$name.msi")) { throw "stage\$name.msi is not there" }
+          Sign "stage\$name.msi"
+          if ($pfx) { Remove-Item -Force $pfx }
+          # And the .msix, for the Microsoft Store, from the same folder with
+          # the manifest and logos beside it. See assets/windows/AppxManifest.xml.
+          # Into store/, not stage/: the Store signs it and takes it, and an
+          # unsigned package in the release is one nobody can install.
+          if ($env:MSSTORE_IDENTITY_NAME -and $env:MSSTORE_PUBLISHER) {
+            $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $makeappx) { throw "makeappx.exe is not in the Windows SDK" }
+            $pack = "$env:RUNNER_TEMP\msix"
+            Copy-Item -Recurse "stage\$name" $pack
+            Copy-Item -Recurse assets\windows\store "$pack\Assets"
+            # The Store's four-part version, whose last part must be 0.
+            $fill = [ordered]@{
+              "{IdentityName}" = $env:MSSTORE_IDENTITY_NAME
+              "{Publisher}" = $env:MSSTORE_PUBLISHER
+              "{PublisherDisplayName}" = $env:MSSTORE_PUBLISHER_DISPLAY_NAME
+              "{DisplayName}" = $env:MSSTORE_DISPLAY_NAME
+              "{Version}" = "$env:VERSION.0"
+              "{Arch}" = "${{ matrix.wix }}"
+            }
+            $manifest = Get-Content -Raw assets\windows\AppxManifest.xml
+            foreach ($word in $fill.Keys) {
+              $manifest = $manifest.Replace($word, [Security.SecurityElement]::Escape($fill[$word]))
+            }
+            # Through .NET, not Set-Content: on the runner Set-Content refused
+            # -Encoding, which failed the v0.2.6 build. UTF-8 with no BOM.
+            [IO.File]::WriteAllText("$pack\AppxManifest.xml", $manifest, [Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Directory -Force store | Out-Null
+            & $makeappx.FullName pack /o /d $pack /p "store\$name.msix"
+            if ($LASTEXITCODE -ne 0) { throw "makeappx failed with $LASTEXITCODE" }
+            Remove-Item -Recurse -Force $pack
+          } else {
+            Write-Host "No Store identity in the repository's variables: no .msix."
+          }
+          # The folder itself is not published: the two installers are.
+          Remove-Item -Recurse -Force "stage\$name"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: VeyCut-${{ matrix.platform }}-${{ matrix.arch }}
+          path: stage/*
+          if-no-files-found: error
+
+      # The Store's package, apart from the release's bundles: release.yml
+      # bundles the two architectures and submits them.
+      - uses: actions/upload-artifact@v7
+        if: matrix.platform == 'windows' && hashFiles('store/*.msix') != ''
+        with:
+          name: Store-windows-${{ matrix.arch }}
+          path: store/*.msix
+          if-no-files-found: error

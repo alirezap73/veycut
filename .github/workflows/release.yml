@@ -1,0 +1,213 @@
+name: Release
+
+# Pushing a tag that starts with v (v0.3.0, v0.3.0-alpha.1, ...) builds the
+# app for every platform and architecture, desktops and phones, and
+# publishes a GitHub release under that tag with one bundle per target and
+# a checksum file. A tag
+# containing a hyphen is a pre-release. The tag must be the workspace's
+# version, alone or with a pre-release suffix: a release whose files say
+# one number and whose tag says another is a release nobody can reason
+# about.
+#
+# The bundles are self-contained: the macOS .dmg carries its FFmpeg dylibs
+# and is notarised when the signing secrets are set; the Linux packages
+# (.deb, .rpm, .AppImage, Arch) and the Windows installers carry the
+# FFmpeg runtime libraries beside the binary; the Android .apk is signed
+# with the repository's key, and the iOS .ipa is signed by the tester on
+# the way onto the phone. Nothing is built until CI has passed on the tag.
+#
+# A release that is not a pre-release also goes to the Microsoft Store,
+# once it is published here, when the repository is set up for it; see
+# the store job.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to build and publish, e.g. v0.3.0
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Tag matches the version
+    # This inherited publisher uses the upstream name, icon and update
+    # manifest. Forks validate through fork-validation.yml until their own
+    # branding and packaging are ready; they must not publish these assets.
+    if: github.repository == 'jub0t/Concat'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - id: tag
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' src/Cargo.toml | head -1)
+          # The tag is the version, or the version with a pre-release
+          # suffix: v0.2.1 and v0.2.1-alpha.22 both belong to 0.2.1.
+          case "$tag" in
+            "v$version" | "v$version-"*) ;;
+            *)
+              echo "tag $tag does not match src/Cargo.toml version $version" >&2
+              exit 1
+              ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # The bundles are named for the version, not the tag: v0.2.1 and
+          # v0.2.1-alpha.22 both produce Concat-0.2.1-* files.
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # The engine's tests and lints, on the tagged commit: a tag on a red
+  # tree is not a release. Named, because a run started by hand is on
+  # main, and without the tag CI would test main instead.
+  engine:
+    name: CI
+    needs: check
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.check.outputs.tag }}
+
+  build:
+    needs: [check, engine]
+    uses: ./.github/workflows/build-app.yml
+    secrets: inherit
+
+  phones:
+    needs: [check, engine]
+    uses: ./.github/workflows/mobile.yml
+    secrets: inherit
+
+  publish:
+    name: Publish release
+    needs: [check, build, phones]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The bundles only: the Store's packages are the store job's.
+      - uses: actions/download-artifact@v8
+        with:
+          path: bundles
+          pattern: Concat-*
+          merge-multiple: true
+
+      # The tree the release is cut from: the notes are read out of its
+      # history, and the manifest out of its model table.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+          fetch-depth: 0
+          path: source
+
+      # One file that says where every other one is: a row per bundle with
+      # its size and digest, and a row per model with the mirror it is
+      # fetched from. An updater or a package script reads this instead of
+      # guessing at asset names. See scripts/models.py.
+      - name: Write the manifest
+        run: |
+          set -euo pipefail
+          python3 source/scripts/models.py release-manifest \
+            --version "${{ needs.check.outputs.version }}" \
+            --tag "${{ needs.check.outputs.tag }}" \
+            --bundles bundles \
+            --out bundles/manifest.json
+          cat bundles/manifest.json
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd bundles
+          ls -l
+          sha256sum -- * > SHA256SUMS
+
+      # The notes are the tag's section of CHANGELOG.md, or the commits
+      # since the previous tag where it has none; see the script.
+      - name: Write the notes
+        id: notes
+        run: |
+          set -euo pipefail
+          cd source
+          tag="${{ needs.check.outputs.tag }}"
+          previous=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
+          .github/release-notes.sh "$previous" "$tag" "${tag#v}" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: Concat ${{ needs.check.outputs.tag }}
+          prerelease: ${{ contains(needs.check.outputs.tag, '-') }}
+          body_path: ${{ runner.temp }}/notes.md
+          fail_on_unmatched_files: true
+          files: bundles/*
+
+  # The Windows packages to the Microsoft Store: the two .msix files the
+  # build made, as one .msixbundle, submitted to the app's listing with
+  # Microsoft's msstore CLI and committed for certification. The Store
+  # signs the package and keeps installs up to date.
+  #
+  # Pre-releases stay here: the Store's version is the release's number,
+  # and v0.3.0-beta.1 and v0.3.0 would both be 0.3.0.0.
+  #
+  # Needs, from Partner Center, repository variables:
+  #   MSSTORE_PRODUCT_ID              the app's Store ID, e.g. 9NBLGGH4R315
+  #   MSSTORE_IDENTITY_NAME           Package/Identity/Name
+  #   MSSTORE_PUBLISHER               Package/Identity/Publisher, CN=...
+  #   MSSTORE_PUBLISHER_DISPLAY_NAME  Package/Properties/PublisherDisplayName
+  #   MSSTORE_DISPLAY_NAME            the reserved name, if not Concat
+  # and secrets, from the Entra ID app associated with the account:
+  #   MSSTORE_TENANT_ID, MSSTORE_SELLER_ID, MSSTORE_CLIENT_ID,
+  #   MSSTORE_CLIENT_SECRET
+  # Without the product ID the job is skipped, as it is on a fork.
+  store:
+    name: Microsoft Store
+    needs: [check, publish]
+    if: ${{ !contains(needs.check.outputs.tag, '-') && vars.MSSTORE_PRODUCT_ID != '' }}
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: store
+          pattern: Store-windows-*
+          merge-multiple: true
+
+      - name: Bundle
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe is not in the Windows SDK" }
+          $packages = @(Get-ChildItem store\*.msix)
+          if ($packages.Count -ne 2) { throw "expected the x86_64 and aarch64 .msix, found $($packages.Count)" }
+          & $makeappx.FullName bundle /o /bv "$env:VERSION.0" /d store /p "Concat-$env:VERSION-windows.msixbundle"
+          if ($LASTEXITCODE -ne 0) { throw "makeappx failed with $LASTEXITCODE" }
+
+      - uses: microsoft/setup-msstore-cli@v1
+
+      - name: Submit
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+          TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID `
+            --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE -ne 0) { throw "msstore could not sign in" }
+          msstore publish "Concat-$env:VERSION-windows.msixbundle" -id $env:PRODUCT_ID
+          if ($LASTEXITCODE -ne 0) { throw "msstore publish failed with $LASTEXITCODE" }

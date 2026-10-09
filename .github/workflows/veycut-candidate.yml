@@ -1,0 +1,21 @@
+name: VeyCut macOS candidate
+
+# Builds a test artifact after native validation. It creates no release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: veycut-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    uses: ./.github/workflows/fork-validation.yml
+  build:
+    needs: validate
+    uses: ./.github/workflows/build-app.yml
+    with:
+      target_matrix: '{"include":[{"platform":"macos","arch":"arm64","os":"macos-15","target":"aarch64-apple-darwin","sherpa":"osx-arm64"}]}'

@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+
+// The right-click menu: an icon slot every row shares, a label, a right-set
+// shortcut hint, checkbox rows, group labels, separators, and one row that may
+// be red.
+//
+// Two constraints shape it:
+//
+// There are no submenus. A Slint struct cannot hold an array, so a row cannot
+// carry its own children; a set of options such as Speed is a group label with
+// its options under it, which is a row type the design already has. Flat also
+// suits a timeline — the menu is a list of verbs about one clip, and burying
+// half of them one level down would be worse even where it were possible.
+//
+// The surface is sized by the caller rather than by its content. Summing the
+// row heights means looping over a model, which the expression language cannot
+// do; whoever builds the items knows what they add up to, and says so.
+
+/// What a row *is*. Only `action` is selectable.
+export enum MenuRow {
+    action,
+    /// a group heading, e.g. SPEED
+    label,
+    separator,
+}
+
+export struct MenuItemData {
+    /// Reported on select. Empty for anything that is not an action.
+    id: string,
+    label: string,
+    kind: MenuRow,
+    /// leading glyph; rows without one still align, the slot is always there
+    glyph: Glyph,
+    /// right-set hint, e.g. "Ctrl+C". Display only — bind the key yourself.
+    shortcut: string,
+    enabled: bool,
+    /// paints the row red, for the one row that destroys something
+    danger: bool,
+    /// turns the row into a checkbox row: the slot carries a tick, not a glyph
+    checkable: bool,
+    checked: bool,
+}
+
+/// Row heights, so the caller can add them up without guessing.
+export global MenuMetrics {
+    out property <length> action: 26px;
+    out property <length> label: 24px;
+    out property <length> separator: 9px;
+    /// the surface's own padding, top and bottom together
+    out property <length> padding: 12px;
+    out property <length> width: 220px;
+}
+
+export component ContextMenu inherits Rectangle {
+    in property <[MenuItemData]> items;
+    /// The summed height of `items` plus MenuMetrics.padding.
+    in property <length> menu-height;
+
+    callback selected(id: string);
+    /// Left or right from the keyboard: the menu beside this one, for a
+    /// menu bar to open. `by` is -1 or 1.
+    callback neighbour(by: int);
+
+    /// Opened from the keyboard: the first row is highlighted and the
+    /// surface takes the keys - the arrows, Return, Escape - so a menu is
+    /// usable without a pointer. Read when `token` changes.
+    in property <bool> keyboard;
+    /// The row the keyboard is on, or -1.
+    property <int> hot: -1;
+
+    /// Whether row `i` is one the keyboard can land on.
+    pure function usable(i: int) -> bool {
+        i >= 0 && i < root.items.length && root.items[i].kind == MenuRow.action
+            && root.items[i].enabled
+    }
+    pure function wrap(i: int) -> int {
+        Math.mod(i + root.items.length, root.items.length)
+    }
+    /// The next row the keyboard can land on from `from`, going `by`,
+    /// round the end. The expression language has no loop, so it looks a
+    /// fixed way ahead: past a separator and a heading is the most any of
+    /// these menus puts between two actions.
+    pure function next(from: int, by: int) -> int {
+        usable(wrap(from + by)) ? wrap(from + by)
+            : usable(wrap(from + 2 * by)) ? wrap(from + 2 * by)
+            : usable(wrap(from + 3 * by)) ? wrap(from + 3 * by)
+            : usable(wrap(from + 4 * by)) ? wrap(from + 4 * by)
+            : from
+    }
+    /// Reports row `i` and closes, the way a press on it does.
+    function choose(i: int) {
+        if (usable(i)) {
+            root.chosen = root.items[i].id;
+            report.running = true;
+            surface.close();
+        }
+    }
+
+    /// Where the menu was asked for, in this element's own coordinates.
+    property <length> at-x;
+    property <length> at-y;
+
+    /// Opened by a token rather than a flag: the surface can be dismissed by a
+    /// click outside without telling anyone, so a boolean the caller sets would
+    /// go stale and the next request at the same spot would be a no-op.
+    in property <int> token;
+    in property <length> request-x;
+    in property <length> request-y;
+
+    changed token => {
+        // Nothing to show is not a menu. Whoever bumps the token may find it
+        // has no rows to offer — a clip that has gone, a selection with
+        // nothing to say — and an empty surface hanging under the pointer is
+        // worse than none. It also lets a caller bump unconditionally, which
+        // is what keeps the arming in lanes.slint honest.
+        if (root.token > 0 && root.items.length > 0) {
+            // Flipped back over the pointer near an edge, so the menu is
+            // always fully on screen and always touching the click.
+            root.at-x = root.request-x + MenuMetrics.width > root.width
+                ? Math.max(0px, root.request-x - MenuMetrics.width)
+                : root.request-x;
+            root.at-y = root.request-y + root.menu-height > root.height
+                ? Math.max(0px, root.request-y - root.menu-height)
+                : root.request-y;
+            // From the top down, the way a menu opens from the keyboard
+            // everywhere: -1 steps onto row 0 or the first usable one.
+            root.hot = root.keyboard ? next(-1, 1) : -1;
+            surface.show();
+        }
+    }
+
+    background: transparent;
+
+    /// What the row that was pressed asked for, held for the beat between
+    /// the surface closing and the report going out.
+    ///
+    /// Reported after the close, not before. The report goes to Rust, which
+    /// rebuilds the rows on its way back - a delete empties them - and rows
+    /// rebuilt under an open surface left it standing over the window,
+    /// collapsed to its padding, taking every press until one landed
+    /// outside it (#160). So the id is copied out of the row, the surface
+    /// closes, and the report goes on the next turn of the loop, when there
+    /// is no surface left for the rows to change under.
+    property <string> chosen;
+    report := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.selected(root.chosen);
+        }
+    }
+
+    /// Which way the keyboard left for the menu beside this one, held for
+    /// the same beat as `chosen`: the next menu's rows would otherwise be
+    /// built under this surface while it still stands.
+    property <int> leaving-by;
+    leave := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.neighbour(root.leaving-by);
+        }
+    }
+
+    surface := PopupWindow {
+        x: root.at-x;
+        y: root.at-y;
+        width: MenuMetrics.width;
+        height: root.menu-height;
+        close-policy: close-on-click-outside;
+
+        // Made afresh each time the surface shows, so this is each opening.
+        FocusScope {
+            init => {
+                if (root.keyboard) {
+                    self.focus();
+                }
+            }
+            key-pressed(event) => {
+                if (event.text == Key.DownArrow) {
+                    root.hot = next(root.hot, 1);
+                } else if (event.text == Key.UpArrow) {
+                    root.hot = next(root.hot < 0 ? 0 : root.hot, -1);
+                } else if (event.text == Key.Return || event.text == " ") {
+                    choose(root.hot);
+                } else if (event.text == Key.Escape) {
+                    surface.close();
+                } else if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                    root.leaving-by = event.text == Key.LeftArrow ? -1 : 1;
+                    leave.running = true;
+                    surface.close();
+                } else {
+                    return reject;
+                }
+                accept
+            }
+        }
+
+        Rectangle {
+            background: Theme.raised;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            border-radius: Theme.r-lg;
+            clip: true;
+
+            VerticalLayout {
+                padding: 6px;
+                alignment: start;
+
+                for item[index] in root.items: Rectangle {
+                    height: item.kind == MenuRow.separator ? MenuMetrics.separator
+                        : item.kind == MenuRow.label ? MenuMetrics.label
+                        : MenuMetrics.action;
+
+                    if item.kind == MenuRow.separator: Rectangle {
+                        x: 8px;
+                        y: (parent.height - 1px) / 2;
+                        width: parent.width - 16px;
+                        height: 1px;
+                        background: Theme.line;
+                    }
+
+                    if item.kind == MenuRow.label: Text {
+                        x: 10px;
+                        y: 0;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        text: item.label;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        letter-spacing: 0.72px;
+                        vertical-alignment: bottom;
+                        overflow: elide;
+                    }
+
+                    if item.kind == MenuRow.action: row := Rectangle {
+                        border-radius: Theme.r-xs;
+                        property <bool> lit: (touch.has-hover || root.hot == index) && item.enabled;
+                        background: !row.lit ? Colors.transparent
+                            : item.danger ? Theme.danger-soft
+                            : Theme.field;
+
+                        property <brush> ink: !item.enabled ? Theme.fg-dim
+                            : (item.danger && row.lit) ? Theme.danger
+                            : Theme.fg;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+
+                            // A fixed slot even when a row has no mark, so
+                            // every label starts on the same x. Ragged labels
+                            // are what make a menu feel thrown together.
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 14px;
+                                    height: 14px;
+
+                                    if item.checkable && item.checked: Icon {
+                                        x: 0;
+                                        y: 0;
+                                        glyph: Glyph.check;
+                                        size: 13px;
+                                        tint: item.enabled ? Theme.accent : Theme.fg-dim;
+                                    }
+
+                                    if !item.checkable && item.glyph != Glyph.none: Icon {
+                                        x: 0;
+                                        y: 0;
+                                        glyph: item.glyph;
+                                        size: 13px;
+                                        tint: item.enabled ? Theme.fg-muted : Theme.fg-dim;
+                                    }
+                                }
+                            }
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: item.label;
+                                color: row.ink;
+                                font-size: Theme.fs;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            if item.shortcut != "": Text {
+                                text: item.shortcut;
+                                color: item.enabled ? Theme.fg-dim : Theme.line-strong;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs-sm;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        touch := TouchArea {
+                            enabled: item.enabled;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                // The id first, while the row still exists;
+                                // the report after the close - see `chosen`.
+                                // The timer is armed before the close, not
+                                // after: closing tears down the surface this
+                                // handler runs in, and anything after it
+                                // never ran, so no row reported at all (#220).
+                                // It still fires on the next turn of the
+                                // loop, when the surface is gone.
+                                root.chosen = item.id;
+                                report.running = true;
+                                surface.close();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

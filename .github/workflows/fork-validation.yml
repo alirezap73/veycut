@@ -1,0 +1,24 @@
+name: Fork full validation
+
+# A manually requested validation on GitHub runners. It checks the Slint
+# GUI and the native engine through the existing cross-platform CI, but
+# never builds installers or publishes a release.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    uses: ./.github/workflows/fork-checks.yml
+  native:
+    needs: quick
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.sha }}

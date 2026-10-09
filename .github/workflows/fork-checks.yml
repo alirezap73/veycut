@@ -1,0 +1,42 @@
+name: Fork development checks
+
+# Manual checks for the fork before a full desktop build. These jobs do
+# not render media, build the GUI, or publish a release.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  documents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+      - name: Project source formatting
+        run: cargo fmt -p concat-project -p concat-host --check
+        working-directory: src
+      - name: Translation inventory
+        run: python3 scripts/locales.py --check
+      - name: Core and project tests
+        run: cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
+        working-directory: src
+      - name: Subtitle file tests without media services
+        run: |
+          rustc --edition 2024 -D warnings --test crates/concat-host/src/subtitle_files.rs -o "$RUNNER_TEMP/subtitle-file-tests"
+          "$RUNNER_TEMP/subtitle-file-tests" --test-threads=1
+        working-directory: src

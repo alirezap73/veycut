@@ -1,0 +1,658 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { IconButton, Row, Section, SectionBody, SectionHeader } from "../primitives/panel.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+import { FontPicker } from "font-picker.slint";
+import { NumberField } from "../primitives/number-field.slint";
+import { Button } from "../primitives/modal.slint";
+import {
+    ColourField, HelpButton, InspectorFmt, Param, ParamFormat, SwitchRow,
+} from "controls.slint";
+import {
+    ClipField, ClipTextField, SelectedClipData, TextAlignment,
+} from "../timeline/model.slint";
+
+// The Text tab.
+//
+// A title is the one thing on the timeline that is not a file, so it gets its
+// own inspector and nothing else: no volume, no speed, no audio filters.
+// Offering those tabs would be offering panels that can only say "nothing
+// here", which is why the tab strip drops them rather than disabling them.
+//
+// Five drawers, in the order a title is made: the words, their typography,
+// the stroke around them, the box they sit in, and where the box goes.
+//
+// The document keeps sizes as fractions of the output frame, never points
+// or pixels, so a title dialled in at 1080p does not move when the project
+// is exported at 4K. The box's width and height are the exception on
+// screen: they are shown and typed in pixels of the current frame, because
+// "400 wide" is a size a person can picture and "20.8%" is not - the
+// fraction is what is stored, still.
+export component TextPanel inherits VerticalLayout {
+    in property <SelectedClipData> selected;
+    /// The faces this build bundles.
+    in property <[string]> families: ["Hanken Grotesk"];
+
+    callback set(field: ClipField, value: float);
+    callback set-text(field: ClipTextField, value: string);
+    callback set-colour(field: ClipTextField, value: color);
+    callback commit();
+    /// The square beside the font picker: bring a font file of your own in.
+    callback import-font();
+    /// Keep this title's look for new titles and captions.
+    callback set-default();
+
+    /// Several titles selected together: every knob writes to all of them
+    /// and the words, each title's own, are not offered.
+    /// https://github.com/jub0t/Concat/issues/224
+    property <bool> batch: root.selected.batch > 1;
+
+    // Local editing state, seeded rather than bound — see the note on
+    // AdjustPanel, which has the same problem for the same reason.
+    property <float> size;
+    property <float> alpha;
+    property <float> stroke-width;
+    property <float> stroke-alpha;
+    property <float> plate-alpha;
+    property <float> plate-radius;
+    /// The background's air, in pixels of the frame like the box's sides.
+    property <float> plate-pad-x;
+    property <float> plate-pad-y;
+    /// The two paddings are one number: an edit to either sets both. A
+    /// choice about how the panel is used, not about the title, so it is
+    /// not in the document and survives a change of selection.
+    property <bool> pad-locked: false;
+    property <float> line-height;
+    property <float> tracking;
+    property <float> box-w;
+    property <float> box-h;
+    /// Each side's unit: 0 is pixels, 1 is Auto, which is zero in the
+    /// document - the words size that side, padding and all.
+    property <int> w-mode;
+    property <int> h-mode;
+    /// What a side measured before it went Auto, so px brings it back.
+    property <float> last-w;
+    property <float> last-h;
+    property <float> offset-x;
+    property <float> offset-y;
+    property <int> weight-index;
+
+    property <[float]> weights: [400, 500, 600, 700];
+    /// The label column of the rows whose label is two words.
+    property <length> label-w: 74px;
+    property <float> frame-w: Math.max(1, root.selected.frame-width);
+    property <float> frame-h: Math.max(1, root.selected.frame-height);
+
+    function seed() {
+        root.size = root.selected.font-size;
+        root.alpha = root.selected.text-opacity;
+        root.stroke-width = root.selected.stroke-width;
+        root.stroke-alpha = root.selected.stroke-opacity;
+        root.plate-alpha = root.selected.plate-opacity;
+        root.plate-radius = root.selected.plate-radius;
+        root.plate-pad-x = root.selected.plate-padding-x * root.frame-h;
+        root.plate-pad-y = root.selected.plate-padding-y * root.frame-h;
+        root.line-height = root.selected.line-height;
+        root.tracking = root.selected.tracking;
+        root.box-w = root.selected.text-width * root.frame-w;
+        root.box-h = root.selected.text-height * root.frame-h;
+        root.w-mode = root.box-w > 0 ? 0 : 1;
+        root.h-mode = root.box-h > 0 ? 0 : 1;
+        root.offset-x = root.selected.offset-x;
+        root.offset-y = root.selected.offset-y;
+        root.weight-index = root.selected.font-weight >= 700 ? 3
+            : root.selected.font-weight >= 600 ? 2
+            : root.selected.font-weight >= 500 ? 1 : 0;
+    }
+
+    init => { root.seed(); }
+    changed selected => { root.seed(); }
+
+    /// Both paddings at once, in pixels of the frame, as one edit: the
+    /// echo takes the two sets and the commit lands them together.
+    function set-padding(x: float, y: float) {
+        root.plate-pad-x = x;
+        root.plate-pad-y = y;
+        root.set(ClipField.background-padding-x, x / root.frame-h);
+        root.set(ClipField.background-padding-y, y / root.frame-h);
+        root.commit();
+    }
+
+    /// A side's unit picked: Auto is zero in the document, and px is the
+    /// size the side last had, or a share of the frame to start from when
+    /// it never had one - half the width, a fifth of the height, a lower
+    /// third's band.
+    function size-mode(width: bool, auto: bool) {
+        if (width) {
+            if (auto) {
+                root.last-w = root.box-w;
+                root.box-w = 0;
+            } else if (root.box-w <= 0) {
+                root.box-w = root.last-w > 0 ? root.last-w : Math.round(root.frame-w / 2);
+            }
+            root.set(ClipField.text-width, root.box-w / root.frame-w);
+        } else {
+            if (auto) {
+                root.last-h = root.box-h;
+                root.box-h = 0;
+            } else if (root.box-h <= 0) {
+                root.box-h = root.last-h > 0 ? root.last-h : Math.round(root.frame-h / 5);
+            }
+            root.set(ClipField.text-height, root.box-h / root.frame-h);
+        }
+        root.commit();
+    }
+
+    /// A box side in pixels: "auto" at zero, else the whole number.
+    pure function px(v: float) -> string {
+        return v <= 0 ? I18n.t("common.autoValue") : "\{Math.round(v)}";
+    }
+
+    // ── a batch ──────────────────────────────────────────────────────────
+    if root.batch: SectionBody {
+        padding-left: Theme.pad;
+        padding-right: Theme.pad;
+        padding-top: 10px;
+        padding-bottom: 6px;
+        Text {
+            text: I18n.t1("textPanel.editingTitles", "\{root.selected.batch}");
+            color: Theme.fg-muted;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+    }
+
+    // ── content ──────────────────────────────────────────────────────────
+    if !root.batch: Section {
+        first: true;
+        content := SectionHeader {
+            title: I18n.t("textPanel.content");
+            collapsible: true;
+            summary: root.selected.content == "" ? "Empty" : root.selected.content;
+        }
+
+        if content.open: SectionBody {
+            padding-left: Theme.pad;
+            padding-right: Theme.pad;
+            padding-bottom: 4px;
+
+            Rectangle {
+                height: 64px;
+                border-radius: Theme.r;
+                background: Theme.field;
+                border-width: 1px;
+                border-color: body.has-focus ? Theme.accent : Theme.line;
+                clip: true;
+
+                body := TextInput {
+                    x: 8px;
+                    y: 6px;
+                    width: parent.width - 16px;
+                    height: parent.height - 12px;
+                    text: root.selected.content;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    // Multi-line: a lower third is routinely two lines, and a
+                    // single-line field would silently eat the break.
+                    single-line: false;
+                    wrap: word-wrap;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+
+                    // Every keystroke goes to the echo so the monitor shows
+                    // the words as they are typed; the commit waits for the
+                    // way out, so a title being typed is one change and not
+                    // forty.
+                    edited => {
+                        root.set-text(ClipTextField.content, self.text);
+                    }
+                    changed has-focus => {
+                        if (!self.has-focus) {
+                            root.set-text(ClipTextField.content, self.text);
+                            root.commit();
+                        }
+                    }
+
+                    // Slint binds Home and End to nothing on macOS, so they
+                    // walked up to the window's playhead shortcuts and the
+                    // preview went blank mid-sentence. They belong to the
+                    // text: the start and the end of it.
+                    key-pressed(event) => {
+                        if (event.text == Key.Home) {
+                            self.set-selection-offsets(0, 0);
+                            return accept;
+                        }
+                        if (event.text == Key.End) {
+                            self.set-selection-offsets(1000000000, 1000000000);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
+        }
+    }
+
+    // ── typography ───────────────────────────────────────────────────────
+    // The face, its weight and size, and its colour: one drawer, because
+    // they are one decision. A colour drawer apart from the font it colours
+    // was two places to look for how the words look.
+    Section {
+        typography := SectionHeader {
+            title: I18n.t("textPanel.typography");
+            collapsible: true;
+            summary: root.selected.font-family + " · "
+                + InspectorFmt.format(ParamFormat.height, root.size) + " · "
+                + root.selected.fill-hex;
+        }
+
+        if typography.open: SectionBody {
+        Row {
+            label: I18n.t("textPanel.font");
+            label-width: root.label-w;
+            // Searchable, each family in its own face; red when the title
+            // names one this machine does not have.
+            FontPicker {
+                family: root.selected.font-family;
+                missing: root.selected.font-missing;
+                picked(family) => {
+                    root.set-text(ClipTextField.font-family, family);
+                    root.commit();
+                }
+            }
+            // A font of your own, from a file: it joins the list for good
+            // and the title is set in it.
+            IconButton {
+                glyph: Glyph.import;
+                label: I18n.t("textPanel.importFont");
+                clicked => { root.import-font(); }
+            }
+        }
+
+        // This look, kept: what new titles and generated captions start
+        // from. The words stay this title's own.
+        Row {
+            label: "";
+            label-width: root.label-w;
+            Button {
+                label: I18n.t("textPanel.useForNewTitles");
+                ghost: true;
+                clicked => { root.set-default(); }
+            }
+        }
+
+        Row {
+            label: I18n.t("textPanel.fontWeight");
+            label-width: root.label-w;
+            Select {
+                options: [I18n.t("textPanel.regular"), I18n.t("common.medium"), I18n.t("textPanel.semibold"), I18n.t("textPanel.bold")];
+                current <=> root.weight-index;
+                changed(index) => {
+                    root.set(ClipField.font-weight, root.weights[index]);
+                    root.commit();
+                }
+            }
+        }
+
+        Param {
+            label: I18n.t("common.size");
+            value <=> root.size;
+            minimum: 0.01;
+            maximum: 0.5;
+            step: 0.005;
+            default-value: 0.09;
+            fmt: ParamFormat.height;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.font-size, v); root.commit(); }
+        }
+
+        SwitchRow {
+            label: I18n.t("textPanel.italic");
+            checked: root.selected.italic;
+            toggled(on) => { root.set(ClipField.italic, on ? 1 : 0); root.commit(); }
+        }
+
+        // The fill has no alpha of its own: the title's Opacity below is
+        // the one dial for how solid the words are.
+        ColourField {
+            label: I18n.t("common.color");
+            value: root.selected.fill;
+            alpha: false;
+            changed(colour) => { root.set-colour(ClipTextField.color, colour); root.commit(); }
+        }
+
+        Param {
+            label: I18n.t("common.opacity");
+            value <=> root.alpha;
+            minimum: 0;
+            maximum: 1;
+            step: 0.01;
+            default-value: 1;
+            fmt: ParamFormat.fraction;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.text-opacity, v); root.commit(); }
+        }
+
+        SwitchRow {
+            label: I18n.t("textPanel.dropShadow");
+            checked: root.selected.shadow;
+
+            HelpButton { text: I18n.t("textPanel.softShadowUnderWords"); }
+
+            toggled(on) => { root.set(ClipField.shadow, on ? 1 : 0); root.commit(); }
+        }
+
+        // The background: the plate, to the painter and the document. A
+        // colour, not a flag - turning it off is clearing it, and fully
+        // transparent is what "none" is stored as.
+        SwitchRow {
+            label: I18n.t("textPanel.background");
+            checked: root.selected.plated;
+
+            HelpButton { text: I18n.t("textPanel.solidBoxBehindWords"); }
+
+            toggled(on) => {
+                root.set-colour(ClipTextField.background,
+                    on ? Theme.plate-on : Colors.transparent);
+                root.commit();
+            }
+        }
+
+        // The background's opacity is its colour's alpha, as the stroke's
+        // is, and the dial below is the one place it is set: the picker
+        // offers no strip of its own, shows the colour solid, and a colour
+        // picked keeps the opacity that was dialled.
+        if root.selected.plated: ColourField {
+            label: I18n.t("textPanel.backgroundColor");
+            value: root.selected.plate.with-alpha(1);
+            alpha: false;
+            changed(shade) => {
+                root.set-colour(ClipTextField.background, shade.with-alpha(root.plate-alpha));
+                root.commit();
+            }
+        }
+
+        if root.selected.plated: Param {
+            label: I18n.t("textPanel.backgroundOpacity");
+            value <=> root.plate-alpha;
+            minimum: 0.01;
+            maximum: 1;
+            step: 0.01;
+            default-value: 0.8;
+            fmt: ParamFormat.fraction;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.background-opacity, v); root.commit(); }
+        }
+
+        // A fraction of the frame's height like the stroke's width, shown
+        // the same way, so the corners stay in proportion at any export
+        // size; zero reads "none" and is square.
+        if root.selected.plated: Param {
+            label: I18n.t("textPanel.cornerRadius");
+            value <=> root.plate-radius;
+            minimum: 0;
+            maximum: 0.2;
+            step: 0.001;
+            default-value: 0.0135;
+            fmt: ParamFormat.outline;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.background-radius, v); root.commit(); }
+        }
+
+        // The air between the words and the background's edges, in pixels
+        // of the frame like the box's sides, on any axis the words size
+        // themselves - a sized box is exactly its size. The lock at the end
+        // makes the two one number: locking takes the Y to the X at once,
+        // and from then on an edit to either is an edit to both.
+        if root.selected.plated: Row {
+            label: I18n.t("textPanel.padding");
+            label-width: root.label-w;
+
+            NumberField {
+                prefix: "X";
+                unit: "px";
+                value <=> root.plate-pad-x;
+                minimum: 0;
+                maximum: root.frame-h / 2;
+                step: 1;
+                changed(v) => { root.set-padding(v, root.pad-locked ? v : root.plate-pad-y); }
+            }
+            NumberField {
+                prefix: "Y";
+                unit: "px";
+                value <=> root.plate-pad-y;
+                minimum: 0;
+                maximum: root.frame-h / 2;
+                step: 1;
+                changed(v) => { root.set-padding(root.pad-locked ? v : root.plate-pad-x, v); }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    glyph: root.pad-locked ? Glyph.lock : Glyph.unlock;
+                    label: root.pad-locked ? I18n.t("textPanel.unlockThePaddings")
+                        : I18n.t("textPanel.lockThePaddingsTogether");
+                    checked: root.pad-locked;
+                    clicked => {
+                        root.pad-locked = !root.pad-locked;
+                        if (root.pad-locked && root.plate-pad-x != root.plate-pad-y) {
+                            root.set-padding(root.plate-pad-x, root.plate-pad-x);
+                        }
+                    }
+                }
+            }
+        }
+        }
+    }
+
+    // ── stroke ───────────────────────────────────────────────────────────
+    Section {
+        stroke := SectionHeader {
+            title: I18n.t("textPanel.stroke");
+            collapsible: true;
+            open: false;
+            summary: InspectorFmt.format(ParamFormat.outline, root.stroke-width);
+        }
+
+        if stroke.open: SectionBody {
+        Param {
+            label: I18n.t("common.width");
+            value <=> root.stroke-width;
+            minimum: 0;
+            maximum: 0.15;
+            step: 0.005;
+            default-value: 0;
+            fmt: ParamFormat.outline;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.stroke-width, v); root.commit(); }
+        }
+
+        // Only once there is a stroke to colour: a swatch for a stroke of
+        // zero width sets something nobody can see. The stroke's opacity is
+        // its colour's alpha - the picker's strip and this dial are one
+        // number - kept apart from the title's own Opacity so an outline
+        // can fade while the words stay solid.
+        if root.selected.stroke-width > 0: ColourField {
+            label: I18n.t("common.color");
+            value: root.selected.stroke;
+            alpha: true;
+            changed(shade) => {
+                root.set-colour(ClipTextField.stroke-color, shade);
+                root.commit();
+            }
+        }
+
+        if root.selected.stroke-width > 0: Param {
+            label: I18n.t("common.opacity");
+            value <=> root.stroke-alpha;
+            minimum: 0;
+            maximum: 1;
+            step: 0.01;
+            default-value: 1;
+            fmt: ParamFormat.fraction;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.stroke-opacity, v); root.commit(); }
+        }
+        }
+    }
+
+    // ── layout ───────────────────────────────────────────────────────────
+    // How the words fill their box, and how big the box is.
+    Section {
+        layout := SectionHeader {
+            title: I18n.t("textPanel.layout");
+            collapsible: true;
+            summary: (root.selected.align == TextAlignment.right ? I18n.t("common.right")
+                : root.selected.align == TextAlignment.center ? I18n.t("textPanel.center") : I18n.t("common.left"))
+                + " · " + root.px(root.box-w) + " × " + root.px(root.box-h);
+        }
+
+        if layout.open: SectionBody {
+        Row {
+            label: I18n.t("textPanel.textAlign");
+            label-width: root.label-w;
+            SegmentedControl {
+                options: [I18n.t("common.left"), I18n.t("textPanel.center"), I18n.t("common.right")];
+                icons: [Glyph.align-left, Glyph.align-center-x, Glyph.align-right];
+                current: root.selected.align == TextAlignment.right ? 2
+                    : root.selected.align == TextAlignment.center ? 1 : 0;
+                changed(index) => { root.set(ClipField.align, index); root.commit(); }
+            }
+        }
+
+        // The box, in pixels of the frame, or Auto: that side is sized by
+        // the words, with the background's padding round them, so a title
+        // whose words change - a caption made from a transcript - keeps
+        // its air whatever is written. The unit is a select joined onto
+        // the field where a unit would sit; Auto greys the number, which
+        // is nothing then. The stage's grips pull the same two numbers;
+        // here they can be typed exactly.
+        Row {
+            label: I18n.t("common.width");
+            label-width: root.label-w;
+            HorizontalLayout {
+                spacing: 0;
+                NumberField {
+                    prefix: "W";
+                    radius-right: 0px;
+                    enabled: root.w-mode == 0;
+                    value <=> root.box-w;
+                    minimum: 1;
+                    maximum: root.frame-w * 2;
+                    step: 1;
+                    format(v) => { return v <= 0 ? "–" : "\{Math.round(v)}"; }
+                    parse(t) => { return t.is-float() ? Math.max(1, t.to-float()) : root.box-w; }
+                    changed(v) => { root.set(ClipField.text-width, v / root.frame-w); root.commit(); }
+                }
+                Select {
+                    width: self.natural-width;
+                    radius-left: 0px;
+                    options: ["px", I18n.t("common.auto")];
+                    current <=> root.w-mode;
+                    changed(index) => { root.size-mode(true, index == 1); }
+                }
+            }
+        }
+        Row {
+            label: I18n.t("common.height");
+            label-width: root.label-w;
+            HorizontalLayout {
+                spacing: 0;
+                NumberField {
+                    prefix: "H";
+                    radius-right: 0px;
+                    enabled: root.h-mode == 0;
+                    value <=> root.box-h;
+                    minimum: 1;
+                    maximum: root.frame-h * 2;
+                    step: 1;
+                    format(v) => { return v <= 0 ? "–" : "\{Math.round(v)}"; }
+                    parse(t) => { return t.is-float() ? Math.max(1, t.to-float()) : root.box-h; }
+                    changed(v) => { root.set(ClipField.text-height, v / root.frame-h); root.commit(); }
+                }
+                Select {
+                    width: self.natural-width;
+                    radius-left: 0px;
+                    options: ["px", I18n.t("common.auto")];
+                    current <=> root.h-mode;
+                    changed(index) => { root.size-mode(false, index == 1); }
+                }
+            }
+        }
+
+        Param {
+            label: I18n.t("textPanel.lineHeight");
+            value <=> root.line-height;
+            minimum: 0.7;
+            maximum: 2.5;
+            step: 0.05;
+            default-value: 1.2;
+            fmt: ParamFormat.rate;
+            unit: "x";
+            changed(v) => { root.set(ClipField.line-height, v); root.commit(); }
+        }
+
+        Param {
+            label: I18n.t("textPanel.tracking");
+            value <=> root.tracking;
+            minimum: -0.05;
+            maximum: 0.3;
+            step: 0.005;
+            default-value: 0;
+            fmt: ParamFormat.outline;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.tracking, v); root.commit(); }
+        }
+        }
+    }
+
+    // ── position ─────────────────────────────────────────────────────────
+    Section {
+        position := SectionHeader {
+            title: I18n.t("textPanel.position");
+            collapsible: true;
+            summary: InspectorFmt.format(ParamFormat.centred, root.offset-x)
+                + " · " + InspectorFmt.format(ParamFormat.centred, root.offset-y);
+        }
+
+        if position.open: SectionBody {
+        Param {
+            label: I18n.t("textPanel.horizontal");
+            value <=> root.offset-x;
+            minimum: -0.5;
+            maximum: 0.5;
+            step: 0.005;
+            default-value: 0;
+            fmt: ParamFormat.centred;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.offset-x, v); root.commit(); }
+        }
+
+        Param {
+            label: I18n.t("textPanel.vertical");
+            value <=> root.offset-y;
+            minimum: -0.5;
+            maximum: 0.5;
+            step: 0.005;
+            default-value: 0;
+            fmt: ParamFormat.centred;
+            unit: "%";
+            unit-scale: 100;
+            changed(v) => { root.set(ClipField.offset-y, v); root.commit(); }
+        }
+        }
+    }
+}

@@ -1,0 +1,1262 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { NumberField } from "../primitives/number-field.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, DialogSection, Field, Modal, Progress } from "../primitives/modal.slint";
+import { IconButton } from "../primitives/panel.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { ColorPicker } from "../primitives/color-picker.slint";
+import { Fmt } from "../util.slint";
+import { Select } from "../primitives/select.slint";
+import { PaneScroll } from "../workspace/pane.slint";
+import { HairlineSplitter } from "../workspace/splitter.slint";
+
+// Settings: a fixed-height sheet with a column of pages down the side. The
+// model rows keep two things apart — a downloaded model is a *choice* and so
+// behaves as a radio, while an absent one is an *acquisition* and is handled
+// by the button on the right. That distinction is the whole reason the row
+// reads at a glance.
+
+export struct ModelData {
+    id: string,
+    name: string,
+    /// "Fastest, least accurate"
+    note: string,
+    /// "142 MB"
+    size: string,
+    /// 1..5, drawn as pips
+    accuracy: int,
+    installed: bool,
+    /// the one this engine will use
+    active: bool,
+    downloading: bool,
+    /// 0..1
+    progress: float,
+    /// "42 MB of 142 MB · 3.1 MB/s"
+    transferred: string,
+    eta: string,
+}
+
+/// One line of the system report: what it is called, and what it says.
+export struct SystemFactData {
+    label: string,
+    value: string,
+}
+
+export struct SettingsData {
+    open: bool,
+    /// 0 General, 1 Appearance, 2 Transcriber, 3 Speech, 4 Remote, 5 About,
+    /// 6 Version
+    tab: int,
+    language: int,
+    /// what the log records: 0 errors only, 1 warnings, 2 normal, 3
+    /// debug, 4 everything
+    log-level: int,
+    /// the playhead stops at the end of the content
+    playhead-stops: bool,
+    /// the magnetic timeline: deleting and trimming close the gap
+    magnetic: bool,
+    /// where model downloads look first: automatic, Concat's mirror,
+    /// hf-mirror.com, the original source, a custom URL
+    download-source: int,
+    /// the base URL of a custom source
+    download-base: string,
+    /// the Concat API served on a socket while the window is open
+    server-enabled: bool,
+    /// the two halves of "127.0.0.1:7420"
+    server-host: string,
+    server-port: int,
+    /// what a connection presents first: the chosen one, or the one the
+    /// server made up when none was chosen
+    server-token: string,
+    /// "Listening on 127.0.0.1:7420 · 1 connected", "Off", or why not
+    server-status: string,
+    /// "3 installed · 612 MB on disk"
+    disk: string,
+    version: string,
+    /// what the Version page says under the version: looking, up to date,
+    /// a newer release out, or why it could not look
+    update-status: string,
+    checking: bool,
+    /// which of the sheet's `versions` the dropdown shows
+    version-choice: int,
+    /// a switch in flight: how far its download is, and "12 MB of 90 MB"
+    installing: bool,
+    install-progress: float,
+    install-transferred: string,
+    /// Install is live: a release is listed and this build came from a
+    /// package that can be put in place; and why not, when not
+    can-install: bool,
+    install-note: string,
+}
+
+// Accuracy, as pips rather than a number: five little bars say "third of five"
+// without the reader having to hold a scale in their head.
+component Pips inherits HorizontalLayout {
+    in property <int> value;
+
+    spacing: 2px;
+
+    for step in 5: Rectangle {
+        width: 3px;
+        height: 10px;
+        border-radius: 1px;
+        background: step < root.value ? Theme.accent : Theme.field-active;
+    }
+}
+
+component ModelRow inherits Rectangle {
+    in property <ModelData> model;
+
+    callback activated();
+    callback download();
+    callback cancel();
+    callback remove();
+
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: root.model.active ? Theme.accent
+        : touch.has-hover ? Theme.line-strong
+        : Theme.line;
+    background: root.model.active ? Theme.accent-soft : Theme.raised;
+    // An absent model is dimmer than an installed one, but not so dim it
+    // stops being readable — it is a thing you can have, not a thing denied.
+    opacity: (root.model.installed || root.model.downloading) ? 1.0 : 0.86;
+
+    animate background, border-color { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    touch := TouchArea {
+        // Only an installed model is a choice. An absent one is acquired with
+        // the button on the right, and clicking the row would be ambiguous.
+        enabled: root.model.installed;
+        mouse-cursor: root.model.installed ? pointer : default;
+        clicked => { root.activated(); }
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            // The radio. A ring that thickens into a filled dot when this is
+            // the model in use, dimmer again when the model is not even here —
+            // three states in one mark, which is what lets the row say what it
+            // is without a word of it.
+            VerticalLayout {
+                alignment: start;
+                padding-top: 2px;
+                Rectangle {
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 8px;
+                    border-width: root.model.active ? 5px : 1.5px;
+                    border-color: root.model.active ? Theme.accent
+                        : root.model.installed ? Theme.line-strong
+                        : Theme.field-active;
+
+                    animate border-width, border-color {
+                        duration: 120ms;
+                        easing: cubic-bezier(0.4, 0, 0.2, 1);
+                    }
+                }
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+
+                    Text {
+                        text: root.model.name;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        font-weight: Theme.weight-title;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    if root.model.active: Rectangle {
+                        width: badge.width + 12px;
+                        height: 15px;
+                        border-radius: 7.5px;
+                        background: Theme.accent;
+
+                        badge := Text {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            text: I18n.t("settings.inUse");
+                            color: Theme.on-accent;
+                            font-size: Theme.fs-xs;
+                            font-weight: Theme.weight-display;
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.model.note;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    overflow: elide;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Pips { value: root.model.accuracy; }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: root.model.size;
+                    color: Theme.fg-dim;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-sm;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+
+                if root.model.downloading: Button {
+                    label: I18n.t("common.cancel");
+                    glyph: Glyph.close;
+                    ghost: true;
+                    clicked => { root.cancel(); }
+                }
+
+                if !root.model.downloading && root.model.installed: Button {
+                    label: I18n.t("common.remove");
+                    glyph: Glyph.trash;
+                    danger: true;
+                    clicked => { root.remove(); }
+                }
+
+                if !root.model.downloading && !root.model.installed: Button {
+                    label: I18n.t("settings.download");
+                    glyph: Glyph.import;
+                    clicked => { root.download(); }
+                }
+
+            }
+        }
+
+        if root.model.downloading: VerticalLayout {
+            spacing: 6px;
+
+            Progress { value: root.model.progress; }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.model.transferred;
+                    color: Theme.fg-muted;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.model.eta;
+                    color: Theme.fg-muted;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// One accent on offer: a dot of the colour, and a ring round it while it is
+// the one in use. The ring is the text colour rather than the accent — the
+// dot already *is* the accent, and a ring in it would just be a bigger dot —
+// and it sits off the dot by a gap of the panel, so it reads as a mark round
+// the colour and not as a border on it. A hover shows the same ring faintly.
+component AccentSwatch inherits Rectangle {
+    in property <color> colour;
+    /// The colour's name, for whoever cannot see it.
+    in property <string> label;
+    in property <bool> chosen;
+    /// Not a colour yet: the dot wears a plus, cut out in the panel's
+    /// colour, to say it is where a colour would go.
+    in property <bool> blank;
+
+    callback clicked();
+
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    border-width: 2px;
+    border-color: root.chosen ? Theme.fg
+        : touch.has-hover ? Theme.line-strong
+        : Colors.transparent;
+
+    accessible-role: button;
+    accessible-label: root.label;
+
+    animate border-color { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    Rectangle {
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.colour;
+
+        animate background { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+        if root.blank: Icon {
+            glyph: Glyph.plus;
+            size: 10px;
+            weight: 2.6;
+            tint: Theme.panel;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component PageTab inherits Rectangle {
+    in property <string> label;
+    in property <Glyph> glyph;
+    in property <bool> current;
+
+    callback clicked();
+
+    height: 30px;
+    border-radius: Theme.r-sm;
+    background: root.current ? Theme.field-active
+        : touch.has-hover ? Theme.field
+        : Colors.transparent;
+
+    animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: root.glyph;
+                size: 13px;
+                tint: root.current ? Theme.fg : Theme.fg-muted;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.label;
+            color: root.current ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// One system fact: muted label left, value right. Lifted from the Details
+// panel's FactRow (config-pane.slint) and left there too — that one carries
+// the panel's own gutters, and in here the section already pads. The value is
+// a read-only TextInput for the reason it is one there: a fact you cannot
+// select is a fact you have to retype. The button above copies the lot, and
+// this is how you take one line instead.
+component FactRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+
+    spacing: 12px;
+    min-height: 21px;
+
+    Text {
+        text: root.label;
+        color: Theme.fg-muted;
+        font-size: Theme.fs;
+        vertical-alignment: center;
+    }
+
+    TextInput {
+        horizontal-stretch: 1;
+        text: root.value;
+        color: Theme.fg;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs;
+        horizontal-alignment: right;
+        // The label beside this one is centred and the row is taller than a
+        // line; without this the value rides at the top of it.
+        vertical-alignment: center;
+        read-only: true;
+        single-line: false;
+        wrap: word-wrap;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+    }
+}
+
+export component SettingsDialog inherits Modal {
+    in property <SettingsData> data;
+    in property <[ModelData]> transcribers;
+    in property <[ModelData]> voices;
+    /// the releases a person can switch to, newest first, and beside each
+    /// the day it came out - or that it is this one
+    in property <[string]> versions;
+    in property <[string]> version-details;
+    in property <[string]> languages;
+    /// The system report, as rows. See system_facts() in main.rs.
+    in property <[SystemFactData]> system-facts;
+    /// The same facts as one block of text, because a clipboard takes text
+    /// and not a model. Built from the same list, so the page and the paste
+    /// cannot come apart.
+    in property <string> system-report;
+
+    callback page-changed(index: int);
+    /// Opens the folder this run's log is being written into.
+    callback show-log();
+    callback language-changed(index: int);
+    callback log-level-changed(index: int);
+    /// The theme, chosen rather than flipped. A toggle in the strip could only
+    /// say "the other one"; a page with two named options can say which one is
+    /// on, which is the whole reason it moved in here.
+    callback theme-changed(dark: bool);
+    /// The accent, as an index into `Theme.accent-names`.
+    callback accent-changed(index: int);
+    /// A colour picked by hand in place of any on the list.
+    callback accent-custom-changed(colour: color);
+    /// The playhead's colour, picked by hand in place of the palette's own.
+    callback playhead-changed(colour: color);
+    /// The palette's own playhead colour, back in place of a picked one.
+    callback playhead-reset();
+    callback playhead-stops-changed(on: bool);
+    callback magnetic-changed(on: bool);
+    callback download-source-changed(index: int);
+    callback download-base-edited(text: string);
+    callback server-enabled-changed(on: bool);
+    callback server-host-edited(text: string);
+    callback server-port-edited(port: int);
+    callback server-token-edited(text: string);
+    /// A fresh random token, in place of whatever is there.
+    callback server-token-generated();
+    /// the Version page: look for the releases, pick one, put it in place
+    callback check-updates();
+    callback version-chosen(index: int);
+    callback install-version();
+    callback install-cancel();
+    callback model-activated(id: string);
+    callback model-download(id: string);
+    callback model-cancel(id: string);
+    callback model-remove(id: string);
+
+    /// `Theme.accent-names`, each in the chosen language, in the same order.
+    /// A second list rather than a lookup on the first because the string
+    /// inventory (scripts/locales.py) is built from literal calls, and a name
+    /// that only ever reached `I18n.t` through a variable would never be
+    /// offered to a translator.
+    property <[string]> accent-labels: [
+        I18n.t("settings.lime"), I18n.t("settings.sky"),
+        I18n.t("settings.violet"), I18n.t("settings.rose"), I18n.t("settings.amber"),
+        I18n.t("settings.mint"),
+    ];
+
+    /// The window is a phone's. No Remote page then - the API on a socket
+    /// is a desk's affair, driven from a terminal the phone has not got -
+    /// and the column of pages starts narrower and drags by a wider
+    /// hairline, since the sheet is the screen's width and a finger is
+    /// what drags it.
+    in property <bool> phone;
+
+    /// The column of pages' width, as the hairline beside it was last left.
+    /// In-out because it is dragged; what is drawn is `pages` below, which
+    /// keeps it inside the room the sheet has.
+    in-out property <length> pages-w: root.phone ? 112px : 164px;
+    /// Narrow enough to be a real squeeze, wide enough for a mark and the
+    /// start of a word.
+    property <length> min-pages: 64px;
+    /// Where the column was when the hairline went down. A drag is one
+    /// pointer, so one slot is enough.
+    property <length> press-pages;
+
+    /// The Remote page's token is shown in clear rather than as dots.
+    /// Off each time the sheet opens: showing it is a decision for the
+    /// moment, not a setting.
+    property <bool> token-shown;
+    changed open => {
+        if (!root.open) {
+            root.token-shown = false;
+        }
+    }
+
+    open: root.data.open;
+    title: I18n.t("common.settings");
+    glyph: Glyph.settings;
+    surface-width: 640px;
+    // Fixed rather than fitted: the pages are different lengths and a sheet
+    // that resized as you moved between them would be its own distraction.
+    surface-height: 460px;
+
+    HorizontalLayout {
+        // The clipboard takes text, so there has to be a TextInput holding
+        // the report: Slint copies from a text element's own selection and
+        // has no other way in. It is never read — it is zero wide and clipped
+        // — but it cannot live beside the button that uses it, and that is
+        // worth writing down, because it looks like it should.
+        //
+        // A layout gives every child at least its minimum, and a TextInput's
+        // minimum height is its text: seven lines, about 120px, which a
+        // wrapper cannot cap — an explicit `height: 0px` on the box around it
+        // sets that box's preferred size and loses to the child's minimum
+        // anyway. In the section body that bought a 120px band with the copy
+        // button floating in the middle of it. Here it is one more column of
+        // this row, and the row is the sheet's fixed 418px, so the whole of
+        // what it asks for disappears into height that was already there.
+        Rectangle {
+            width: 0px;
+            clip: true;
+
+            report := TextInput {
+                width: 0px;
+                text: root.system-report;
+                read-only: true;
+                single-line: false;
+            }
+        }
+
+        // The column of pages, the hairline that sizes it, and the page.
+        // Placed rather than laid out, as the timeline pane places its lane
+        // headers and for the same reason: the column is a width someone
+        // dragged and the page is the remainder, and saying so outright is
+        // shorter than a layout and the stretch factors that would express it.
+        body := Rectangle {
+            horizontal-stretch: 1;
+
+            /// The column as it is drawn: never past two fifths of the
+            /// sheet, whatever it was dragged to on a wider one, so a phone
+            /// - whose sheet is its screen - keeps most of the width for the
+            /// page. See `headers-w` in the timeline pane, which has the
+            /// same problem for the same reason.
+            property <length> pages: Math.max(root.min-pages,
+                Math.min(root.pages-w, self.width * 0.4));
+
+            // ── the pages ────────────────────────────────────────────────
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: body.pages;
+                height: parent.height;
+                clip: true;
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 2px;
+                    alignment: start;
+
+                    PageTab {
+                        label: I18n.t("settings.general");
+                        glyph: Glyph.settings;
+                        current: root.data.tab == 0;
+                        clicked => { root.page-changed(0); }
+                    }
+                    PageTab {
+                        label: I18n.t("settings.appearance");
+                        glyph: Glyph.sun;
+                        current: root.data.tab == 1;
+                        clicked => { root.page-changed(1); }
+                    }
+                    PageTab {
+                        label: I18n.t("common.transcriber");
+                        glyph: Glyph.waveform;
+                        current: root.data.tab == 2;
+                        clicked => { root.page-changed(2); }
+                    }
+                    PageTab {
+                        label: I18n.t("common.speech");
+                        glyph: Glyph.music;
+                        current: root.data.tab == 3;
+                        clicked => { root.page-changed(3); }
+                    }
+                    if !root.phone: PageTab {
+                        label: I18n.t("settings.remote");
+                        glyph: Glyph.lock;
+                        current: root.data.tab == 4;
+                        clicked => { root.page-changed(4); }
+                    }
+                    if !root.phone: PageTab {
+                        label: I18n.t("settings.version");
+                        glyph: Glyph.tag;
+                        current: root.data.tab == 6;
+                        clicked => { root.page-changed(6); }
+                    }
+                    PageTab {
+                        label: I18n.t("settings.about");
+                        glyph: Glyph.sparkle;
+                        current: root.data.tab == 5;
+                        clicked => { root.page-changed(5); }
+                    }
+                }
+            }
+
+            // The hairline between the two, and the handle that moves it:
+            // the one the panes size their columns by. Wider to take hold
+            // of on a phone.
+            HairlineSplitter {
+                x: body.pages;
+                y: 0;
+                height: parent.height;
+                grab: root.phone ? 12px : 3px;
+
+                pressed => { root.press-pages = body.pages; }
+                moved(delta) => {
+                    root.pages-w = Math.max(root.min-pages,
+                        Math.min(body.width * 0.4, root.press-pages + delta));
+                }
+            }
+
+        // ── the page ─────────────────────────────────────────────────────
+        PaneScroll {
+            x: body.pages + 1px;
+            y: 0;
+            width: Math.max(0px, body.width - body.pages - 1px);
+            height: parent.height;
+            finger: root.phone;
+
+            if root.data.tab == 0: VerticalLayout {
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.language");
+
+                    // Native names: whoever is stranded in a language they
+                    // cannot read must still recognise their own in this list.
+                    Select {
+                        options: root.languages;
+                        current: root.data.language;
+                        changed(index) => { root.language-changed(index); }
+                    }
+                }
+
+                // What the log records. Normal is what a bug report needs
+                // most days; Debug and Everything are for when a report
+                // asks, and the file grows faster for them. CONCAT_LOG in
+                // the environment overrides this for one run.
+                // https://github.com/jub0t/Concat/issues/223
+                DialogSection {
+                    title: I18n.t("settings.logLevel");
+                    hint: I18n.t("settings.logLevelHint");
+
+                    Select {
+                        options: [
+                            I18n.t("settings.logErrors"),
+                            I18n.t("settings.logWarnings"),
+                            I18n.t("settings.logNormal"),
+                            I18n.t("settings.logDebug"),
+                            I18n.t("settings.logEverything"),
+                        ];
+                        current: root.data.log-level;
+                        changed(index) => { root.log-level-changed(index); }
+                    }
+                }
+
+                // Off, a delete leaves its hole and a trim moves one edge.
+                // On, the lane closes up behind either - the magnetic
+                // timeline of the mainstream editors, asked for in
+                // https://github.com/jub0t/Concat/issues/106
+                DialogSection {
+                    title: I18n.t("common.magneticTimeline");
+                    hint: I18n.t("settings.deletingClipPullsWhat");
+                    switchable: true;
+                    on: root.data.magnetic;
+                    open: false;
+                    switched(on) => { root.magnetic-changed(on); }
+                }
+
+                // Off, the playhead goes wherever the ruler is clicked, past
+                // the last clip included, so a clip can be placed out there.
+                // On, it stops where the content does.
+                DialogSection {
+                    title: I18n.t("settings.playhead");
+                    hint: I18n.t("settings.offClickRulerPast");
+                    switchable: true;
+                    on: root.data.playhead-stops;
+                    open: false;
+                    switched(on) => { root.playhead-stops-changed(on); }
+                }
+
+                // The models are open weights from elsewhere, mirrored so
+                // they stay reachable; where a download looks first is a
+                // matter of where you are. Every source is still tried.
+                DialogSection {
+                    title: I18n.t("settings.downloads");
+                    hint: I18n.t("settings.modelsFetchedFirstTime");
+                    choices: [
+                        I18n.t("settings.automatic"),
+                        I18n.t("settings.concatsMirror"),
+                        "hf-mirror.com",
+                        I18n.t("settings.originalSource"),
+                        I18n.t("settings.customUrl"),
+                    ];
+                    choice-details: [
+                        "",
+                        "github.com",
+                        I18n.t("settings.forMainlandChina"),
+                        I18n.t("settings.whereEachModelCame"),
+                        I18n.t("settings.mirrorOwn"),
+                    ];
+                    choice: root.data.download-source;
+                    chose(index) => { root.download-source-changed(index); }
+                    // The body is only the custom source's address, so it
+                    // folds away for every other choice.
+                    open: root.data.download-source == 4;
+
+                    if root.data.download-source == 4: Field {
+                        value: root.data.download-base;
+                        placeholder: "https://models.example.com/concat";
+                        technical: true;
+                        edited(text) => { root.download-base-edited(text); }
+                    }
+                }
+            }
+
+            // Read straight off the Theme global rather than through
+            // SettingsData: the theme is not editor state — it is one bool
+            // that every colour in the tree already binds to — and routing it
+            // through the struct would be a second copy to keep in step with
+            // the first. The change still goes out as a callback, so Rust
+            // stays the one place a remembered preference will be written.
+            if root.data.tab == 1: VerticalLayout {
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.theme");
+
+                    SegmentedControl {
+                        options: [I18n.t("settings.dark"), I18n.t("settings.light")];
+                        current: Theme.dark ? 0 : 1;
+                        changed(index) => { root.theme-changed(index == 0); }
+                    }
+                }
+
+                // The accent: the colour every selection, activated tool and
+                // focus ring is drawn in. Read off the Theme global for the
+                // same reason the theme is, and each one is shown in the
+                // palette that is on, so the choice is made in the room it
+                // will be worn in. The chosen one's name sits at the end of
+                // the row: a dot is a colour, not a word, and the word is
+                // what the settings file remembers.
+                DialogSection {
+                    title: I18n.t("settings.accent");
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+
+                        for name[index] in Theme.accent-names: AccentSwatch {
+                            colour: Theme.accent-of(index);
+                            label: root.accent-labels[index];
+                            chosen: Theme.accent-choice == index;
+                            clicked => { root.accent-changed(index); }
+                        }
+
+                        // The seventh dot is any colour at all. Grey with a
+                        // plus until one is picked — a grey dot is a blank,
+                        // not an offer of grey — and the picked colour once
+                        // one is. It opens the same picker a title's colour
+                        // does, seeded with the accent that is on, so the
+                        // picking starts from what the window already wears.
+                        Rectangle {
+                            width: 26px;
+                            height: 26px;
+
+                            AccentSwatch {
+                                colour: Theme.accent-is-custom ? Theme.accent-custom : Theme.fg-dim;
+                                label: I18n.t("common.custom");
+                                chosen: Theme.accent-is-custom;
+                                blank: !Theme.accent-is-custom;
+                                clicked => { picker.show(); }
+                            }
+
+                            picker := PopupWindow {
+                                x: 0;
+                                y: parent.height + 4px;
+                                width: 236px;
+                                close-policy: close-on-click-outside;
+
+                                Rectangle {
+                                    background: Theme.raised;
+                                    border-width: 1px;
+                                    border-color: Theme.line-strong;
+                                    border-radius: Theme.r;
+
+                                    ColorPicker {
+                                        value: Theme.accent-is-custom ? Theme.accent-custom : Theme.accent;
+                                        alpha: false;
+                                        changed(next) => { root.accent-custom-changed(next); }
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: Theme.accent-is-custom ? I18n.t("common.custom")
+                                : root.accent-labels[Theme.accent-choice];
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+
+                        if Theme.accent-is-custom: Text {
+                            text: Fmt.hex-of(Theme.accent-custom, false);
+                            color: Theme.fg-dim;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // The playhead: the one line over the lanes that has to be
+                // found at a glance, whatever the clips under it are wearing.
+                // The palette's own is lime. The second dot opens the same
+                // picker the accent does, and the picked colour replaces the
+                // palette's under both palettes until the first dot puts it
+                // back. Read off the Theme global for the same reason the
+                // accent is, and the hex is always shown: what the line is
+                // wearing is the whole point of the row.
+                DialogSection {
+                    title: I18n.t("settings.playhead");
+                    hint: I18n.t("settings.lineAcrossLanesMarks");
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+
+                        AccentSwatch {
+                            colour: Theme.playhead-default;
+                            label: I18n.t("settings.default");
+                            chosen: !Theme.playhead-is-custom;
+                            clicked => { root.playhead-reset(); }
+                        }
+
+                        Rectangle {
+                            width: 26px;
+                            height: 26px;
+
+                            AccentSwatch {
+                                colour: Theme.playhead-is-custom ? Theme.playhead-custom : Theme.fg-dim;
+                                label: I18n.t("common.custom");
+                                chosen: Theme.playhead-is-custom;
+                                blank: !Theme.playhead-is-custom;
+                                clicked => { playhead-picker.show(); }
+                            }
+
+                            playhead-picker := PopupWindow {
+                                x: 0;
+                                y: parent.height + 4px;
+                                width: 236px;
+                                close-policy: close-on-click-outside;
+
+                                Rectangle {
+                                    background: Theme.raised;
+                                    border-width: 1px;
+                                    border-color: Theme.line-strong;
+                                    border-radius: Theme.r;
+
+                                    ColorPicker {
+                                        value: Theme.playhead;
+                                        alpha: false;
+                                        changed(next) => { root.playhead-changed(next); }
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: Theme.playhead-is-custom ? I18n.t("common.custom") : I18n.t("settings.default");
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: Fmt.hex-of(Theme.playhead, false);
+                            color: Theme.fg-dim;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            if root.data.tab == 2: VerticalLayout {
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.models");
+
+                    for model in root.transcribers: ModelRow {
+                        model: model;
+                        activated => { root.model-activated(model.id); }
+                        download => { root.model-download(model.id); }
+                        cancel => { root.model-cancel(model.id); }
+                        remove => { root.model-remove(model.id); }
+                    }
+
+                    HorizontalLayout {
+                        padding-top: 2px;
+                        spacing: 6px;
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.data.disk;
+                            color: Theme.fg-muted;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            Icon { glyph: Glyph.check; size: 12px; tint: Theme.green; }
+                        }
+
+                        Text {
+                            text: I18n.t("settings.runsLocally");
+                            color: Theme.green;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            if root.data.tab == 3: VerticalLayout {
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.voices");
+
+                    for model in root.voices: ModelRow {
+                        model: model;
+                        activated => { root.model-activated(model.id); }
+                        download => { root.model-download(model.id); }
+                        cancel => { root.model-cancel(model.id); }
+                        remove => { root.model-remove(model.id); }
+                    }
+                }
+            }
+
+            // The API on a socket. The switch is the whole of it for most
+            // people; the address and the token are there for the one who
+            // is putting a script on another machine, and the hints say
+            // what that opens.
+            if root.data.tab == 4 && !root.phone: VerticalLayout {
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.remoteControl");
+                    hint: I18n.t("settings.servesConcatApiWhile");
+                    switchable: true;
+                    on: root.data.server-enabled;
+                    switched(on) => { root.server-enabled-changed(on); }
+
+                    Text {
+                        text: root.data.server-status;
+                        color: Theme.fg-muted;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+
+                DialogSection {
+                    title: I18n.t("settings.address");
+                    hint: I18n.t("settings.localAddressWarning");
+
+                    // One control in two halves: the address, a fixed
+                    // colon nobody has to type, and the port as a number
+                    // held to what a port can be.
+                    HorizontalLayout {
+                        spacing: 0;
+
+                        Field {
+                            value: root.data.server-host;
+                            placeholder: "127.0.0.1";
+                            technical: true;
+                            radius-right: 0px;
+                            edited(text) => { root.server-host-edited(text); }
+                        }
+
+                        Rectangle {
+                            width: 18px;
+                            min-height: 28px;
+                            max-height: 28px;
+                            background: Theme.well;
+
+                            Text {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                text: ":";
+                                color: Theme.fg-dim;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs;
+                            }
+                        }
+
+                        NumberField {
+                            width: 76px;
+                            horizontal-stretch: 0;
+                            radius-left: 0px;
+                            value: root.data.server-port;
+                            minimum: 0;
+                            maximum: 65535;
+                            step: 1;
+                            precision: 0;
+                            changed(port) => { root.server-port-edited(port); }
+                        }
+                    }
+                }
+
+                DialogSection {
+                    title: I18n.t("settings.token");
+                    hint: I18n.t("settings.whatConnectionMustPresent");
+
+                    // Dots until asked, the way a password field is: the
+                    // token is what lets a connection in, and Settings is
+                    // open on screens other people look at. The eye shows
+                    // it for as long as the sheet is up.
+                    HorizontalLayout {
+                        spacing: 6px;
+
+                        Field {
+                            value: root.data.server-token;
+                            placeholder: I18n.t("common.none");
+                            technical: true;
+                            secret: !root.token-shown;
+                            edited(text) => { root.server-token-edited(text); }
+                        }
+
+                        Button {
+                            square: true;
+                            glyph: root.token-shown ? Glyph.eye-off : Glyph.eye;
+                            label: root.token-shown ? I18n.t("settings.hideTheToken") : I18n.t("settings.showTheToken");
+                            clicked => { root.token-shown = !root.token-shown; }
+                        }
+
+                        Button {
+                            label: I18n.t("settings.newToken");
+                            clicked => { root.server-token-generated(); }
+                        }
+                    }
+                }
+            }
+
+            // The Version page: which release this is, whether a newer one
+            // is out, and any release from 0.2.5 on put in this one's place.
+            // A desk's affair, like the Remote page: a phone's store does
+            // its updating.
+            if root.data.tab == 6 && !root.phone: VerticalLayout {
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.version");
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: I18n.t1("settings.concat", "\{root.data.version}");
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                        }
+
+                        Text {
+                            text: root.data.update-status;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            alignment: start;
+
+                            Button {
+                                label: root.data.checking
+                                    ? I18n.t("settings.checkingForUpdates")
+                                    : I18n.t("settings.checkForUpdates");
+                                enabled: !root.data.checking;
+                                clicked => { root.check-updates(); }
+                            }
+                        }
+                    }
+                }
+
+                DialogSection {
+                    title: I18n.t("settings.switchVersion");
+                    hint: I18n.t("settings.switchVersionNote");
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            Select {
+                                horizontal-stretch: 1;
+                                options: root.versions;
+                                details: root.version-details;
+                                current: root.data.version-choice;
+                                placeholder: I18n.t("settings.noReleasesYet");
+                                enabled: root.versions.length > 0 && !root.data.installing;
+                                changed(index) => { root.version-chosen(index); }
+                            }
+
+                            if !root.data.installing: Button {
+                                label: I18n.t("settings.install");
+                                glyph: Glyph.import;
+                                primary: true;
+                                enabled: root.data.can-install;
+                                clicked => { root.install-version(); }
+                            }
+
+                            if root.data.installing: Button {
+                                label: I18n.t("common.cancel");
+                                glyph: Glyph.close;
+                                ghost: true;
+                                clicked => { root.install-cancel(); }
+                            }
+                        }
+
+                        if root.data.install-note != "": Text {
+                            text: root.data.install-note;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+
+                        if root.data.installing: VerticalLayout {
+                            spacing: 6px;
+
+                            Progress { value: root.data.install-progress; }
+
+                            Text {
+                                text: root.data.install-transferred;
+                                color: Theme.fg-muted;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs-sm;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.data.tab == 5: VerticalLayout {
+                // The name and the build, and nothing under them: the engine
+                // and the FFmpeg it links are rows of the table below, where
+                // a report reads them from.
+                DialogSection {
+                    first: true;
+                    title: I18n.t("settings.about");
+
+                    Text {
+                        text: I18n.t1("settings.concat", "\{root.data.version}");
+                        color: Theme.fg;
+                        font-size: Theme.fs-lg;
+                        font-weight: Theme.weight-title;
+                    }
+                }
+
+                // The block an issue report is opened with. Every line in it
+                // is something the report will be asked for and nobody has to
+                // hand — which build, which renderer, which OS — and reading
+                // them off a screen one at a time is how a report ends up
+                // missing the one that mattered. Hence the buttons: the whole
+                // block in one press, and the rows still selectable a line at
+                // a time for when only one of them is the answer.
+                //
+                // Laid out by hand rather than as a DialogSection, because the
+                // buttons belong on the title's row, at its far end, and a
+                // section's header has no slot for them. The hairline, the
+                // header's height and the body's inset are the section's own,
+                // so the group reads as one more of them.
+                Rectangle {
+                    height: 1px;
+                    background: Theme.line;
+                }
+
+                Rectangle {
+                    height: 30px;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: Theme.gap;
+
+                        Text {
+                            text: I18n.t("settings.systemInformation");
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // The other half of a report: the block says what
+                        // this machine is, the log says what the app did on
+                        // it. A run writes one file, and the last ten runs
+                        // are in the folder this opens.
+                        IconButton {
+                            glyph: Glyph.folder;
+                            label: I18n.t("settings.showTheLog");
+                            icon-size: 13px;
+                            clicked => { root.show-log(); }
+                        }
+
+                        IconButton {
+                            glyph: Glyph.copy;
+                            label: I18n.t("settings.copySystemInformation");
+                            icon-size: 13px;
+                            // Cleared again straight away: the selection is
+                            // the mechanism, not something the reader asked
+                            // for, and leaving it set would light up a block
+                            // of text nobody can see.
+                            clicked => {
+                                report.select-all();
+                                report.copy();
+                                report.clear-selection();
+                            }
+                        }
+                    }
+                }
+
+                // No spacing: the rows carry their own height, the way the
+                // Details panel's table does, and any more between them opens
+                // the table back into a list of paragraphs.
+                VerticalLayout {
+                    padding: 14px;
+                    padding-top: 4px;
+                    spacing: 0px;
+
+                    for fact in root.system-facts: FactRow {
+                        label: fact.label;
+                        value: fact.value;
+                    }
+                }
+            }
+        }
+        }
+    }
+}
