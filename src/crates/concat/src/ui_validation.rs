@@ -46,12 +46,12 @@ fn capture(
     window.set_size(PhysicalSize::new(width, height));
     let mut pixels = vec![Pixel::default(); (width * height) as usize];
     window.request_redraw();
-    // Lay out once, then settle the tab thumb and field animations before
-    // retaining pixels. The clock advances without sleeping or a GUI loop.
+    // Lay out once, then settle the tabs, fields and 380 ms export sheet
+    // before retaining pixels. Virtual time adds no real sleep or GUI loop.
     window.draw_if_needed(|renderer| {
         renderer.render(&mut pixels, width as usize);
     });
-    clock.set(clock.get() + Duration::from_millis(250));
+    clock.set(clock.get() + Duration::from_millis(500));
     slint::platform::update_timers_and_animations();
     window.request_redraw();
     let rendered = window.draw_if_needed(|renderer| {
@@ -304,9 +304,8 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
                 label(&selected),
                 "visible size must follow the chosen option"
             );
-            assert_eq!(
-                label(&initial),
-                label(&restored),
+            assert!(
+                label(&initial) == label(&restored),
                 "controller reset must restore visible size after a real dropdown click"
             );
         }
