@@ -175,6 +175,11 @@ jobs:
               for down in [true, false] {
                   let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
                   event.flags = flags
+                  if code == 115 || code == 124 {
+                      event.flags.formUnion([.maskSecondaryFn, .maskNumericPad])
+                      var character: UniChar = code == 115 ? 0xF729 : 0xF703
+                      event.keyboardSetUnicodeString(stringLength: 1, unicodeString: &character)
+                  }
                   event.post(tap: .cghidEventTap)
                   Thread.sleep(forTimeInterval: 0.1)
               }
