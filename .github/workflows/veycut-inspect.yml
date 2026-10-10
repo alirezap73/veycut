@@ -169,19 +169,19 @@ jobs:
               for modifier in modifiers {
                   let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier, keyDown: true)!
                   event.flags = flags
-                  event.postToPid(pid)
+                  event.post(tap: .cghidEventTap)
                   Thread.sleep(forTimeInterval: 0.1)
               }
               for down in [true, false] {
                   let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
                   event.flags = flags
-                  event.postToPid(pid)
+                  event.post(tap: .cghidEventTap)
                   Thread.sleep(forTimeInterval: 0.1)
               }
               for modifier in modifiers.reversed() {
                   let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier, keyDown: false)!
                   event.flags = []
-                  event.postToPid(pid)
+                  event.post(tap: .cghidEventTap)
                   Thread.sleep(forTimeInterval: 0.1)
               }
           }
