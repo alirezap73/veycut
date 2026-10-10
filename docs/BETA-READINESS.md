@@ -14,7 +14,9 @@ Clip duplication and clipboard paste now insert a complete snapshot as one edit.
 
 The [replacement Mac package build](https://github.com/alirezap73/veycut/actions/runs/38069013402) and [native package/UI inspection](https://github.com/alirezap73/veycut/actions/runs/38082919880) passed for exact source `e46372af035b073ddf3fa04673dcd82d6c66ded2`. Installer SHA-256: `bfa886a430bdd9b20352a683f9e706970bfb29a2cd3d35bac3db615d6dd88df5`. The package remains a workflow artifact; no official beta has been published.
 
-The packaged app imported a copied generated MP4 through the native file picker, saved its probed dimensions/audio metadata and retained the media after reopening. Native project open/save/close/reopen, single-step duplication undo/redo, failed-save window retention and retry all passed. An unsaved undo also survived a failed close and was persisted when saving became possible. The initial timeline was seeded outside the UI; imported media was not seeded. `PROJECT-UI-TEST.json` records this separate editing evidence, while `PACKAGE-INSPECTION.json` describes only the idle startup observation. Split/trim through the packaged UI, a complete subtitle session, GUI export, drag/drop, longer user footage and independent-machine installation remain unverified. The previous installer below does not contain the duplication fix.
+The [55-step packaged GUI check](https://github.com/alirezap73/veycut/actions/runs/38085438701) passed on that exact runtime. It imports a copied generated MP4 through the native picker, removes the initially seeded clip and places the imported media from the library onto the timeline. It splits at one second with undo/redo, imports editable bilingual WebVTT captions with undo/redo, replaces the English caption, exports WebVTT, saves/reopens and exports video through visible controls. The H.264/AAC output was independently fully decoded: 720×1280, 30 fps, 60 frames, two seconds, with silence followed by the expected tone. Visual inspection of the two extracted frames confirmed Persian shaping and the unique replacement text `GUI subtitle pass`, distinct from the fixture's baked captions.
+
+Native project open/save/close/reopen, single-step duplication undo/redo, failed-save window retention and retry also passed. An unsaved undo survived a failed close and was persisted when saving became possible. `CORE-GUI-TEST.json` and `PROJECT-UI-TEST.json` record editing evidence; `PACKAGE-INSPECTION.json` describes only idle startup. This generated two-second fixture does not verify trim/move gestures, drag/drop, longer user footage, transcription or independent-machine installation. The previous installer below does not contain the duplication fix. No official beta has been published.
 
 ## Previous source validation at e5d667c
 
@@ -29,8 +31,8 @@ The combined changes preserve active export cancellation, report rejected captio
 | Main path | Verified evidence | Remaining scope |
 | --- | --- | --- |
 | Import video, stills and audio | Native integration creates and probes actual encoded video/audio files | Native picker and drag/drop with user-supplied formats |
-| Split, trim and move clips | `every_edit_still_exports` exports after each command and checks decoded picture/audio at expected times | Mouse and keyboard operations in the packaged editor |
-| Text and subtitles | Bundled Persian shaping, bilingual captions, SRT/WebVTT and undo/redo checks | Full packaged-editor subtitle session |
+| Split, trim and move clips | Engine export regressions plus packaged GUI split undo/redo on an imported clip | Packaged trim/move gestures and longer timelines |
+| Text and subtitles | Packaged bilingual WebVTT import, undo/redo, text replacement, file export and rendered video captions | Longer caption sessions, appearance changes and transcription |
 | Save and reopen | Integration reopens the project and compares the flattened clips after each export | Longer sessions and interruption/restart on an independent machine |
 | Export | Full decoding and audio checks, portrait captions, selectable dimensions, output collision protection | Longer real footage and repeated user-driven exports |
 | Cancel and missing media | Stale reply guards, cancellable search, duplicate/partial-tree refusal | User-driven cancel/relink in a complete packaged session |
