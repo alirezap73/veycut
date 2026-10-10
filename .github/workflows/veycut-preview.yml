@@ -55,14 +55,22 @@ jobs:
           run-id: ${{ inputs.candidate_run }}
           name: VeyCut-macos-arm64
           path: bundles
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run }}
+          name: VeyCut-platform-validation
+          path: bundles
       - name: Manifest and checksums
         env:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           python3 scripts/test_veycut_release.py
+          python3 -c 'import json, os; assert json.load(open("bundles/VALIDATION.json"))["source_revision"] == os.environ["GITHUB_SHA"]'
           python3 scripts/veycut_release.py --bundles bundles --version "$VERSION" --tag "$TAG" --revision "$GITHUB_SHA"
           cd bundles
+          sha256sum VALIDATION.json >> SHA256SUMS
           sha256sum -c SHA256SUMS
       - name: Create preview draft
         env:

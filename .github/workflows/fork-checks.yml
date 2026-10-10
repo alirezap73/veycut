@@ -47,3 +47,5 @@ jobs:
         working-directory: src
       - name: VeyCut release metadata tests
         run: python3 scripts/test_veycut_release.py
+      - name: Mac preview validation policy tests
+        run: python3 scripts/test_verify_preview_ci.py

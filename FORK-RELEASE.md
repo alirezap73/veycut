@@ -32,7 +32,7 @@ Begin with one tested desktop target. Mark other desktop/mobile targets unverifi
 2. Run Fork development checks.
 3. Run Fork full validation. This calls the existing CI: native checks, tests, lints and cross-platform jobs run on GitHub runners.
 4. Inspect failures and fix them before enabling a fork installer publisher.
-5. Run **VeyCut macOS candidate** with the successful CI run ID in `validation_run`. It verifies that the full native checks passed at the exact same source revision, runs the lightweight checks and builds an Apple silicon test artifact on GitHub. This creates no public release. Review that artifact before releasing an installer.
+5. Run **VeyCut macOS candidate** with the successful CI run ID in `validation_run`. It verifies passing Linux native, macOS compilation and wasm checks, rejects any runtime or package-build changes since that validation, records allowed workflow/documentation changes in VALIDATION.json, runs the lightweight checks and builds an Apple silicon test artifact on GitHub. Windows validation is separate and Windows installers are excluded from this preview. This creates no public release. Review that artifact before releasing an installer.
 
 The inherited Release workflow is intentionally upstream-only. Fork full validation creates no public release and uploads no unbranded installer. Do not remove the publisher restriction until the fork's branding, update URLs and package scripts have been changed and tested.
 
@@ -44,4 +44,4 @@ The inherited Release workflow is intentionally upstream-only. Fork full validat
 - [ ] Native tests, GUI screenshot review and package build at the final 0.2.0 commit.
 - [ ] Re-run Windows tests serially; inspect effect-card progress if they time out again.
 
-Publish source updates for server validation. Publish a desktop preview only after its native checks and build succeed, with unsigned/clean-machine limitations stated. A preview is not a verified stable installer.
+Publish source updates for server validation. Publish a Mac preview only after its required Linux/macOS/wasm checks and Mac build succeed, with unsigned/clean-machine limitations stated. A preview is not a verified stable installer.

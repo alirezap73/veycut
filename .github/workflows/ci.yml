@@ -7,6 +7,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Run only Windows validation, reusing its build cache
+        type: boolean
+        default: false
   # release.yml runs this before it builds anything: a tag on a red tree
   # is not a release. It names the tag, because a release started by hand
   # runs on main, and main is not what it builds.
@@ -16,6 +21,9 @@ on:
         description: The ref to test, when it is not the one this runs on
         type: string
         default: ""
+      windows_only:
+        type: boolean
+        default: false
 
 # Keyed on what is tested, so a release testing its tag and a push to
 # main never cancel each other.
@@ -25,6 +33,7 @@ concurrency:
 
 jobs:
   engine:
+    if: ${{ !inputs.windows_only }}
     name: Engine tests and lints
     runs-on: ubuntu-latest
     env:
@@ -149,6 +158,7 @@ jobs:
   # creeps into concat-core or concat-project fails here, not when someone
   # next tries the target. See src/README.md for the list.
   web:
+    if: ${{ !inputs.windows_only }}
     name: Engine on wasm32
     runs-on: ubuntu-latest
     steps:
@@ -182,13 +192,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-15
-            sherpa: osx-arm64
-            verb: Compiles
-          - os: windows-2022
-            sherpa: win-x64
-            verb: Tests
+        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]') }}
     runs-on: ${{ matrix.os }}
     env:
       FFMPEG_WINDOWS: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip

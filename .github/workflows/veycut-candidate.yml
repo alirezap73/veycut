@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       validation_run:
-        description: Successful CI run at this exact source revision
+        description: CI run with passing Linux, macOS and wasm checks for this runtime source
         required: true
         type: string
 
@@ -22,7 +22,10 @@ jobs:
     if: github.repository == 'alirezap73/veycut'
     runs-on: ubuntu-latest
     steps:
-      - name: Verify completed native checks at the same revision
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify native Mac preview checks and runtime identity
         env:
           GH_TOKEN: ${{ github.token }}
           VALIDATION_RUN: ${{ inputs.validation_run }}
@@ -30,14 +33,14 @@ jobs:
           set -euo pipefail
           [[ "$VALIDATION_RUN" =~ ^[0-9]+$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATION_RUN" > "$RUNNER_TEMP/validation.json"
-          python3 - <<'PY'
-          import json, os, pathlib
-          run = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'validation.json').read_text())
-          assert run['head_sha'] == os.environ['GITHUB_SHA'], 'Native checks must match this exact revision'
-          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Native checks have not passed'
-          assert run['path'] == '.github/workflows/ci.yml', 'A full native CI run is required'
-          print('Verified native validation run', run['id'], 'at', run['head_sha'])
-          PY
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATION_RUN/jobs?per_page=100" > "$RUNNER_TEMP/jobs.json"
+          python3 scripts/test_verify_preview_ci.py
+          python3 scripts/verify_preview_ci.py "$RUNNER_TEMP/validation.json" "$RUNNER_TEMP/jobs.json" "$RUNNER_TEMP/VALIDATION.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: VeyCut-platform-validation
+          path: ${{ runner.temp }}/VALIDATION.json
+          if-no-files-found: error
   quick:
     uses: ./.github/workflows/fork-checks.yml
   build:
