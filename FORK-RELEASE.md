@@ -32,7 +32,7 @@ Begin with one tested desktop target. Mark other desktop/mobile targets unverifi
 2. Run Fork development checks.
 3. Run Fork full validation. This calls the existing CI: native checks, tests, lints and cross-platform jobs run on GitHub runners.
 4. Inspect failures and fix them before enabling a fork installer publisher.
-5. Run **VeyCut macOS candidate** to validate and build an Apple silicon test artifact on GitHub. This creates no public release. Test that artifact before releasing an installer.
+5. Run **VeyCut macOS candidate** with the successful CI run ID in `validation_run`. It verifies that the full native checks passed at the exact same source revision, runs the lightweight checks and builds an Apple silicon test artifact on GitHub. This creates no public release. Review that artifact before releasing an installer.
 
 The inherited Release workflow is intentionally upstream-only. Fork full validation creates no public release and uploads no unbranded installer. Do not remove the publisher restriction until the fork's branding, update URLs and package scripts have been changed and tested.
 

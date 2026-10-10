@@ -8,12 +8,17 @@ use slint::platform::software_renderer::{
 };
 use slint::platform::{Platform, WindowAdapter};
 use slint::{ComponentHandle, PhysicalSize};
+use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
-struct Backend(Rc<MinimalSoftwareWindow>);
+struct Backend(Rc<MinimalSoftwareWindow>, Rc<Cell<Duration>>);
 impl Platform for Backend {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.0.clone())
+    }
+    fn duration_since_start(&self) -> Duration {
+        self.1.get()
     }
 }
 
@@ -31,9 +36,23 @@ impl TargetPixel for Pixel {
     }
 }
 
-fn capture(window: &Rc<MinimalSoftwareWindow>, name: &str, width: u32, height: u32) {
+fn capture(
+    window: &Rc<MinimalSoftwareWindow>,
+    clock: &Cell<Duration>,
+    name: &str,
+    width: u32,
+    height: u32,
+) {
     window.set_size(PhysicalSize::new(width, height));
     let mut pixels = vec![Pixel::default(); (width * height) as usize];
+    window.request_redraw();
+    // Lay out once, then settle the tab thumb and field animations before
+    // retaining pixels. The clock advances without sleeping or a GUI loop.
+    window.draw_if_needed(|renderer| {
+        renderer.render(&mut pixels, width as usize);
+    });
+    clock.set(clock.get() + Duration::from_millis(250));
+    slint::platform::update_timers_and_animations();
     window.request_redraw();
     let rendered = window.draw_if_needed(|renderer| {
         renderer.render(&mut pixels, width as usize);
@@ -57,7 +76,9 @@ fn capture(window: &Rc<MinimalSoftwareWindow>, name: &str, width: u32, height: u
 #[test]
 fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-    slint::platform::set_platform(Box::new(Backend(window.clone()))).expect("offscreen backend");
+    let clock = Rc::new(Cell::new(Duration::ZERO));
+    slint::platform::set_platform(Box::new(Backend(window.clone(), clock.clone())))
+        .expect("offscreen backend");
     let app = crate::ui::App::new().expect("actual compiled Slint tree");
     let catalogue: serde_json::Value =
         serde_json::from_str(include_str!("../locales/en.json")).expect("English UI catalogue");
@@ -96,16 +117,43 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
                 .into()
         });
     app.show().expect("show offscreen window");
+    let chips = |options: &[(&str, f32)]| {
+        slint::ModelRc::new(slint::VecModel::from(
+            options
+                .iter()
+                .map(|(label, ratio)| crate::ui::ChipOption {
+                    label: (*label).into(),
+                    ratio: *ratio,
+                })
+                .collect::<Vec<_>>(),
+        ))
+    };
+    app.set_start_aspects(chips(&[
+        ("16:9", 16.0 / 9.0),
+        ("9:16", 9.0 / 16.0),
+        ("1:1", 1.0),
+    ]));
+    app.set_start_sizes(chips(&[("720p", 0.0), ("1080p", 0.0)]));
+    app.set_start_rates(chips(&[("24", 0.0), ("30", 0.0), ("60", 0.0)]));
     for (phone, width, height) in [(false, 1400, 900), (false, 900, 600), (true, 360, 640)] {
         app.set_phone(phone);
         app.set_on_start(true);
         app.set_start(crate::ui::StartData {
             composing: true,
             name: "VeyCut test".into(),
+            location: "Projects".into(),
+            aspect: 1,
+            size: 1,
+            rate: 1,
+            size_readout: "1080 × 1920".into(),
+            custom_width: 1080.0,
+            custom_height: 1920.0,
+            custom_fps: 30.0,
+            rate_readout: "30/1 fps".into(),
             frame_aspect: 0.5625,
             ..Default::default()
         });
-        capture(&window, "project", width, height);
+        capture(&window, &clock, "project", width, height);
         app.set_start(crate::ui::StartData::default());
         app.set_on_start(false);
         for section in 0..3 {
@@ -117,7 +165,13 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
                 offset: "0.5".into(),
                 ..Default::default()
             });
-            capture(&window, &format!("captions-{section}"), width, height);
+            capture(
+                &window,
+                &clock,
+                &format!("captions-{section}"),
+                width,
+                height,
+            );
         }
         app.set_captions(crate::ui::CaptionsSheetData::default());
     }

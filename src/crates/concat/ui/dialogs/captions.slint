@@ -212,7 +212,7 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            Text {
+            if root.section == 0: Text {
                 text: root.from-sound
                     ? I18n.t("captions.oneTitlePerPhrase")
                     : I18n.t("captions.oneTitlePerSentence");
@@ -278,7 +278,7 @@ export component CaptionsDialog inherits Modal {
                     vertical-alignment: center;
                 }
 
-                Text {
+                if !root.data.importing: Text {
                     text: "\{Math.round(root.data.progress * 100)}%";
                     color: Theme.fg-muted;
                     font-family: Theme.font-technical;

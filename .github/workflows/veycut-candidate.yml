@@ -3,9 +3,15 @@ name: VeyCut macOS candidate
 # Builds a test artifact after native validation. It creates no release.
 on:
   workflow_dispatch:
+    inputs:
+      validation_run:
+        description: Successful CI run at this exact source revision
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: veycut-candidate-${{ github.ref }}
@@ -13,9 +19,29 @@ concurrency:
 
 jobs:
   validate:
-    uses: ./.github/workflows/fork-validation.yml
+    if: github.repository == 'alirezap73/veycut'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify completed native checks at the same revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+        run: |
+          set -euo pipefail
+          [[ "$VALIDATION_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATION_RUN" > "$RUNNER_TEMP/validation.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          run = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'validation.json').read_text())
+          assert run['head_sha'] == os.environ['GITHUB_SHA'], 'Native checks must match this exact revision'
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Native checks have not passed'
+          assert run['path'] == '.github/workflows/ci.yml', 'A full native CI run is required'
+          print('Verified native validation run', run['id'], 'at', run['head_sha'])
+          PY
+  quick:
+    uses: ./.github/workflows/fork-checks.yml
   build:
-    needs: validate
+    needs: [validate, quick]
     uses: ./.github/workflows/build-app.yml
     with:
       target_matrix: '{"include":[{"platform":"macos","arch":"arm64","os":"macos-15","target":"aarch64-apple-darwin","sherpa":"osx-arm64"}]}'
