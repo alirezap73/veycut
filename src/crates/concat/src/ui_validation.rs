@@ -42,7 +42,7 @@ fn capture(
     name: &str,
     width: u32,
     height: u32,
-) {
+) -> Vec<Pixel> {
     window.set_size(PhysicalSize::new(width, height));
     let mut pixels = vec![Pixel::default(); (width * height) as usize];
     window.request_redraw();
@@ -65,12 +65,13 @@ fn capture(
     if let Some(directory) = std::env::var_os("VEYCUT_ARTIFACT_DIR") {
         let directory = std::path::PathBuf::from(directory);
         std::fs::create_dir_all(&directory).expect("screenshot directory");
-        let bytes: Vec<u8> = pixels.into_iter().flat_map(|pixel| pixel.0).collect();
+        let bytes: Vec<u8> = pixels.iter().flat_map(|pixel| pixel.0).collect();
         image::RgbImage::from_raw(width, height, bytes)
             .expect("screenshot pixels")
             .save(directory.join(format!("ui-{name}-{width}x{height}.png")))
             .expect("screenshot PNG");
     }
+    pixels
 }
 
 #[test]
@@ -175,4 +176,55 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
         }
         app.set_captions(crate::ui::CaptionsSheetData::default());
     }
+
+    // A real tab click followed by closing/reopening must restore Create,
+    // including the selected thumb, rather than keeping the old local value.
+    let weak = app.as_weak();
+    app.on_captions_section_changed(move |section| {
+        let app = weak.upgrade().expect("live fixture");
+        let mut data = app.get_captions();
+        data.section = section;
+        app.set_captions(data);
+    });
+    app.set_phone(false);
+    app.set_captions(crate::ui::CaptionsSheetData {
+        open: true,
+        ..Default::default()
+    });
+    capture(&window, &clock, "captions-before-click", 1400, 900);
+    let position = slint::LogicalPosition::new(860.0, 210.0);
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position,
+            button: slint::platform::PointerEventButton::Left,
+        });
+    assert_eq!(app.get_captions().section, 2, "pointer must select Edit");
+    let brightness = |pixels: &[Pixel], x: usize| {
+        pixels[202 * 1400 + x]
+            .0
+            .iter()
+            .map(|channel| u16::from(*channel))
+            .sum::<u16>()
+    };
+    let edited = capture(&window, &clock, "captions-after-click", 1400, 900);
+    assert!(
+        brightness(&edited, 795) > brightness(&edited, 465),
+        "Edit thumb must be selected"
+    );
+    app.set_captions(crate::ui::CaptionsSheetData::default());
+    app.set_captions(crate::ui::CaptionsSheetData {
+        open: true,
+        ..Default::default()
+    });
+    let reopened = capture(&window, &clock, "captions-reopened", 1400, 900);
+    assert!(
+        brightness(&reopened, 465) > brightness(&reopened, 795),
+        "Create thumb must reset on reopen"
+    );
+    app.set_captions(crate::ui::CaptionsSheetData::default());
 }

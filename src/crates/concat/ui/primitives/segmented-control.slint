@@ -17,6 +17,8 @@ export component SegmentedControl inherits Rectangle {
     /// `options` is fine; a segment past the end keeps its word.
     in property <[Glyph]> icons;
     in-out property <int> current;
+    /// The owner updates current after changed; keep its binding intact.
+    in property <bool> controlled: false;
     in property <bool> enabled: true;
 
     callback changed(index: int);
@@ -40,7 +42,7 @@ export component SegmentedControl inherits Rectangle {
 
     function select(index: int) {
         if (index >= 0 && index < root.options.length) {
-            root.current = index;
+            if (!root.controlled) { root.current = index; }
             root.changed(index);
         }
     }

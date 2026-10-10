@@ -111,6 +111,7 @@ export component CaptionsDialog inherits Modal {
         HorizontalLayout {
             padding: 14px;
             SegmentedControl {
+                    controlled: true;
                 options: [I18n.t("captions.createTab"), I18n.t("captions.filesTab"), I18n.t("captions.editTab")];
                 current: root.section;
                 enabled: !root.data.running;
@@ -197,6 +198,7 @@ export component CaptionsDialog inherits Modal {
             DialogRow {
                 label: I18n.t("captions.placement");
                 SegmentedControl {
+                    controlled: true;
                     options: [I18n.t("common.bottom"), I18n.t("captions.centre"), I18n.t("common.top")];
                     current: root.data.placement;
                     changed(index) => { root.placement-changed(index); }
@@ -206,6 +208,7 @@ export component CaptionsDialog inherits Modal {
             DialogRow {
                 label: I18n.t("common.size");
                 SegmentedControl {
+                    controlled: true;
                     options: [I18n.t("common.small"), I18n.t("common.medium"), I18n.t("common.large")];
                     current: root.data.size;
                     changed(index) => { root.size-changed(index); }
@@ -223,6 +226,7 @@ export component CaptionsDialog inherits Modal {
             DialogRow {
                 label: I18n.t("captions.style");
                 SegmentedControl {
+                    controlled: true;
                     options: [I18n.t("captions.styleInherited"), I18n.t("captions.styleBox"), I18n.t("captions.styleOutline")];
                     current: root.data.appearance;
                     changed(index) => { root.appearance-changed(index); }
@@ -317,6 +321,7 @@ export component CaptionsDialog inherits Modal {
             if !root.data.running && root.section == 1: DialogRow {
                 label: I18n.t("captions.exportFormat");
                 SegmentedControl {
+                    controlled: true;
                     options: ["SRT", "WebVTT"];
                     current: root.data.export-format;
                     changed(index) => { root.export-format-changed(index); }
@@ -325,6 +330,7 @@ export component CaptionsDialog inherits Modal {
             if !root.data.running && root.section == 1: DialogRow {
                 label: I18n.t("captions.srtStart");
                 SegmentedControl {
+                    controlled: true;
                     options: [I18n.t("captions.timelineStart"), I18n.t("settings.playhead")];
                     current: root.data.srt-origin;
                     changed(index) => { root.srt-origin-changed(index); }
@@ -341,6 +347,7 @@ export component CaptionsDialog inherits Modal {
             if !root.data.running && root.section != 0: DialogRow {
                 label: I18n.t("captions.scope");
                 SegmentedControl {
+                    controlled: true;
                     options: [I18n.t("captions.selectedText"), I18n.t("captions.allText")];
                     current: root.data.scope;
                     changed(index) => { root.scope-changed(index); }
