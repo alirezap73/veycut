@@ -724,6 +724,7 @@ pub struct Studio {
     /// Unsaved changes, and the timer that writes them.
     dirty: bool,
     autosave: slint::Timer,
+    saves: projects::SaveQueue,
 
     // ── the bin ──
     pub media: crate::panes::media_bin::MediaBin,
@@ -1950,6 +1951,7 @@ impl Studio {
             empty: Project::new(),
             dirty: false,
             autosave: slint::Timer::default(),
+            saves: projects::SaveQueue::default(),
             media: crate::panes::media_bin::MediaBin::default(),
             peaks: HashMap::new(),
             strips: HashMap::new(),
@@ -2448,15 +2450,30 @@ impl Studio {
         };
         self.autosave.stop();
         let (path, document) = session.prepare_save(None);
-        self.dirty = false;
-        spawn(
-            move || projects::save(&path, &document),
-            move |studio, _, _, result| match result {
-                Ok(()) if announce => studio.notify(&t("studio.projectSaved"), false),
-                Ok(()) => {}
-                Err(error) => {
-                    studio.dirty = true;
-                    studio.notify(&tf("studio.couldNotSave", &[&error]), true);
+        let pending = self.saves.prepare(path, document);
+        let save_revision = pending.revision();
+        let edit_revision = self.revision;
+        let queue = self.saves.clone();
+        crate::host::spawn_in_project(
+            move || pending.write(),
+            move |studio, _, _, result| {
+                if !queue.is_current(save_revision) {
+                    return;
+                }
+                match result {
+                    Ok(true) => {
+                        if studio.revision == edit_revision {
+                            studio.dirty = false;
+                        }
+                        if announce && studio.revision == edit_revision {
+                            studio.notify(&t("studio.projectSaved"), false);
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        studio.dirty = true;
+                        studio.notify(&tf("studio.couldNotSave", &[&error]), true);
+                    }
                 }
             },
         );
@@ -6856,6 +6873,17 @@ impl Studio {
     /// says why it could not.
     pub fn open_project(&mut self, info: ProjectInfo) -> Result<(), String> {
         log::info!("project: opening {}", info.path);
+        // Reopening the current folder must keep its live, possibly unsaved
+        // edit rather than reload an older disk snapshot under an alias.
+        if self.session.as_ref().is_some_and(|session| {
+            session.path() == info.path
+                || std::fs::canonicalize(session.path())
+                    .ok()
+                    .zip(std::fs::canonicalize(&info.path).ok())
+                    .is_some_and(|(current, target)| current == target)
+        }) {
+            return Ok(());
+        }
         if self
             .host
             .open_projects
@@ -6866,6 +6894,20 @@ impl Studio {
         }
         match Session::open_info(&info) {
             Ok(session) => {
+                // Load the target first: a failed open never closes the current
+                // edit. Then commit typed text and publish its newest snapshot
+                // before replacing any current state or releasing its claim.
+                self.flush_commit();
+                if let Some(current) = self.session.as_mut() {
+                    let (path, document) = current.prepare_save(None);
+                    if let Err(error) = self.saves.prepare(path, document).write() {
+                        self.dirty = true;
+                        self.host.open_projects.release(&info.path);
+                        return Err(error);
+                    }
+                    self.host.open_projects.release(current.path());
+                }
+                self.autosave.stop();
                 if let Err(error) = projects::remember(&self.host.dirs.config, &info) {
                     log::warn!("{error}");
                 }
@@ -6893,6 +6935,9 @@ impl Studio {
                 }
                 self.export.reset_for_project(&self.host.exporter);
                 self.relink.reset();
+                self.handle(crate::panes::Msg::Captions(
+                    crate::panes::captions::CaptionsMsg::Cancel,
+                ));
                 self.session = Some(session);
                 crate::host::next_project_epoch();
                 self.forget_art();
@@ -7016,10 +7061,19 @@ impl Studio {
     }
 
     /// Saves, then closes the session and returns to the launch screen.
-    pub fn close_project(&mut self) {
+    /// False keeps the session and window open after a failed save.
+    pub fn close_project(&mut self) -> bool {
         log::info!("project: closing {}", self.project_name);
         // Words still being typed land in the save, not on the floor.
         self.flush_commit();
+        if let Some(session) = self.session.as_mut() {
+            let (path, document) = session.prepare_save(None);
+            if let Err(error) = self.saves.prepare(path, document).write() {
+                self.dirty = true;
+                self.notify(&tf("studio.couldNotSave", &[&error]), true);
+                return false;
+            }
+        }
         self.pause();
         self.host.cutouts.cancel();
         self.host.enhancers.cancel();
@@ -7028,13 +7082,9 @@ impl Studio {
         self.reverse_jobs.clear();
         self.cutout_jobs.clear();
         self.region_job = None;
-        if let Some(session) = self.session.as_mut() {
-            let (path, document) = session.prepare_save(None);
-            if let Err(error) = projects::save(&path, &document) {
-                self.notify(&tf("studio.couldNotSave", &[&error]), true);
-                return;
-            }
-        }
+        self.handle(crate::panes::Msg::Captions(
+            crate::panes::captions::CaptionsMsg::Cancel,
+        ));
         self.autosave.stop();
         if let Some(session) = self.session.as_ref() {
             self.host.open_projects.release(session.path());
@@ -7075,6 +7125,7 @@ impl Studio {
             .set_clips(std::path::PathBuf::new(), Vec::new());
         self.on_start = true;
         self.recents = projects::list(&self.host.dirs.config);
+        true
     }
 
     /// Posters for the recents that have none yet, decoded on a worker.

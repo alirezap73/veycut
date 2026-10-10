@@ -44,6 +44,9 @@ jobs:
     name: Engine tests and lints
     runs-on: ubuntu-latest
     env:
+      # Match the native test profile for check/lint and the transport tests.
+      # Switching debug info between steps invalidates Cargo fingerprints.
+      CARGO_PROFILE_DEV_DEBUG: "0"
       FFMPEG_LINUX: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-shared-8.1.tar.xz
       # See build-app.yml: the version the ort crate is built against.
       ORT_VERSION: 1.28.0
@@ -206,6 +209,7 @@ jobs:
         include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]' || inputs.mac_beta && '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]') }}
     runs-on: ${{ matrix.os }}
     env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
       FFMPEG_WINDOWS: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip
     steps:
       - uses: actions/checkout@v7

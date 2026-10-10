@@ -16,6 +16,36 @@ The [portrait sample](beta-samples/portrait-2s.mp4) is a two-second, 720×1280, 
 
 Submit failures through the repository's beta bug form. Include the first failed step, expected/actual result and reproducible media if shareable. A passed tiny fixture does not satisfy the independent-machine or longer-session gates in [beta readiness](BETA-READINESS.md).
 
+## Save and recovery regressions in the development source
+
+Use disposable copies of the sample project for these failure checks. An older
+installer is not evidence for fixes in newer development source; record the
+candidate's source revision as well as its fixed version number.
+
+- While an export is running, use the Export shortcut again. Progress and Cancel
+  must remain available, and cancellation must still stop that job.
+- Edit a caption and immediately open another project, then reopen the first.
+  The edit must have been saved. Reopening the same folder must keep its live
+  edits. Switching after a save failure must retain the current project.
+- In a disposable project, keep a backup of its manifest, move the manifest out
+  of the way and place an empty directory at the same manifest path. Save or
+  Close must report a failure. Titlebar, system and menu window-close actions
+  must keep the window and unsaved edit visible. Restore the original manifest
+  after removing only that empty test directory, then retry Save and reopen.
+- Open a caption script or start transcription, then successfully switch or
+  close the project. The old dialog/job must be cancelled, with no stale busy
+  state or old script inserted into the next project.
+- For a missing-media project, try recovery from a folder containing a zero-byte
+  file with the exact expected name. Recovery must report failure and leave every
+  project media path unchanged. Repeat with a valid replacement and check playback.
+
+Server tests cover save ordering and publication failures, container-probe
+rejection and export cancellation/retry. The user-driven checks above remain
+separate; container probing does not guarantee that every frame of any recording
+is decodable.
+
 ## آزمون دستی بتا
 
 نمونهٔ بالا فقط دو ثانیه است، روی سرور ساخته و کامل بازخوانی شده است؛ ویدیوی دوربین یا آزمون پروژهٔ طولانی نیست. روی یک مک مناسب، ورود از پنجرهٔ فایل، برش و جابه‌جایی، پخش صدا، زیرنویس، ذخیره و بازکردن و خروجی را طبق مراحل بالا بررسی کنید. در اولین خطا، شمارهٔ مرحله و نتیجهٔ واقعی را گزارش کنید. تغییرات شمارهٔ نسخه متوقف است و کاندید توسعه هنوز انتشار عمومی جدید محسوب نمی‌شود.
+
+بررسی خطای ذخیره و فایل خراب را فقط روی کپی آزمایشی پروژه انجام دهید. در خطای ذخیره، پنجره و تغییرات باید باقی بمانند؛ تعویض موفق پروژه باید تغییرات قبلی را ذخیره و عملیات زیرنویس قبلی را لغو کند. فایل هم‌نامِ خالی نباید به‌عنوان رسانهٔ بازیابی‌شده پذیرفته شود. شمارهٔ ثابت نسخه به‌تنهایی کافی نیست؛ شناسهٔ سورسِ بستهٔ آزمایش‌شده را هم ثبت کنید.

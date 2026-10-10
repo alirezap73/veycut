@@ -834,7 +834,9 @@ fn fixed_note(why: Fixed) -> String {
 fn quit_for_switch() {
     on_ui(|studio, app, _| {
         log::info!("close: quitting for a version switch");
-        studio.close_project();
+        if !studio.close_project() {
+            return;
+        }
         slint::ComponentHandle::window(app).hide().ok();
         slint::quit_event_loop().ok();
     });

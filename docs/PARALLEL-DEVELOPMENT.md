@@ -18,6 +18,11 @@ engine tests, wasm and macOS compilation. Default CI still checks Windows;
 the Mac scope is not evidence of Windows support. Installers are separate and
 are not published by either validation workflow.
 
+Native check/lint/test steps use the same development debug-information setting,
+so profile switches do not invalidate dependency fingerprints between those
+steps. The first cache warm-up may still be slow. Measure complete job durations
+before claiming a speed improvement; parallel worker count is not a speed ratio.
+
 ## Optional model trials
 
 No external provider is configured or used merely by adding this protocol.

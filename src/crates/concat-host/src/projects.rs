@@ -158,6 +158,80 @@ pub fn create(
     })
 }
 
+/// Orders the window's save snapshots before they enter its worker pool.
+/// New requests supersede queued older work without waiting for disk I/O;
+/// publication is serialized, including synchronous saves during close.
+#[derive(Clone, Default)]
+pub struct SaveQueue {
+    state: std::sync::Arc<SaveState>,
+}
+
+#[derive(Default)]
+struct SaveState {
+    latest: std::sync::atomic::AtomicU64,
+    writing: std::sync::Mutex<()>,
+}
+
+/// A reserved save, safe to send to a worker or write synchronously on close.
+pub struct PendingSave {
+    queue: SaveQueue,
+    revision: u64,
+    path: String,
+    document: serde_json::Value,
+}
+
+impl SaveQueue {
+    /// Reserves this snapshot in UI request order, before worker scheduling.
+    pub fn prepare(&self, path: String, document: serde_json::Value) -> PendingSave {
+        let revision = self
+            .state
+            .latest
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1);
+        PendingSave {
+            queue: self.clone(),
+            revision,
+            path,
+            document,
+        }
+    }
+
+    /// Whether a completion still represents the latest requested save.
+    pub fn is_current(&self, revision: u64) -> bool {
+        self.state.latest.load(std::sync::atomic::Ordering::SeqCst) == revision
+    }
+}
+
+impl PendingSave {
+    /// The request number, used to ignore superseded worker completions.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Writes the snapshot, or returns false if a newer request superseded it.
+    /// The write lock spans publication, including synchronous close saves.
+    pub fn write(self) -> Result<bool, String> {
+        let _writing = self
+            .queue
+            .state
+            .writing
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !self.queue.is_current(self.revision) {
+            return Ok(false);
+        }
+        save(&self.path, &self.document).map(|()| true)
+    }
+}
+
+/// Removes only this save's unpublished staging file on any error.
+struct SaveFile(PathBuf);
+impl Drop for SaveFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Writes the whole project document to the project's manifest.
 ///
 /// The document is passed through as opaque JSON rather than being mirrored
@@ -171,7 +245,6 @@ pub fn create(
 pub fn save(path: &str, document: &serde_json::Value) -> Result<(), String> {
     let root = PathBuf::from(path);
     let manifest = manifest_path(&root);
-    let temporary = root.join(format!("{MANIFEST}.saving"));
 
     std::fs::create_dir_all(&root)
         .map_err(|error| format!("could not create {}: {error}", root.display()))?;
@@ -182,15 +255,27 @@ pub fn save(path: &str, document: &serde_json::Value) -> Result<(), String> {
     // Written, then flushed to the disk, then renamed: a rename is only
     // atomic over bytes that have reached the platter. Without the sync a
     // power cut after the rename can leave a zero-length manifest.
-    let mut file = std::fs::File::create(&temporary)
-        .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
+    static NEXT_SAVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let (temporary, mut file) = loop {
+        let id = NEXT_SAVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let candidate = root.join(format!(".veycut-save-{}-{id}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => break (SaveFile(candidate), file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("could not prepare project save: {error}")),
+        }
+    };
     std::io::Write::write_all(&mut file, &encoded)
-        .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
+        .map_err(|error| format!("could not write {}: {error}", temporary.0.display()))?;
     file.sync_all()
-        .map_err(|error| format!("could not flush {}: {error}", temporary.display()))?;
+        .map_err(|error| format!("could not flush {}: {error}", temporary.0.display()))?;
     drop(file);
 
-    std::fs::rename(&temporary, &manifest)
+    std::fs::rename(&temporary.0, &manifest)
         .map_err(|error| format!("could not replace {}: {error}", manifest.display()))
 }
 
@@ -365,6 +450,123 @@ fn count_files(dir: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_queued_older_save_cannot_overwrite_the_close_snapshot() {
+        let scratch =
+            std::env::temp_dir().join(format!("veycut-save-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let queue = SaveQueue::default();
+        let old = queue.prepare(
+            scratch.to_string_lossy().into_owned(),
+            serde_json::json!({"edit": "older"}),
+        );
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            old.write()
+        });
+        ready_rx.recv().unwrap();
+        let latest = queue.prepare(
+            scratch.to_string_lossy().into_owned(),
+            serde_json::json!({"edit": "close", "captions": ["سلام", "latest"]}),
+        );
+        assert!(latest.write().unwrap());
+        release_tx.send(()).unwrap();
+        assert!(!worker.join().unwrap().unwrap());
+        assert_eq!(
+            read_document(&scratch.to_string_lossy()).unwrap().unwrap(),
+            serde_json::json!({"edit": "close", "captions": ["سلام", "latest"]})
+        );
+        assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 1);
+        std::fs::remove_dir_all(scratch).unwrap();
+    }
+
+    #[test]
+    fn a_new_snapshot_can_be_reserved_while_publication_is_busy() {
+        let scratch = std::env::temp_dir().join(format!("veycut-save-busy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let queue = SaveQueue::default();
+        let older = queue.prepare(
+            scratch.to_string_lossy().into_owned(),
+            serde_json::json!({"edit": "older"}),
+        );
+        // Hold the publication gate to model a slow disk. Reservation and
+        // completion checks must remain responsive while that gate is busy.
+        let writing = queue.state.writing.lock().unwrap();
+        let other = queue.clone();
+        let path = scratch.to_string_lossy().into_owned();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let pending = other.prepare(path, serde_json::json!({"edit": "newest"}));
+            let current = other.is_current(pending.revision());
+            sender.send((pending, current)).unwrap();
+        });
+        let prepared = receiver.recv_timeout(std::time::Duration::from_secs(5));
+        drop(writing);
+        worker.join().unwrap();
+        let (newest, current) =
+            prepared.expect("reserving a snapshot must not wait for disk publication");
+        assert!(current);
+        assert!(!older.write().unwrap());
+        assert!(newest.write().unwrap());
+        assert_eq!(
+            read_document(&scratch.to_string_lossy()).unwrap().unwrap(),
+            serde_json::json!({"edit": "newest"})
+        );
+        std::fs::remove_dir_all(scratch).unwrap();
+    }
+
+    #[test]
+    fn failed_save_preserves_the_previous_document_and_allows_retry() {
+        let scratch =
+            std::env::temp_dir().join(format!("veycut-save-failure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        save(
+            &scratch.to_string_lossy(),
+            &serde_json::json!({"edit": "saved"}),
+        )
+        .unwrap();
+        let manifest = scratch.join(MANIFEST);
+        let backup = scratch.join("previous.json");
+        std::fs::rename(&manifest, &backup).unwrap();
+        // A directory at the destination deterministically refuses publication,
+        // including when tests run as root; no chmod or disk-full simulation.
+        std::fs::create_dir(&manifest).unwrap();
+        let queue = SaveQueue::default();
+        let document = serde_json::json!({"edit": "new unsaved edit"});
+        assert!(
+            queue
+                .prepare(scratch.to_string_lossy().into_owned(), document.clone())
+                .write()
+                .is_err()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&backup).unwrap()).unwrap(),
+            serde_json::json!({"edit": "saved"})
+        );
+        assert_eq!(
+            std::fs::read_dir(&scratch).unwrap().count(),
+            2,
+            "failed save cleans its staging file"
+        );
+        std::fs::remove_dir(&manifest).unwrap();
+        std::fs::rename(&backup, &manifest).unwrap();
+        assert!(
+            queue
+                .prepare(scratch.to_string_lossy().into_owned(), document.clone())
+                .write()
+                .unwrap()
+        );
+        assert_eq!(
+            read_document(&scratch.to_string_lossy()).unwrap().unwrap(),
+            document
+        );
+        assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 1);
+        std::fs::remove_dir_all(scratch).unwrap();
+    }
 
     #[test]
     fn sanitises_names_windows_would_reject() {

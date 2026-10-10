@@ -36,7 +36,7 @@ pub enum RelinkMsg {
         /// The missing media snapshot taken before the search.
         items: Vec<(String, String)>,
         /// Complete, unambiguous matches only.
-        result: SearchResult,
+        result: Result<SearchResult, String>,
     },
     Dismiss,
 }
@@ -70,7 +70,10 @@ impl RelinkPane {
                 if self.searching && self.generation == generation {
                     self.searching = false;
                     self.cancelled = None;
-                    self.apply_matches(items, result, studio);
+                    match result {
+                        Ok(result) => self.apply_matches(items, result, studio),
+                        Err(error) => studio.notify(&error, true),
+                    }
                 }
             }
             RelinkMsg::Dismiss => self.reset(),
@@ -113,7 +116,10 @@ impl RelinkPane {
         self.cancelled = Some(Arc::clone(&cancelled));
         self.searching = true;
         crate::host::spawn_in_project(
-            move || (items, relink_files::search(&folder, &names, &cancelled)),
+            move || {
+                let result = relink_files::search(&folder, &names, &cancelled);
+                (items, probe_matches(result, &cancelled))
+            },
             move |studio, _, _, (items, result)| {
                 studio.handle(crate::panes::Msg::Relink(RelinkMsg::Found {
                     generation,
@@ -220,6 +226,44 @@ impl RelinkPane {
     }
 }
 
+/// Search matches are only candidates: probe them on the search worker before
+/// changing the project. One invalid replacement rejects the entire batch.
+fn probe_matches(result: SearchResult, cancelled: &AtomicBool) -> Result<SearchResult, String> {
+    validate_matches(result, cancelled, |path| {
+        let path = path
+            .to_str()
+            .ok_or_else(|| "Media path is not valid UTF-8".to_owned())?;
+        let summary = concat_host::media::probe(path)?;
+        if summary.video.is_none() && summary.audio.is_none() {
+            return Err(format!("{path}: no supported audio or video stream"));
+        }
+        Ok(())
+    })
+}
+
+fn validate_matches(
+    result: SearchResult,
+    cancelled: &AtomicBool,
+    mut probe: impl FnMut(&Path) -> Result<(), String>,
+) -> Result<SearchResult, String> {
+    if !result.complete || cancelled.load(Ordering::Relaxed) {
+        return Ok(SearchResult::default());
+    }
+    for path in result.unique.values() {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(SearchResult::default());
+        }
+        let checked = probe(path);
+        // Probing a slow/network volume cannot itself be interrupted. A
+        // cancellation during it still must prevent every pending update.
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(SearchResult::default());
+        }
+        checked?;
+    }
+    Ok(result)
+}
+
 impl Drop for RelinkPane {
     fn drop(&mut self) {
         if let Some(cancelled) = self.cancelled.take() {
@@ -231,6 +275,77 @@ impl Drop for RelinkPane {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn candidates() -> SearchResult {
+        SearchResult {
+            complete: true,
+            unique: [("clip.mp4".into(), "replacement/clip.mp4".into())]
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn probe_failure_rejects_the_entire_recovery_batch() {
+        let mut result = candidates();
+        result
+            .unique
+            .insert("other.mp4".into(), "replacement/other.mp4".into());
+        let mut calls = 0;
+        let checked = validate_matches(result, &AtomicBool::new(false), |_| {
+            calls += 1;
+            if calls == 1 {
+                Ok(())
+            } else {
+                Err("invalid media".into())
+            }
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(checked.unwrap_err(), "invalid media");
+    }
+
+    #[test]
+    fn cancellation_before_or_during_probe_discards_every_match() {
+        let cancelled = AtomicBool::new(true);
+        let checked = validate_matches(candidates(), &cancelled, |_| {
+            panic!("cancelled search must not start probing")
+        })
+        .unwrap();
+        assert!(!checked.complete && checked.unique.is_empty());
+        cancelled.store(false, Ordering::Relaxed);
+        let checked = validate_matches(candidates(), &cancelled, |_| {
+            cancelled.store(true, Ordering::Relaxed);
+            Ok(())
+        })
+        .unwrap();
+        assert!(!checked.complete && checked.unique.is_empty());
+    }
+
+    #[test]
+    fn empty_and_malformed_replacements_are_not_recovered() {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        struct Folder(std::path::PathBuf);
+        impl Drop for Folder {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let folder = Folder(std::env::temp_dir().join(format!(
+            "veycut-relink-probe-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        )));
+        std::fs::create_dir(&folder.0).unwrap();
+        let path = folder.0.join("clip.mp4");
+        let names = ["clip.mp4".into()].into_iter().collect();
+        for bytes in [b"".as_slice(), b"this is not a media container".as_slice()] {
+            std::fs::write(&path, bytes).unwrap();
+            let cancelled = AtomicBool::new(false);
+            let result = relink_files::search(&folder.0, &names, &cancelled);
+            assert!(result.complete && result.unique.len() == 1);
+            assert!(probe_matches(result, &cancelled).is_err());
+        }
+    }
+
     #[test]
     fn dismiss_cancels_and_invalidates_pending_search() {
         let cancelled = Arc::new(AtomicBool::new(false));
