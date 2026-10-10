@@ -144,6 +144,14 @@ package stamps a Perth watermark on what it speaks; the ONNX pipeline
 carries no such step and Concat adds none, which MIT permits and which
 anyone passing the sound off as a person's should know is not there.
 
+## Microsoft DirectX Shader Compiler
+
+Windows validation and bundles use Microsoft DXC v1.9.2609 from the official
+release at https://github.com/microsoft/DirectXShaderCompiler/releases/tag/v1.9.2609.
+The archive is verified against its SHA-256 before use. Windows bundles include
+`dxcompiler.dll`, `dxil.dll` and the archive's full license notices under
+`licenses/dxc/`. The same runtime is used when validating Windows effects.
+
 ## ONNX Runtime
 
 The cutout models run on Microsoft's ONNX Runtime
