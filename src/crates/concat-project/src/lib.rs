@@ -335,6 +335,7 @@ mod tests {
         editor
             .apply(Command::RemoveClips {
                 clip_ids: vec![source_id.clone()],
+                ripple: false,
             })
             .unwrap();
         let command = Command::PasteClip {
