@@ -1,0 +1,15 @@
+VeyCut 0.2.0 caption sample
+
+The editor includes an English interface. Choose English in Settings > Language when needed.
+
+Use bilingual.vtt OR bilingual.srt, not both in the same timeline.
+
+1. Create a portrait 720 x 1280 project at 30 fps.
+2. Open Captions, then Files. Import one sample at timeline start.
+3. In Edit, choose all text clips and apply bottom placement, medium size and outlined appearance.
+4. Shift the text clips by 0.5 seconds, then Undo to restore their timing.
+5. Replace the exact text "VeyCut" with "My story", then Undo. Replacement is case-sensitive.
+6. Export the text clips as SRT or WebVTT and inspect their text and timing.
+7. Save the project and reopen it.
+
+Subtitle files carry text and timing; font, placement and appearance are project settings. These samples are prepared for manual checking. The packaged-app manual flow and clean-machine installation have not yet been verified.

@@ -15,14 +15,15 @@
 - [x] Replace desktop UI labels and icon, isolate app data, and prepare macOS bundle metadata. Windows/Linux metadata has been updated; mobile packaging remains under review.
 - [x] Point the fork's version/update UI at its own release repository; upstream model download attribution stays separate.
 - [x] Set fork version 0.2.0 and write source-candidate notes distinguishing inherited features from added features.
-- [ ] Run Fork development checks and Fork full validation against the release commit.
-- [ ] Build the modified GUI and inspect server-rendered Captions and project forms at 1400×900, 900×600 and 360×640.
+- [x] Pass 198 development checks and validate the unchanged release runtime with 748 Linux native test cases, macOS compilation and wasm checks. The baseline run had a Windows timeout; Windows validation remains separate.
+- [x] Build the modified GUI and inspect server-rendered Captions and project forms at 1400×900, 900×600 and 360×640.
 - [ ] Import valid, corrupt, missing and mixed media through the native picker and drag/drop.
 - [ ] Import SRT at both origins; select all three appearances; confirm undo/redo and save/reopen.
-- [ ] Run the bundled-font Persian shaping test and inspect the plain, boxed and outlined bilingual screenshots.
-- [ ] Pass the native bilingual 720×1280/30 fps export test with audio and complete decode; inspect its video and frame artifact.
-- [ ] Package an installer on GitHub and test it on a clean target machine.
-- [ ] Include source revision, license/notices, checksum and known limitations with the release.
+- [x] Run the bundled-font Persian shaping test and inspect the plain, boxed and outlined bilingual screenshots.
+- [x] Pass the native bilingual 720×1280/30 fps export test with audio and complete decode; inspect its video and frame artifact.
+- [x] Package the Apple silicon DMG on GitHub; verify its image, bundle signature and library paths; observe a native window after 30 seconds on a macOS 15 runner.
+- [ ] Install and edit on a separate clean target machine.
+- [x] Include source revision, license/notices, checksum and known limitations with the release.
 
 Begin with one tested desktop target. Mark other desktop/mobile targets unverified until their own checks pass. A green logic test suite is not proof of GUI layout, media output or installer behavior.
 
@@ -41,7 +42,11 @@ The inherited Release workflow is intentionally upstream-only. Fork full validat
 - [x] Project logic: WebVTT, selected scope, exact shift rejection, group styles, Unicode replacement and undo/redo.
 - [x] Standalone filename tests: Unicode boundaries, invalid/reserved names and preservation of an existing output.
 - [x] Translation inventory and targeted source formatting/lint.
-- [ ] Native tests, GUI screenshot review and package build at the final 0.2.0 commit.
+- [x] Native tests and GUI screenshot review cover the unchanged runtime; the package build and inspection use release source 18dd62d exactly.
 - [ ] Re-run Windows tests serially; inspect effect-card progress if they time out again.
 
 Publish source updates for server validation. Publish a Mac preview only after its required Linux/macOS/wasm checks and Mac build succeed, with unsigned/clean-machine limitations stated. A preview is not a verified stable installer.
+
+## Published preview
+
+[VeyCut 0.2.0 preview.1](https://github.com/alirezap73/veycut/releases/tag/v0.2.0-preview.1) was published from `18dd62d3fff2edca5a61caae7c9b544eadd7108e`. [Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38024725413) and [package inspection](https://github.com/alirezap73/veycut/actions/runs/38027085464) passed. The app is ad-hoc signed and not Apple-notarized; no Windows, Linux or mobile installer is included. [Windows validation](https://github.com/alirezap73/veycut/actions/runs/38024989783) remains separate.

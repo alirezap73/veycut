@@ -16,13 +16,21 @@ VeyCut is a native video editor with timeline editing, video effects, transition
 - **Reliable operations:** cancellation invalidates old subtitle/transcription replies; subtitle reads are bounded and writes are atomic. Video export validates filenames and refuses an existing output at preflight. GPU completion/readback waits have a 30-second limit.
 - **Verification artifacts:** server tests exercise real Slint forms at desktop and phone sizes, bundled Persian shaping without system fonts, and a bilingual 720p/30 fps export with audio and full decoding.
 
-## Verification status
+## Preview and verification
 
-The 0.2.0 source is being validated. Local project tests and targeted lint checks passed; the standalone export-path tests passed. All 14 locale inventories are consistent. GUI screenshots, native tests and the new video export test run on GitHub runners; their results must be inspected before a release is advertised as verified.
+The Apple silicon macOS preview is available from [GitHub Releases](https://github.com/alirezap73/veycut/releases/tag/v0.2.0-preview.1). Choose the `VeyCut-0.2.0-macos-arm64.dmg` asset. Intel Macs, Windows, Linux and mobile installers are not included in this preview.
 
-The prior source passed Linux native validation and macOS type checking. Its Windows test job timed out while drawing effect cards. Windows tests now run serially with card progress visible; a successful rerun is still required. Mobile packages and installation on a clean target machine remain unverified.
+The interface supports English and Persian. Change it in **Settings → Language**. To try the new subtitle tools, open **Captions → Files** and import an SRT or plain-text WebVTT file; **Edit** provides group timing, appearance and literal find/replace operations. Try the [bilingual subtitle examples](docs/caption-examples/TRY-CAPTIONS.txt).
 
-Follow [GitHub Actions](https://github.com/alirezap73/veycut/actions) for current results. **VeyCut macOS candidate** validates and builds an Apple silicon test artifact; it does not publish a release. See [the release checklist](FORK-RELEASE.md).
+![VeyCut caption workspace](docs/veycut-caption-workspace.png)
+
+The built DMG passed [package inspection on macOS 15](https://github.com/alirezap73/veycut/actions/runs/38027085464): image verification, strict signature verification, library path checks, and a 30-second startup with a native VeyCut window observed. First startup generates effect thumbnails and may log missing-thumbnail messages while they are being created.
+
+This is an experimental preview. The macOS app is ad-hoc signed and is not Apple-notarized. Installation on a separate clean machine, native file-picker/drag-and-drop flows and long editing sessions remain unverified.
+
+The unchanged runtime source passed **748 Linux native test cases**, macOS compilation and wasm checks. The release candidate also passed **198 development checks**. Server checks cover actual Slint form rendering and caption pointer/reopen behavior, bundled Persian font shaping, and a bilingual 720×1280/30 fps video export with audio and full decoding. See [native validation](https://github.com/alirezap73/veycut/actions/runs/38021310768) and [Mac candidate validation](https://github.com/alirezap73/veycut/actions/runs/38024725413). The baseline run includes a Windows timeout; it is not an all-platform pass. [Windows validation](https://github.com/alirezap73/veycut/actions/runs/38024989783) is tracked separately.
+
+`manifest.json` records the package source revision, file size and checksum. `VALIDATION.json` records the native validation revision and permitted workflow/documentation differences. `PACKAGE-INSPECTION.json` records the startup check. `SHA256SUMS` covers the package and all three metadata files. See [the release checklist](FORK-RELEASE.md).
 
 ## Build and test
 
