@@ -289,7 +289,7 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
             capture(&window, &clock, "export-resolution-options", width, height);
             click(750.0, 151.0);
             assert_eq!(app.get_export().resolution, 0, "pointer must choose 4K");
-            capture(&window, &clock, "export-resolution-selected", width, height);
+            let selected = capture(&window, &clock, "export-resolution-selected", width, height);
             let mut reset = app.get_export();
             reset.resolution = 2;
             app.set_export(reset);
