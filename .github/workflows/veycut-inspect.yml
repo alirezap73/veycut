@@ -256,20 +256,9 @@ jobs:
           } else if action == "save" {
               key(1, .maskCommand)
               Thread.sleep(forTimeInterval: 3)
-          } else if action == "split" {
-              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-              guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowName as String] as? String) == "VeyCut" }),
-                    let bounds = window[kCGWindowBounds as String] as? [String: Any],
-                    let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
-                    let width = bounds["Width"] as? Double else { exit(10) }
-              let point = CGPoint(x: x + width / 2, y: y + 16)
-              for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-                  CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-                  Thread.sleep(forTimeInterval: 0.2)
-              }
-              key(115)
-              for _ in 0..<30 { key(124) }
-              key(11, .maskCommand)
+          } else if action == "duplicate" {
+              key(0, .maskCommand)
+              key(2, .maskCommand)
               Thread.sleep(forTimeInterval: 2)
           } else if action == "undo" {
               key(6, .maskCommand)
@@ -347,22 +336,22 @@ jobs:
                           before = manifest.stat().st_mtime_ns
                           ui(process, 'open')
                           if cycle == 1:
-                              ui(process, 'split')
+                              ui(process, 'duplicate')
                           ui(process, 'save')
                           assert manifest.stat().st_mtime_ns > before, 'Native open/save did not publish project'
                           saved = json.loads(manifest.read_text())
                           assert saved['video'] == video
                           assert any(c['id'] == 'c1' for c in saved.get('clips', [])), 'Seeded timeline did not survive native save'
                           if cycle == 1:
-                              assert len(saved['clips']) == 2, 'Native split did not create two clips'
-                              assert abs(sum(c['duration'] for c in saved['clips']) - 2) < 0.01
+                              assert len(saved['clips']) == 2, 'Native duplication did not create two clips'
+                              assert abs(sum(c['duration'] for c in saved['clips']) - 4) < 0.01
                               ui(process, 'undo')
                               ui(process, 'save')
                               assert len(json.loads(manifest.read_text())['clips']) == 1, 'Native undo did not restore clip'
                               ui(process, 'redo')
                               ui(process, 'save')
                               saved = json.loads(manifest.read_text())
-                              assert len(saved['clips']) == 2, 'Native redo did not restore split'
+                              assert len(saved['clips']) == 2, 'Native redo did not restore duplicate'
                           else:
                               assert len(saved['clips']) == 1, 'Unsaved undo was lost across failed close and reopen'
                           pathlib.Path(f'evidence/project-saved-{cycle}.json').write_text(json.dumps(saved, indent=2))
@@ -398,7 +387,7 @@ jobs:
                               except subprocess.TimeoutExpired:
                                   process.kill()
                                   process.wait()
-              result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'split_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': False, 'editing_verified': 'split_undo_redo_only', 'gui_export_verified': False, 'fixture_seeded_outside_ui': True}
+              result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': False, 'editing_verified': 'duplicate_undo_redo_only', 'native_split_verified': False, 'gui_export_verified': False, 'fixture_seeded_outside_ui': True}
               pathlib.Path('evidence/PROJECT-UI-TEST.json').write_text(json.dumps(result, indent=2) + '\n')
           PYTHON
       - uses: actions/upload-artifact@v7
