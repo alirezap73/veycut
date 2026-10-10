@@ -7,6 +7,14 @@ on:
         description: Successful Mac candidate run to inspect without rebuilding
         required: true
         type: string
+      session_seconds:
+        description: Seconds to observe each idle editor launch (30 to 180)
+        type: string
+        default: '30'
+      launch_cycles:
+        description: Launches on the same runner profile (1 to 3)
+        type: string
+        default: '1'
 
 permissions:
   contents: read
@@ -51,6 +59,9 @@ jobs:
           name: VeyCut-macos-arm64
           path: bundles
       - name: Inspect mounted package and launch editor
+        env:
+          SESSION_SECONDS: ${{ inputs.session_seconds }}
+          LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
         run: |
           set -euo pipefail
           mkdir -p evidence "$RUNNER_TEMP/veycut-mount"
@@ -97,25 +108,43 @@ jobs:
           python3 - <<'PYTHON'
           import json, os, pathlib, subprocess, time
           temp = pathlib.Path(os.environ['RUNNER_TEMP'])
-          with open('evidence/startup.log', 'w') as log:
-              process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
-              try:
-                  for _ in range(30):
-                      time.sleep(1)
-                      assert process.poll() is None, 'Packaged editor exited during startup'
-                  with open('evidence/editor-window.json', 'w') as window:
-                      subprocess.run(['swift', str(temp / 'window.swift'), str(process.pid)], stdout=window, check=True)
-                  assert process.poll() is None, 'Packaged editor exited before window inspection'
-                  report = {'source_revision': os.environ['PACKAGE_REVISION'], 'platform': 'macos-arm64', 'runner': 'macos-15', 'startup_seconds': 30, 'window_observed': True, 'clean_machine_installation_verified': False, 'native_picker_verified': False, 'long_session_verified': False}
-                  pathlib.Path('evidence/PACKAGE-INSPECTION.json').write_text(json.dumps(report, indent=2) + '\n')
-              finally:
-                  if process.poll() is None:
-                      process.terminate()
-                      try:
-                          process.wait(timeout=10)
-                      except subprocess.TimeoutExpired:
-                          process.kill()
-                          process.wait()
+          seconds = int(os.environ['SESSION_SECONDS'])
+          cycles = int(os.environ['LAUNCH_CYCLES'])
+          assert 30 <= seconds <= 180 and 1 <= cycles <= 3
+          launches = []
+          for cycle in range(1, cycles + 1):
+              log_path = pathlib.Path(f'evidence/startup-{cycle}.log')
+              with log_path.open('w') as log:
+                  process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
+                  try:
+                      samples = []
+                      for elapsed in range(1, seconds + 1):
+                          time.sleep(1)
+                          assert process.poll() is None, f'Launch {cycle} exited at {elapsed}s'
+                          if elapsed % 30 == 0:
+                              window_path = pathlib.Path(f'evidence/editor-window-{cycle}-{elapsed}.json')
+                              with window_path.open('w') as window:
+                                  subprocess.run(['swift', str(temp / 'window.swift'), str(process.pid)], stdout=window, check=True, timeout=30)
+                              windows = json.loads(window_path.read_text())
+                              assert any(w.get('kCGWindowName') == 'VeyCut' and w.get('kCGWindowIsOnscreen') for w in windows), 'Visible VeyCut editor window missing'
+                              usage = subprocess.check_output(['ps', '-p', str(process.pid), '-o', 'rss=', '-o', '%cpu='], text=True, timeout=10).split()
+                              samples.append({'elapsed_seconds': elapsed, 'rss_kib': int(usage[0]), 'cpu_percent': float(usage[1])})
+                      assert process.poll() is None, 'Packaged editor exited before session inspection'
+                      log.flush()
+                      startup = log_path.read_text().lower()
+                      assert 'panicked at' not in startup and 'panic at ' not in startup, 'Panic in startup output'
+                      launches.append({'cycle': cycle, 'observation_seconds': seconds, 'visible_window_samples': len(samples), 'resource_samples': samples})
+                  finally:
+                      if process.poll() is None:
+                          process.terminate()
+                          try:
+                              process.wait(timeout=10)
+                          except subprocess.TimeoutExpired:
+                              process.kill()
+                              process.wait()
+              time.sleep(2)
+          report = {'source_revision': os.environ['PACKAGE_REVISION'], 'platform': 'macos-arm64', 'runner': 'macos-15', 'startup_seconds': seconds, 'launch_cycles': cycles, 'window_observed': True, 'launches': launches, 'idle_observation_only': True, 'termination_method': 'SIGTERM between launches', 'clean_machine_installation_verified': False, 'native_picker_verified': False, 'long_session_verified': False}
+          pathlib.Path('evidence/PACKAGE-INSPECTION.json').write_text(json.dumps(report, indent=2) + '\n')
           PYTHON
       - uses: actions/upload-artifact@v7
         if: always()
