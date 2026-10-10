@@ -142,6 +142,21 @@ pub fn replace(
         if !old.content.contains(find) {
             continue;
         }
+        let matches = old.content.match_indices(find).count();
+        let bytes = old
+            .content
+            .len()
+            .checked_sub(matches * find.len())
+            .and_then(|kept| {
+                replacement
+                    .len()
+                    .checked_mul(matches)
+                    .and_then(|added| kept.checked_add(added))
+            })
+            .ok_or("Replacement text exceeds the subtitle size limit")?;
+        if bytes > crate::subtitles::MAX_SRT_BYTES {
+            return Err("Replacement text exceeds the subtitle size limit".into());
+        }
         let content = old.content.replace(find, replacement);
         if content == old.content {
             continue;
@@ -240,6 +255,13 @@ mod tests {
         assert!(editor.undo());
         assert_eq!(editor.project().active(), &before);
     }
+    #[test]
+    fn repeated_replacement_is_bounded_before_allocating_the_output() {
+        let editor = editor();
+        let huge = "x".repeat(crate::subtitles::MAX_SRT_BYTES);
+        assert!(replace(editor.project().active(), None, "ا", &huge).is_err());
+    }
+
     #[test]
     fn unicode_replacement_preserves_style_and_rejects_partial_changes() {
         let mut editor = editor();

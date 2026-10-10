@@ -1,4 +1,4 @@
-# VeyCut source candidate 0.1.0
+# VeyCut changelog
 
 ## 0.2.0 — source upgrade (2026-10-10)
 
@@ -12,8 +12,9 @@
 
 Native validation and installer verification are required before declaring this a stable release.
 
+## 0.1.0 — source candidate
 
-This is an unreleased VeyCut source candidate.
+This was the initial VeyCut source candidate.
 
 Added vertical 720p/1080p project presets, boxed and outlined caption presets, mixed media-import feedback, UTF-8 SRT import at timeline zero or the playhead, and SRT export of active timeline text. Imported subtitles form one undo step. Subtitle files are bounded to 1 MiB and saved through atomic replacement.
 

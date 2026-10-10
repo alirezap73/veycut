@@ -1,0 +1,75 @@
+name: VeyCut preview draft
+
+# A draft from an already validated and built candidate, never a rebuild
+# or an automatic stable release. Publishing the draft is a separate step.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful VeyCut macOS candidate run at this exact commit
+        required: true
+        type: string
+      tag:
+        description: Preview tag matching the workspace version
+        required: true
+        default: v0.2.0-preview.1
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: veycut-preview-draft
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    if: github.repository == 'alirezap73/veycut'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify candidate and source identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > "$RUNNER_TEMP/candidate.json"
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          candidate = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'candidate.json').read_text())
+          assert candidate['head_sha'] == os.environ['GITHUB_SHA'], 'Candidate must match this exact source revision'
+          assert candidate['status'] == 'completed' and candidate['conclusion'] == 'success', 'Candidate has not passed'
+          assert candidate['path'] == '.github/workflows/veycut-candidate.yml', 'Wrong candidate workflow'
+          version = re.search(r'^version = "([^"]+)"', pathlib.Path('src/Cargo.toml').read_text(), re.M).group(1)
+          assert re.fullmatch('v' + re.escape(version) + r'-[A-Za-z0-9.-]+', os.environ['TAG']), 'Only a matching preview tag is allowed'
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('VERSION=' + version + '\n')
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run }}
+          name: VeyCut-macos-arm64
+          path: bundles
+      - name: Manifest and checksums
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/test_veycut_release.py
+          python3 scripts/veycut_release.py --bundles bundles --version "$VERSION" --tag "$TAG" --revision "$GITHUB_SHA"
+          cd bundles
+          sha256sum -c SHA256SUMS
+      - name: Create preview draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --draft --prerelease --title "VeyCut $VERSION preview" \
+            --notes-file RELEASE-PREVIEW.md bundles/*

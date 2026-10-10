@@ -80,7 +80,7 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
             | TimelineMsg::Resized(_),
         )
         | Msg::Export(ExportMsg::Progress { .. })
-        | Msg::Captions(CaptionsMsg::Progress(_))
+        | Msg::Captions(CaptionsMsg::Progress { .. })
         | Msg::Speech(SpeechMsg::Progress(_))
         | Msg::Settings(SettingsMsg::ModelProgress { .. } | SettingsMsg::InstallProgress { .. }) => {
             return None;
@@ -102,13 +102,18 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         Msg::Captions(CaptionsMsg::Begin) => {
             return Some(Activity::once(Info, "captions: started".to_owned()));
         }
-        Msg::Captions(CaptionsMsg::Finished(Ok(segments))) => {
+        Msg::Captions(CaptionsMsg::Finished {
+            result: Ok(segments),
+            ..
+        }) => {
             return Some(Activity::once(
                 Info,
                 format!("captions: finished, {} segments", segments.len()),
             ));
         }
-        Msg::Captions(CaptionsMsg::Finished(Err(error))) => {
+        Msg::Captions(CaptionsMsg::Finished {
+            result: Err(error), ..
+        }) => {
             return Some(Activity::once(Info, format!("captions: failed, {error}")));
         }
         Msg::Speech(SpeechMsg::Begin) => {

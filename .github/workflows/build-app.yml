@@ -510,7 +510,7 @@ jobs:
           Icon=veycut
           Categories=AudioVideo;Video;
           Terminal=false
-          StartupWMClass=concat
+          StartupWMClass=veycut
           DESKTOP
           cp LICENSE LICENSE-EXCEPTIONS.md SOURCE-NOTICES.md THIRD_PARTY_NOTICES.md "stage/$name/"
           mkdir -p "stage/$name/licenses/fonts"

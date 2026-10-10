@@ -269,9 +269,9 @@ pub fn installed_as() -> Result<PackageKind, Fixed> {
             linux_kind(
                 std::env::var_os("APPIMAGE").is_some(),
                 std::env::var_os("FLATPAK_ID").is_some(),
-                Path::new("/var/lib/dpkg/info/concat.list").exists(),
-                pacman_has_concat(),
-                rpm_has_concat(),
+                Path::new("/var/lib/dpkg/info/veycut.list").exists(),
+                pacman_has_veycut(),
+                rpm_has_veycut(),
             )
         } else {
             Err(Fixed::Store)
@@ -337,25 +337,25 @@ fn linux_kind(
     }
 }
 
-/// Whether pacman's database lists the `concat` package: a folder named
-/// `concat-<version>-<release>` under its local store.
-fn pacman_has_concat() -> bool {
+/// Whether pacman's database lists the `veycut` package: a folder named
+/// `veycut-<version>-<release>` under its local store.
+fn pacman_has_veycut() -> bool {
     std::fs::read_dir("/var/lib/pacman/local").is_ok_and(|entries| {
         entries.flatten().any(|entry| {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            name.strip_prefix("concat-")
+            name.strip_prefix("veycut-")
                 .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
         })
     })
 }
 
-/// Whether the RPM database lists `concat`. Asked of `rpm` itself, and only
+/// Whether the RPM database lists `veycut`. Asked of `rpm` itself, and only
 /// where there is a database to ask about.
-fn rpm_has_concat() -> bool {
+fn rpm_has_veycut() -> bool {
     Path::new("/var/lib/rpm").exists()
         && Command::new("rpm")
-            .args(["-q", "concat"])
+            .args(["-q", "veycut"])
             .output()
             .is_ok_and(|output| output.status.success())
 }
