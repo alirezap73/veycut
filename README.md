@@ -14,6 +14,10 @@ Missing-media recovery runs in a cancellable background search. Duplicate filena
 
 The 0.3.0 development candidate passed native Linux/macOS/wasm checks, its Mac build and package inspection. It remains **unpublished** while the main editing path is verified for the [beta milestone](docs/BETA-READINESS.md). The public download stays at **0.2.0-preview.1**; the development version will not increase for each commit.
 
+## Core beta development
+
+The next milestone is a reliable Apple silicon macOS beta covering media import, timeline edits, text/audio, save/reopen and export. The public preview stays at **0.2.0-preview.1**; the development candidate remains unpublished and its version is fixed. See [verified scope and remaining beta gates](docs/BETA-READINESS.md), the [small sample and manual editing check](docs/BETA-TEST.md), and the beta bug form in Issues. Development source is on [development/0.3.0](https://github.com/alirezap73/veycut/tree/development/0.3.0).
+
 ## Version 0.2.0 changes
 
 - **Caption workspace:** separate Create, Files and Edit tabs, with a scrolling dialog for smaller windows.

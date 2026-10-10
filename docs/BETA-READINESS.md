@@ -29,7 +29,7 @@ Use the [manual core check and small generated media sample](BETA-TEST.md) to re
 3. Fix observed blocking failures and rerun the affected checks. Rebuild and reinspect if the runtime or package changes; keep source and package identity explicit.
 4. Publish a beta only with completed evidence, checksums, installation instructions and actual remaining limitations. Do not describe server form fixtures as verified user media playback.
 
-Full builds and media/GUI tests stay on GitHub runners when local laptop use must remain light. The shipping workflow now keeps compiled workspace crates under a new cache-policy key; the previous candidate's cache excluded them and rebuilt them in 32m06s. The new policy needs a first warm build, and no speed improvement is claimed until measured.
+Full builds and media/GUI tests stay on GitHub runners when local laptop use must remain light. The development shipping workflow now keeps compiled workspace crates under a new cache-policy key; the previous candidate's cache excluded them and rebuilt them in 32m06s. The new policy needs a first warm build, and no speed improvement is claimed until measured.
 
 ## معیار بتا
 
