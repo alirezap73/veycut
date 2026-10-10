@@ -1,6 +1,8 @@
 Unpublished development candidate. The public preview remains 0.2.0-preview.1. The existing development version is fixed during core beta work; no new release number is being introduced.
 
-Current validated runtime source: `e5d667ce361ab1133193f30565ef8b1af94f984c`.
+Current validated runtime source: `e46372af035b073ddf3fa04673dcd82d6c66ded2`. Atomic full-property duplication and paste passed [native validation](https://github.com/alirezap73/veycut/actions/runs/38067689837) and [225 development test invocations](https://github.com/alirezap73/veycut/actions/runs/38067695299). The [replacement package](https://github.com/alirezap73/veycut/actions/runs/38069013402) is building; packaged editing/import tests for this source are pending. No official beta has been published.
+
+Previous packaged runtime source: `e5d667ce361ab1133193f30565ef8b1af94f984c`. The checks and checksum below belong to that previous source and do not certify the latest duplication fix.
 
 This source preserves active export cancellation, reports rejected caption edits, orders project saves, keeps the editor open after failed saves, cancels stale caption work across successful project switches, and validates replacement media before changing paths. Earlier development features include selectable export sizes, isolated export work files, destination collision protection and background missing-media recovery. English and Persian interface languages remain available.
 

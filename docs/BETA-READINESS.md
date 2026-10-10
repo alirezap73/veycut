@@ -8,7 +8,13 @@ The public preview stays at 0.2.0-preview.1. The existing 0.3.0 build is an unpu
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
-## Current source validation at e5d667c
+## Current source validation at e46372a
+
+Clip duplication and clipboard paste now insert a complete snapshot as one edit. A selected group duplicates as one undo step. Regression tests cover all six clip kinds, styling and timing preservation, paste after deleting the original, gap placement and failure rollback. [Native validation](https://github.com/alirezap73/veycut/actions/runs/38067689837) passed Linux tests/lints, macOS compilation and WebAssembly checks. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38067695299) passed 225 test invocations (213 Rust and 12 Python).
+
+The [replacement Mac package build](https://github.com/alirezap73/veycut/actions/runs/38069013402) is in progress. The previous installer below does not contain this duplication fix. Packaged duplication/undo/redo and native media import remain pending against the replacement package; this source is not an official beta release.
+
+## Previous source validation at e5d667c
 
 [Native validation](https://github.com/alirezap73/veycut/actions/runs/38057090804) passed Linux engine tests and lints, macOS compilation and WebAssembly checks: 772 successful native test invocations. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38057087322) passed 222 successful test invocations. Counts describe test executions, not distinct features or a completeness percentage.
 
