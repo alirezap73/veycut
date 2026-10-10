@@ -59,8 +59,15 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     slint::platform::set_platform(Box::new(Backend(window.clone()))).expect("offscreen backend");
     let app = crate::ui::App::new().expect("actual compiled Slint tree");
-    let translations: std::collections::HashMap<String, String> =
-        serde_json::from_str(include_str!("../locales/en.json")).expect("English UI strings");
+    let catalogue: serde_json::Value =
+        serde_json::from_str(include_str!("../locales/en.json")).expect("English UI catalogue");
+    let translations: std::collections::HashMap<String, String> = catalogue
+        .as_object()
+        .expect("locale object")
+        .iter()
+        .filter_map(|(key, value)| value.as_str().map(|text| (key.clone(), text.to_owned())))
+        .collect();
+    assert!(translations.contains_key("captions.createTab"));
     let words = translations.clone();
     app.global::<crate::ui::I18n>().on_lookup(move |_, key| {
         words
