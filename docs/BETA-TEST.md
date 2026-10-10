@@ -9,7 +9,7 @@ The [portrait sample](beta-samples/portrait-2s.mp4) is a two-second, 720×1280, 
 3. Split the clip near one second. Move the second part to create a visible gap; trim an edge. Preview the changes. Undo the operations and redo them, checking the clip positions and lengths.
 4. Open Captions → Files and import the WebVTT sample at the start of the timeline. The two imported text clips should be editable; the text already baked into the video remains part of its picture. Change an imported caption's text/appearance, then check undo/redo. Save the project.
 5. Close and reopen the project. Confirm media, clip positions, trims, imported text and appearance remain as saved. Repeat one edit after reopening.
-6. Export to a fresh filename. Check the output in a separate player, including picture, caption placement, sound and duration. In the development candidate, also choose a smaller output size and verify the saved editing frame remains 720×1280.
+6. Export to a fresh filename. Check the output in a separate player, including picture, caption placement, sound and duration. For the smaller-output check in the development candidate, create a separate 1080×1920 project, add the sample and export at 720×1280. Verify the decoded output dimensions and confirm the saved editing frame remains 1080×1920.
 7. Export again using the same filename. The existing file must stay intact and the app must report the collision. In the development candidate, start a fresh export and cancel it, then start another: progress/results from the cancelled job must not replace the new job's state. If the tiny export finishes before cancellation, repeat with a longer test sequence and report cancellation as unverified until exercised.
 8. In the development candidate, close the project, move the sample media to another folder, then reopen it. Recover the missing file from the new folder; check playback and save/reopen. Verify dismissing recovery leaves media paths unchanged. Also try a folder with two exact copies of the filename: it must not silently pick one.
 9. On a separate clean target machine, repeat installation and the main path using short footage you can share, landscape and portrait media, and separate audio. Follow with a longer editing session. Report exact passed/failed steps and the files/formats used.
@@ -32,9 +32,16 @@ candidate's source revision as well as its fixed version number.
   Close must report a failure. Titlebar, system and menu window-close actions
   must keep the window and unsaved edit visible. Restore the original manifest
   after removing only that empty test directory, then retry Save and reopen.
-- Open a caption script or start transcription, then successfully switch or
-  close the project. The old dialog/job must be cancelled, with no stale busy
-  state or old script inserted into the next project.
+- Clear clip selection before opening Captions → Create to enter script mode.
+  Enter `سلام؟ خوبی؟ Ready?` and check three editable captions, undo/redo and
+  save/reopen. Separately leave a script draft open, then successfully switch
+  or close the project: the old draft must not appear in the next project.
+- Test transcription-worker cancellation separately using longer spoken audio
+  and an already installed transcription model. Start transcription, confirm it
+  is still running, then successfully switch or close the project. No stale
+  busy state, old dialog or old result may appear in the next project. If these
+  prerequisites are absent or the job finishes first, record worker-boundary
+  cancellation as unverified; a script-dialog check does not cover it.
 - For a missing-media project, try recovery from a folder containing a zero-byte
   file with the exact expected name. Recovery must report failure and leave every
   project media path unchanged. Repeat with a valid replacement and check playback.

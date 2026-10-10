@@ -12,7 +12,7 @@ The shipping profile uses thin LTO. A build-speed improvement has not been estab
 
 Missing-media recovery runs in a cancellable background search. Duplicate filenames are left offline, symlinks are not followed and bounded or unreadable searches make no edits. See the [English/Persian quick start](docs/QUICK-START.md).
 
-The 0.3.0 development candidate passed native Linux/macOS/wasm checks, its Mac build and package inspection. It remains **unpublished** while the main editing path is verified for the [beta milestone](docs/BETA-READINESS.md). The public download stays at **0.2.0-preview.1**; the development version will not increase for each commit.
+The latest development source (`e5d667c`) passed native Linux tests, macOS compilation and WebAssembly checks. Its updated Mac package is being built; earlier package inspection covers source `231e726`, not these latest fixes. The candidate remains **unpublished** while the main editing path is verified for the [beta milestone](docs/BETA-READINESS.md). The public download stays at **0.2.0-preview.1**; small releases use patch increments, and the development version will not increase for each commit.
 
 ## Core beta development
 
