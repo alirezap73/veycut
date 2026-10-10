@@ -32,6 +32,8 @@ jobs:
         working-directory: src
       - name: Translation inventory
         run: python3 scripts/locales.py --check
+      - name: Optional model trial input and credential policy
+        run: python3 scripts/test_model_trial.py
       - name: Core and project tests
         run: cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
         working-directory: src

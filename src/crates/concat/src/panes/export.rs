@@ -158,9 +158,7 @@ impl ExportPane {
         }
         match msg {
             ExportMsg::Open => {
-                self.open = true;
-                self.phase = ExportPhase::Idle;
-                self.message.clear();
+                self.open_sheet();
                 // Default to the timeline's own size/rate; keep later choices
                 // when the sheet is dismissed and opened again.
                 if !self.configured {
@@ -169,7 +167,7 @@ impl ExportPane {
                     self.configured = true;
                 }
             }
-            ExportMsg::Close => self.open = false,
+            ExportMsg::Close => self.close_sheet(),
             ExportMsg::NameEdited(name) => self.name = name,
             ExportMsg::ResolutionChanged(index) => {
                 if let Ok(index) = usize::try_from(index)
@@ -276,6 +274,25 @@ impl ExportPane {
                 self.message = error.clone();
                 studio.notify(&tf("export.exportFailed", &[&error]), true);
             }
+        }
+    }
+
+    /// Opening the sheet again (for example with the global shortcut)
+    /// must keep the active render and its Cancel action visible. Resetting
+    /// its phase would discard every subsequent worker reply.
+    fn open_sheet(&mut self) {
+        self.open = true;
+        if self.phase != ExportPhase::Running {
+            self.phase = ExportPhase::Idle;
+            self.message.clear();
+        }
+    }
+
+    /// The running sheet owns the visible cancellation control. Match the
+    /// hidden close button even when a close callback is sent directly.
+    fn close_sheet(&mut self) {
+        if self.phase != ExportPhase::Running {
+            self.open = false;
         }
     }
 
@@ -747,6 +764,48 @@ impl ExportPane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reopening_a_running_export_keeps_progress_completion_and_cancel_available() {
+        let exporter = concat_host::export::Exporter::new();
+        let job = exporter.begin().expect("one active export");
+        let mut pane = ExportPane {
+            open: true,
+            phase: ExportPhase::Running,
+            generation: 7,
+            progress: 0.4,
+            stage: "mixing audio".into(),
+            started_at: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        let started_at = pane.started_at;
+        let progress = ExportMsg::Progress {
+            generation: 7,
+            fraction: 0.5,
+            stage: "mixing audio".into(),
+        };
+        let finished = ExportMsg::Finished {
+            generation: 7,
+            result: Ok("movie.mp4".into()),
+        };
+        pane.open_sheet();
+        pane.open_sheet();
+        pane.close_sheet();
+        assert!(pane.open, "the running job keeps its Cancel action visible");
+        assert_eq!(pane.phase, ExportPhase::Running);
+        assert_eq!(pane.progress, 0.4);
+        assert_eq!(pane.stage, "mixing audio");
+        assert_eq!(pane.started_at, started_at);
+        assert!(pane.accepts_reply(&progress));
+        assert!(pane.accepts_reply(&finished));
+        assert!(!job.cancel_flag().load(std::sync::atomic::Ordering::Relaxed));
+        pane.invalidate(&exporter);
+        assert!(job.cancel_flag().load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(pane.phase, ExportPhase::Idle);
+        assert!(!pane.accepts_reply(&finished));
+        pane.close_sheet();
+        assert!(!pane.open, "the sheet can close after cancellation");
+    }
 
     #[test]
     fn cancelled_and_replaced_jobs_cannot_report_success_or_progress() {

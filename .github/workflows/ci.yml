@@ -12,6 +12,10 @@ on:
         description: Run only Windows validation, reusing its build cache
         type: boolean
         default: false
+      mac_beta:
+        description: Validate the Mac beta (Linux engine, wasm and Mac compilation; excludes Windows)
+        type: boolean
+        default: false
   # release.yml runs this before it builds anything: a tag on a red tree
   # is not a release. It names the tag, because a release started by hand
   # runs on main, and main is not what it builds.
@@ -22,6 +26,9 @@ on:
         type: string
         default: ""
       windows_only:
+        type: boolean
+        default: false
+      mac_beta:
         type: boolean
         default: false
 
@@ -196,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]') }}
+        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]' || inputs.mac_beta && '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]') }}
     runs-on: ${{ matrix.os }}
     env:
       FFMPEG_WINDOWS: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip

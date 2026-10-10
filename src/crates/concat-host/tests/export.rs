@@ -2102,3 +2102,131 @@ fn portrait_export_can_resize_without_changing_the_project() {
         .unwrap();
     }
 }
+
+/// A person can cancel a running export and retry it without leftover files.
+/// If another application creates the destination during the retry, its bytes
+/// survive publication, and choosing the name again after removing that file
+/// produces a fully decodable video and audio stream from the unchanged edit.
+#[test]
+fn cancelled_export_and_destination_race_allow_a_clean_retry() {
+    use std::sync::atomic::Ordering;
+
+    let scratch = Scratch::new("veycut-export-retry");
+    let wav = scratch.path().join("sound.wav");
+    clock_wav(&wav, 2);
+    let mut studio = Studio::new(scratch.path(), "Export retry", video(WIDTH, HEIGHT, 30, 1));
+    let sound = studio.import(&wav);
+    studio.apply(Command::AddClipAtFirstFree {
+        media_id: sound,
+        start: 0.0,
+    });
+    let original_edit = studio.session.flattened_clips();
+    let destination = studio.exports.join("finished.mp4");
+    let unrelated = studio.exports.join("keep.txt");
+    std::fs::write(&unrelated, b"another application's file").unwrap();
+    let spec = ExportSpec {
+        output: destination.to_string_lossy().into_owned(),
+        crf: 18,
+        preset: "ultrafast".into(),
+        codec: VideoCodec::H264,
+        ..ExportSpec::default()
+    };
+    let request = export::request(&studio.session, &spec, Vec::new());
+    let folder_entries = || {
+        let mut entries: Vec<_> = std::fs::read_dir(&studio.exports)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        entries.sort();
+        entries
+    };
+    let before = folder_entries();
+
+    // Stop from a progress report after encoding has started, rather than
+    // setting the flag before the exporter has opened any work files.
+    let cancel = AtomicBool::new(false);
+    let mut rendered_before_cancellation = false;
+    let cancelled = export::run(&request, &cancel, |progress| {
+        if progress.stage == "rendering" && progress.frame > 0 {
+            assert!(progress.frame < progress.total);
+            rendered_before_cancellation = true;
+            cancel.store(true, Ordering::Relaxed);
+        }
+    });
+    assert!(
+        rendered_before_cancellation,
+        "cancellation interrupts a real render"
+    );
+    assert!(cancelled.is_err(), "cancelled export cannot report success");
+    assert!(
+        !destination.exists(),
+        "cancelled export leaves no final output"
+    );
+    assert_eq!(
+        folder_entries(),
+        before,
+        "cancelled export removes only its work files"
+    );
+    assert_eq!(
+        std::fs::read(&unrelated).unwrap(),
+        b"another application's file"
+    );
+
+    // This happens after preflight has accepted the absent destination, so
+    // the whole exporter must refuse to replace it at publication time.
+    let cancel = AtomicBool::new(false);
+    let mut created_during_render = false;
+    let collision = export::run(&request, &cancel, |progress| {
+        if progress.stage == "rendering" && progress.frame > 0 && !created_during_render {
+            std::fs::write(&destination, b"created by another application").unwrap();
+            created_during_render = true;
+        }
+    });
+    assert!(
+        created_during_render,
+        "destination appeared after render started"
+    );
+    assert!(
+        collision.is_err(),
+        "destination collision cannot report success"
+    );
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"created by another application"
+    );
+    let mut expected = before;
+    expected.push(destination.file_name().unwrap().to_os_string());
+    expected.sort();
+    assert_eq!(
+        folder_entries(),
+        expected,
+        "failed publication leaves no work files"
+    );
+
+    std::fs::remove_file(&destination).unwrap();
+    let written = export::run(&request, &AtomicBool::new(false), |_| {})
+        .expect("a fresh export succeeds after cancellation and a destination collision");
+    let exported = Exported::read(
+        "retry after cancellation and collision",
+        Path::new(&written),
+        (30, 1),
+    );
+    exported.expect_length(2.0);
+    exported.expect_sound(2.0);
+    exported.expect_quiet(0.5);
+    exported.expect_tone(1.5);
+    assert_eq!(exported.frames.len(), 60);
+    assert_eq!(
+        folder_entries(),
+        expected,
+        "successful retry leaves only the final output"
+    );
+    assert_eq!(
+        std::fs::read(&unrelated).unwrap(),
+        b"another application's file"
+    );
+    assert!(
+        studio.session.flattened_clips() == original_edit,
+        "export attempts preserve the timeline"
+    );
+}

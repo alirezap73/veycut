@@ -261,11 +261,7 @@ impl CaptionsPane {
                                 )
                             })
                             .collect();
-                        if studio.apply(Command::Batch { commands }).is_some() {
-                            self.open = false;
-                            self.message.clear();
-                            studio.notify(&tf("captions.addedCaptions", &[&count]), false);
-                        }
+                        self.add_captions(studio, commands, count);
                     }
                     Err(error) => {
                         self.message = tf("captions.srtFailed", &[&error]);
@@ -351,12 +347,11 @@ impl CaptionsPane {
                             })
                             .collect();
                         let count = commands.len();
-                        self.open = false;
                         if count == 0 {
+                            self.open = false;
                             studio.notify(&t("captions.nothingSaidClip"), true);
                         } else {
-                            studio.apply(Command::Batch { commands });
-                            studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+                            self.add_captions(studio, commands, count);
                         }
                     }
                     // Asked for: the sheet is already on its way down.
@@ -364,6 +359,19 @@ impl CaptionsPane {
                     Err(error) => self.message = error,
                 }
             }
+        }
+    }
+
+    /// Close and report success only after the entire caption batch commits.
+    /// A rejected edit leaves the script/import form available for correction.
+    fn add_captions(&mut self, studio: &mut Studio, commands: Vec<Command>, count: usize) {
+        match studio.apply_checked(Command::Batch { commands }) {
+            Ok(_) => {
+                self.open = false;
+                self.message.clear();
+                studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+            }
+            Err(error) => self.message = error,
         }
     }
 
@@ -466,9 +474,7 @@ impl CaptionsPane {
             })
             .collect();
         let count = commands.len();
-        self.open = false;
-        studio.apply(Command::Batch { commands });
-        studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+        self.add_captions(studio, commands, count);
     }
 
     /// The sheet's clip through the transcriber on a worker, reporting into
@@ -603,7 +609,8 @@ fn script_captions(text: &str) -> Vec<(String, f64)> {
 
 /// A paragraph's sentences. A full stop, question or exclamation mark ends
 /// one when it is followed by space or by the end - so "3.5" and "e.g." hold
-/// together - and the CJK marks end one on their own.
+/// together. Persian/Arabic question marks follow the same rule, and the
+/// CJK marks end one on their own.
 fn sentences(paragraph: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
@@ -612,7 +619,7 @@ fn sentences(paragraph: &str) -> Vec<String> {
         current.push(ch);
         let ends = match ch {
             '。' | '！' | '？' => true,
-            '.' | '!' | '?' => chars.peek().is_none_or(|next| next.is_whitespace()),
+            '.' | '!' | '?' | '؟' => chars.peek().is_none_or(|next| next.is_whitespace()),
             _ => false,
         };
         if ends {
@@ -671,6 +678,16 @@ fn wrap_caption(sentence: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::script_captions;
+
+    /// Persian questions are separate captions just as English questions
+    /// are; decimal punctuation and mixed-language words remain intact.
+    #[test]
+    fn persian_questions_keep_sentence_boundaries() {
+        let lines = script_captions("سلام؟ خوبی؟ نسخه 3.5 آماده است. Ready?");
+        let text: Vec<&str> = lines.iter().map(|(line, _)| line.as_str()).collect();
+        assert_eq!(text, ["سلام؟", "خوبی؟", "نسخه 3.5 آماده است.", "Ready?"]);
+        assert_eq!(script_captions("سلام؟خوبی")[0].0, "سلام؟خوبی");
+    }
 
     /// A script becomes one caption per sentence, a hand line break is
     /// kept, a long sentence wraps at its words, and each line is held for
