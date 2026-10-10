@@ -46,6 +46,22 @@ pub(super) fn apply(
             })
         }
 
+        Command::DuplicateClip { clip_id } => {
+            let source = project
+                .active()
+                .clip(&clip_id)
+                .ok_or(CommandError::ClipGone)?
+                .clone();
+            let track = source.track_id.clone();
+            let start = source.start + source.duration;
+            insert_snapshot(project, mint, source, track, start)
+        }
+        Command::PasteClip {
+            clip,
+            track_id,
+            start,
+        } => insert_snapshot(project, mint, *clip, track_id, start),
+
         Command::AddClipAtFirstFree { media_id, start } => {
             let media = project
                 .media_by_id(&media_id)
@@ -850,4 +866,46 @@ pub fn why_not_merge(timeline: &Timeline, clip_ids: &[String]) -> Option<String>
         }
     }
     None
+}
+
+/// Validates references before minting or mutating, then places the complete
+/// snapshot with the same non-ripple gap policy as ordinary clip insertion.
+fn insert_snapshot(
+    project: &mut Project,
+    mint: &mut IdMint,
+    snapshot: Clip,
+    track_id: String,
+    start: f64,
+) -> Result<Outcome, CommandError> {
+    if !start.is_finite() {
+        return Err(CommandError::NotANumber);
+    }
+    if project.active().track(&track_id).is_none() {
+        return Err(CommandError::TrackGone);
+    }
+    if matches!(
+        snapshot.kind,
+        ClipKind::Video | ClipKind::Audio | ClipKind::Image
+    ) && project.media_by_id(&snapshot.media_id).is_none()
+    {
+        return Err(CommandError::MediaGone);
+    }
+    let mut copy = snapshot.tidy();
+    copy.start = project
+        .active()
+        .nearest_free_start(&track_id, start.max(0.0), copy.duration, &[]);
+    copy.track_id = track_id;
+    copy.id = mint.next("c");
+    if matches!(
+        copy.kind,
+        ClipKind::Text | ClipKind::Shape | ClipKind::Layer
+    ) {
+        copy.media_id.clear();
+    }
+    let id = copy.id.clone();
+    project.active_mut().clips.push(Arc::new(copy));
+    Ok(Outcome {
+        created_id: Some(id),
+        applied: true,
+    })
 }

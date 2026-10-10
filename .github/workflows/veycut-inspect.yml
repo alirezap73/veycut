@@ -229,8 +229,8 @@ jobs:
               }
               return nil
           }
-          if action == "open" {
-              key(31, .maskCommand)
+          if action == "open" || action == "import" {
+              key(action == "open" ? 31 : 34, .maskCommand)
               Thread.sleep(forTimeInterval: 3)
               let element = AXUIElementCreateApplication(pid)
               AXUIElementSetMessagingTimeout(element, 3)
@@ -272,7 +272,7 @@ jobs:
           } else { exit(5) }
           SWIFT
           python3 - <<'PYTHON'
-          import json, os, pathlib, subprocess, time
+          import json, os, pathlib, shutil, subprocess, time
           temp = pathlib.Path(os.environ['RUNNER_TEMP'])
           seconds = int(os.environ['SESSION_SECONDS'])
           cycles = int(os.environ['LAUNCH_CYCLES'])
@@ -319,14 +319,16 @@ jobs:
               project = temp / 'veycut-ui-project'
               project.mkdir()
               sample = pathlib.Path('docs/beta-samples/portrait-2s.mp4').resolve()
+              imported_sample = temp / 'native-import-copy.mp4'
+              shutil.copyfile(sample, imported_sample)
               video = {'width': 720, 'height': 1280, 'rateNum': 30, 'rateDen': 1}
               clip = {'id': 'c1', 'trackId': 'T1', 'mediaId': 'm1', 'name': 'GUI fixture', 'kind': 'video', 'start': 0, 'duration': 2, 'sourceStart': 0, 'speed': 1, 'volume': 1, 'scale': 1, 'opacity': 1}
               fixture = {'concat': os.environ['PACKAGE_VERSION'], 'version': 1, 'name': 'VeyCut GUI fixture', 'video': video, 'media': [{'id': 'm1', 'path': str(sample), 'name': sample.name, 'kind': 'video', 'duration': 2, 'width': 720, 'height': 1280, 'frameRate': 30, 'frameRateFraction': '30/1', 'hasAudio': True}], 'activeTimelineId': 'TL1', 'timelines': [{'id': 'TL1', 'name': 'Timeline 1', 'video': video, 'tracks': [{'id': 'T1', 'visible': True, 'muted': False}], 'clips': [clip]}]}
               manifest = project / 'concat.json'
               manifest.write_text(json.dumps(fixture))
-              def ui(process, action):
+              def ui(process, action, path=project):
                   with open(f'evidence/ui-action-{process.pid}-{action}.txt', 'w') as output:
-                      subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(project)], stdout=output, check=True, timeout=60)
+                      subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
               for cycle in range(1, 3):
                   ui_log = pathlib.Path(f'evidence/project-ui-{cycle}.log')
                   with ui_log.open('w') as log:
@@ -336,12 +338,26 @@ jobs:
                           before = manifest.stat().st_mtime_ns
                           ui(process, 'open')
                           if cycle == 1:
+                              ui(process, 'import', imported_sample)
+                              # Import probes metadata asynchronously. Wait for a
+                              # persisted result before the next editing gesture.
+                              for attempt in range(6):
+                                  ui(process, 'save')
+                                  imported_state = json.loads(manifest.read_text())
+                                  if any(m['path'] == str(imported_sample) for m in imported_state['media']):
+                                      break
+                                  time.sleep(2)
+                              else:
+                                  raise AssertionError('Native import did not finish within its bounded wait')
                               ui(process, 'duplicate')
                           ui(process, 'save')
                           assert manifest.stat().st_mtime_ns > before, 'Native open/save did not publish project'
                           saved = json.loads(manifest.read_text())
                           assert saved['video'] == video
                           assert any(c['id'] == 'c1' for c in saved.get('clips', [])), 'Seeded timeline did not survive native save'
+                          imported = [m for m in saved['media'] if m['path'] == str(imported_sample)]
+                          assert len(imported) == 1 and imported[0]['id'] != 'm1', 'Native import did not persist a new media entry'
+                          assert imported[0]['width'] == 720 and imported[0]['height'] == 1280 and imported[0]['hasAudio'], 'Imported metadata mismatch'
                           if cycle == 1:
                               assert len(saved['clips']) == 2, 'Native duplication did not create two clips'
                               assert abs(sum(c['duration'] for c in saved['clips']) - 4) < 0.01
@@ -387,7 +403,7 @@ jobs:
                               except subprocess.TimeoutExpired:
                                   process.kill()
                                   process.wait()
-              result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': False, 'editing_verified': 'duplicate_undo_redo_only', 'native_split_verified': False, 'gui_export_verified': False, 'fixture_seeded_outside_ui': True}
+              result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'duplicate_undo_redo_only', 'native_split_verified': False, 'gui_export_verified': False, 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
               pathlib.Path('evidence/PROJECT-UI-TEST.json').write_text(json.dumps(result, indent=2) + '\n')
           PYTHON
       - uses: actions/upload-artifact@v7

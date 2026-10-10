@@ -6672,8 +6672,6 @@ impl Studio {
         }
     }
 
-    /// A copy of `source` laid after it. Three commands, because a clip's
-    /// in-point and length are set by trims, not by placement.
     /// Duplicate every unlocked selected clip (right-to-left by start so
     /// neighbours do not stack). Falls back to the menu target when the
     /// selection is empty.
@@ -6698,92 +6696,36 @@ impl Studio {
             return;
         }
         sources.sort_by(|left, right| right.start.total_cmp(&left.start));
-        let mut last = None;
-        for source in &sources {
-            self.duplicate(source);
-            last = self.selection.first().cloned();
-        }
-        if let Some(id) = last {
+        let mut commands: Vec<Command> = sources
+            .into_iter()
+            .map(|source| Command::DuplicateClip { clip_id: source.id })
+            .collect();
+        // One user gesture is one undo step, including a multi-clip selection.
+        let command = if commands.len() == 1 {
+            commands.pop().expect("one selected clip")
+        } else {
+            Command::Batch { commands }
+        };
+        if let Some(id) = self.apply(command) {
             self.selection = vec![id];
         }
     }
 
+    /// Inserts a clipboard snapshot after its supplied position. The original
+    /// clip may have been deleted, and paste may target a different track.
+    /// The engine preserves the complete snapshot and publishes it in one edit.
     pub fn duplicate(&mut self, source: &Clip) {
-        let end = source.start + source.duration;
-        if source.kind == model::ClipKind::Text {
-            let created = self.apply(Command::AddTextClip {
-                above: false,
-                track_id: Some(source.track_id.clone()),
-                start: end,
-                style: source.text.clone(),
-                duration: Some(source.duration),
-                offset_y: Some(source.offset_y),
-            });
-            if let Some(id) = created {
-                self.selection = vec![id];
-            }
-            return;
+        let mut clip = source.clone();
+        if !matches!(clip.kind, model::ClipKind::Text | model::ClipKind::Shape) {
+            clip.name = format!("{} copy", clip.name);
         }
-        if source.kind == model::ClipKind::Shape {
-            let created = self.apply(Command::AddShapeClip {
-                above: false,
-                track_id: Some(source.track_id.clone()),
-                start: end,
-                style: source.shape.clone(),
-                duration: Some(source.duration),
-                name: source.name.clone(),
-            });
-            if let Some(id) = created {
-                self.selection = vec![id];
-            }
-            return;
-        }
-        let Some(created) = self.apply(Command::AddClip {
-            media_id: source.media_id.clone(),
+        if let Some(id) = self.apply(Command::PasteClip {
+            clip: Box::new(clip),
             track_id: source.track_id.clone(),
-            start: (end - source.source_start / source.speed).max(0.0),
-            ripple: false,
-        }) else {
-            return;
-        };
-        let placed = self.clip(&created).cloned();
-        let Some(placed) = placed else { return };
-        let mut commands = Vec::new();
-        let head = end - placed.start;
-        if head.abs() > 1e-6 {
-            commands.push(Command::TrimClip {
-                clip_id: created.clone(),
-                edge: TrimEdge::Start,
-                delta: head,
-                ripple: false,
-            });
+            start: (source.start + source.duration).max(0.0),
+        }) {
+            self.selection = vec![id];
         }
-        let after_head = placed.duration - head.max(0.0);
-        let tail = source.duration - after_head;
-        if tail.abs() > 1e-6 {
-            commands.push(Command::TrimClip {
-                clip_id: created.clone(),
-                edge: TrimEdge::End,
-                delta: tail,
-                ripple: false,
-            });
-        }
-        commands.push(Command::UpdateClip {
-            clip_id: created.clone(),
-            patch: ClipPatch {
-                name: Some(format!("{} copy", source.name)),
-                volume: Some(source.volume),
-                fade_in: Some(source.fade_in),
-                fade_out: Some(source.fade_out),
-                opacity: Some(source.opacity),
-                preserve_pitch: Some(source.preserve_pitch),
-                filters: Some(source.filters.clone()),
-                video_effects: Some(source.video_effects.clone()),
-                ..ClipPatch::default()
-            },
-        });
-        self.apply(Command::Batch { commands });
-        self.selection = vec![created];
     }
 
     /// What the tray's sound and word tools may do to the selection: one
