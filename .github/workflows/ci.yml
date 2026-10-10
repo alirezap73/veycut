@@ -257,7 +257,6 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           key: check-${{ matrix.os }}
-          cache-on-failure: true
       - run: cargo check --workspace --all-targets
         if: runner.os != 'Windows'
         working-directory: src
