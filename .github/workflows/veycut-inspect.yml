@@ -252,6 +252,16 @@ jobs:
               key(1, .maskCommand)
               Thread.sleep(forTimeInterval: 3)
           } else if action == "split" {
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowName as String] as? String) == "VeyCut" }),
+                    let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                    let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
+                    let width = bounds["Width"] as? Double else { exit(10) }
+              let point = CGPoint(x: x + width / 2, y: y + 16)
+              for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                  CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.2)
+              }
               key(115)
               for _ in 0..<30 { key(124) }
               key(11, .maskCommand)
