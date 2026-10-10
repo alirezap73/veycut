@@ -99,7 +99,6 @@ pub struct ExportPane {
     pub sdr: bool,
     /// Index into `ColorRange::ALL`: 0 limited, 1 full. Read only while
     /// the Advanced section is open, like the bitrate.
-    /// https://github.com/jub0t/Concat/issues/103
     pub color_range: usize,
     /// The Advanced section is open: bitrate controls show, and the size
     /// estimate reads the chosen bitrate.

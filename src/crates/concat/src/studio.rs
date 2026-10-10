@@ -6892,6 +6892,7 @@ impl Studio {
                     log::info!("{swept} stale proxies swept from {}", project_dir.display());
                 }
                 self.export.reset_for_project(&self.host.exporter);
+                self.relink.reset();
                 self.session = Some(session);
                 crate::host::next_project_epoch();
                 self.forget_art();
@@ -7039,6 +7040,7 @@ impl Studio {
             self.host.open_projects.release(session.path());
         }
         self.export.reset_for_project(&self.host.exporter);
+        self.relink.reset();
         self.session = None;
         // Whatever a worker still brings back for this project is dropped
         // at delivery; the sheets that were waiting on one stop waiting.

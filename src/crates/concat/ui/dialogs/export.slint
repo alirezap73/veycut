@@ -350,10 +350,7 @@ component OutputSection inherits DialogSection {
 
     DialogRow {
         label: I18n.t("export.resolution");
-        // The timeline's own size, and the ladder it sits on for scale:
-        // a 9:16 edit is 1080 × 1920, not 1920 × 1080, and it exports at
-        // the size it was cut at - the other rungs are shown and cannot be
-        // picked. https://github.com/jub0t/Concat/issues/109
+        // An aspect-preserving output ladder independent of the editing frame.
         Select {
             current: root.data.resolution;
             options: root.data.resolutions;

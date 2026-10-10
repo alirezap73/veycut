@@ -14,6 +14,7 @@ export struct MissingMediaItem {
 
 export struct RelinkData {
     open: bool,
+    searching: bool,
     items: [MissingMediaItem],
 }
 
@@ -92,7 +93,8 @@ export component RelinkDialog inherits Modal {
 
             Button {
                 primary: true;
-                label: I18n.t("relink.relinkAll");
+                label: root.data.searching ? I18n.t("relink.searching") : I18n.t("relink.relinkAll");
+                enabled: !root.data.searching;
                 clicked => { root.relink-all(); }
             }
         }

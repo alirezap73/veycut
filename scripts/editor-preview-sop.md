@@ -12,7 +12,7 @@ editor window floating on a soft gradient card, built by
    panel. Make the window wide (the composite assumes a landscape window).
 
 2. **Capture the window.** In dark theme, press `⌘⇧4`, then `Space`, then
-   click the Concat window. macOS saves the window with a transparent margin
+   click the VeyCut window. macOS saves the window with a transparent margin
    and its drop shadow; the script trims that away itself.
 
 3. **Build the composite:**
@@ -31,12 +31,6 @@ editor window floating on a soft gradient card, built by
    centred with the timeline running off the bottom edge. Backdrop colours,
    corner radii, and the crop height are constants at the top of the script.
 
-5. **Commit** `assets/editor-dark.png` and `assets/editor.png`. The
-   README loads `assets/editor.png` through jsDelivr rather than GitHub's
-   raw host, which drops requests from some regions. No README edit is
-   needed, but jsDelivr caches `@main` for up to a day, so purge it after
-   pushing:
-
-   ```sh
-   curl https://purge.jsdelivr.net/gh/jub0t/Concat@main/assets/editor.png
-   ```
+5. **Commit** only reviewed screenshots of VeyCut. Link the repository image
+   directly from the README. Never reuse a download link or externally hosted
+   product screenshot from another repository as evidence of a VeyCut build.

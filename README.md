@@ -10,6 +10,8 @@ This development source adds selectable export resolutions without changing the 
 
 The shipping profile uses thin LTO to reduce build time; speed improvements require measurement on GitHub. Windows effect tests execute the exact previously compiled test binary, keeping compilation outside the GPU-test timeout. Missing first-start effect previews use placeholders while cards are being generated. New log headers and filenames use VeyCut.
 
+Missing-media recovery runs in a cancellable background search. Duplicate filenames are left offline, symlinks are not followed and bounded or unreadable searches make no edits. See the [English/Persian quick start](docs/QUICK-START.md).
+
 0.3.0 native validation and packaging are pending. The download below remains the previously verified **0.2.0 experimental preview** until a new candidate passes.
 
 ## Version 0.2.0 changes

@@ -35,6 +35,7 @@ pub mod preview;
 pub mod projects;
 pub mod proxy;
 pub mod record;
+pub mod relink_files;
 pub mod reverse;
 pub mod session;
 pub mod subtitle_files;

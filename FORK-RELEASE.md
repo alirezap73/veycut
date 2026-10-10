@@ -53,6 +53,8 @@ Publish source updates for server validation. Publish a Mac preview only after i
 
 ## 0.3.0 source candidate
 
+- [x] Cancellable missing-media search with ambiguous filenames and bounded/partial trees covered by standalone tests.
+- [x] English/Persian quick-start guide covering export and recovery.
 - [x] Selectable output resolutions with aspect preservation and even encoder dimensions.
 - [x] Per-job work files and final publication that refuses an existing destination.
 - [x] Generation/project guards for cancelled export replies.

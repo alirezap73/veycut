@@ -1,3 +1,5 @@
+Missing-media searches run in the background, can be dismissed, ignore stale project replies and refuse ambiguous filenames. Incomplete searches leave all media paths unchanged. See docs/QUICK-START.md for English/Persian usage instructions.
+
 VeyCut 0.3.0 adds selectable export resolutions, with captions and titles rasterized at the chosen output size. It isolates each export's work files, refuses existing output files at final publication and discards late progress/results after cancellation or project changes. The shipping build uses thin LTO; no measured performance improvement is claimed before its checks complete.
 
 This experimental preview targets Apple silicon macOS. Linux native tests, macOS compilation, wasm checks, lightweight checks and the exact Mac candidate build must pass before creating a release draft. VALIDATION.json records source identity and validation scope. Windows validation is separate; no Windows, Linux or mobile installer is included.
