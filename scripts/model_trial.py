@@ -58,6 +58,36 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def query(url, model, key, prompt):
+    payload = json.dumps({"model": model, "messages": [
+        {"role": "user", "content": prompt}
+    ], "max_tokens": 2048}).encode()
+    request = urllib.request.Request(url, data=payload, headers={
+        "Authorization": "Bearer " + key, "Content-Type": "application/json"
+    })
+    started = time.monotonic()
+    evidence = {"request_succeeded": False, "response_complete": False}
+    try:
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as reply:
+            result = json.loads(reply.read(2_000_001))
+        choice = result["choices"][0]
+        content = choice["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("No usable text response")
+        reason = choice.get("finish_reason")
+        evidence.update(response=content, reported_usage=result.get("usage"),
+                        reported_model=result.get("model"), finish_reason=reason,
+                        response_complete=reason == "stop", request_succeeded=True)
+    except urllib.error.HTTPError as error:
+        evidence.update(error_type="HTTPError", http_status=error.code)
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError,
+            IndexError, TypeError, AttributeError) as error:
+        # No response body or request headers are printed or persisted on failure.
+        evidence.update(error_type=type(error).__name__)
+    evidence["elapsed_seconds"] = round(time.monotonic() - started, 3)
+    return evidence
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("task", choices=TASKS)
@@ -74,24 +104,8 @@ def main():
         key = os.environ.get(args.key_env)
         if not args.model or not key:
             parser.error("An explicit model and key environment variable are required")
-        payload = json.dumps({"model": args.model, "messages": [
-            {"role": "user", "content": record["prompt"]}
-        ], "max_tokens": 2048}).encode()
-        request = urllib.request.Request(url, data=payload, headers={
-            "Authorization": "Bearer " + key, "Content-Type": "application/json"
-        })
-        started = time.monotonic()
-        try:
-            with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as reply:
-                result = json.loads(reply.read(2_000_001))
-            record.update(response=result["choices"][0]["message"]["content"],
-                          reported_usage=result.get("usage"),
-                          reported_model=result.get("model"), request_succeeded=True)
-        except (urllib.error.URLError, ValueError, KeyError, IndexError) as error:
-            # No response body or request headers are printed or persisted on failure.
-            record.update(request_succeeded=False, error_type=type(error).__name__)
-        record.update(requested_model=args.model, endpoint=args.endpoint,
-                      elapsed_seconds=round(time.monotonic() - started, 3))
+        record.update(query(url, args.model, key, record["prompt"]))
+        record.update(requested_model=args.model, endpoint=args.endpoint)
     record.update(review_accepted=None, tests_passed=None, verified_speedup=None)
     # Exclusive creation preserves earlier trials and their evidence.
     with args.output.open("x", encoding="utf-8") as handle:

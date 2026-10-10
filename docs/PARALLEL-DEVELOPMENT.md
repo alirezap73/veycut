@@ -38,7 +38,9 @@ python3 scripts/model_trial.py export-files --model MODEL_ID \
   --endpoint https://PROVIDER_HOST/v1 --output /tmp/veycut-candidate-trial.json
 ```
 
-The response is a suggestion, not a source edit. Trial JSON includes source hash,
+The response is a suggestion, not a source edit. Compare complete responses;
+truncated answers, HTTP errors and timeouts are separate failure evidence, not
+reviewer rejection. Trial JSON includes source hash,
 elapsed request time and provider-reported usage/model. A reviewer separately
 records accepted/rejected reasoning and relevant GitHub test results. Compare
 time to an accepted, tested change including review and repair; request latency
