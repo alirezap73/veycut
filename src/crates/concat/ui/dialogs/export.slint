@@ -352,6 +352,7 @@ component OutputSection inherits DialogSection {
         label: I18n.t("export.resolution");
         // An aspect-preserving output ladder independent of the editing frame.
         Select {
+            controlled: true;
             current: root.data.resolution;
             options: root.data.resolutions;
             details: root.data.resolution-details;
@@ -363,6 +364,7 @@ component OutputSection inherits DialogSection {
     DialogRow {
         label: I18n.t("common.frameRate");
         Select {
+            controlled: true;
             current: root.data.rate;
             options: root.data.rates;
             details: root.data.rate-details;
@@ -375,6 +377,7 @@ component OutputSection inherits DialogSection {
     if root.data.hdr-timeline && root.data.deep-available: DialogRow {
         label: I18n.t("common.color");
         Select {
+            controlled: true;
             current: root.data.hdr ? 0 : 1;
             options: [root.data.hdr-label, "SDR"];
             details: [I18n.t("export.asTheTimeline"), I18n.t("export.toneMapped")];
@@ -389,6 +392,7 @@ component OutputSection inherits DialogSection {
     if !root.data.hdr: DialogRow {
         label: I18n.t("export.codec");
         Select {
+            controlled: true;
             current: root.data.codec;
             options: ["H.264", "HEVC", "AV1"];
             details: [
@@ -403,6 +407,7 @@ component OutputSection inherits DialogSection {
     if root.data.hdr: DialogRow {
         label: I18n.t("export.codec");
         Select {
+            controlled: true;
             current: root.data.codec - 1;
             options: ["HEVC", "AV1"];
             details: [
@@ -501,6 +506,7 @@ component AdvancedSection inherits VerticalLayout {
         DialogRow {
             label: I18n.t("common.mode");
             Select {
+            controlled: true;
                 current: root.data.rate-mode;
                 options: [I18n.t("export.vbr"), I18n.t("export.cbr")];
                 changed(index) => { root.rate-mode-changed(index); }
@@ -521,6 +527,7 @@ component AdvancedSection inherits VerticalLayout {
         DialogRow {
             label: I18n.t("common.colourRange");
             Select {
+            controlled: true;
                 current: root.data.color-range;
                 options: [I18n.t("common.limited"), I18n.t("common.full")];
                 details: [I18n.t("export.videoYoutube"), I18n.t("export.screenContent")];

@@ -236,6 +236,13 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
                 .collect::<Vec<_>>(),
         ))
     };
+    let weak = app.as_weak();
+    app.on_export_resolution_changed(move |resolution| {
+        let app = weak.upgrade().expect("live fixture");
+        let mut data = app.get_export();
+        data.resolution = resolution;
+        app.set_export(data);
+    });
     for (width, height) in [(1400, 900), (900, 600), (360, 640)] {
         app.set_phone(width < 600);
         app.set_export(crate::ui::ExportData {
@@ -263,7 +270,46 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
             size_small: "1 MB".into(),
             ..Default::default()
         });
-        capture(&window, &clock, "export-resized", width, height);
+        let initial = capture(&window, &clock, "export-resized", width, height);
+        if width == 1400 {
+            let click = |x, y| {
+                let position = slint::LogicalPosition::new(x, y);
+                app.window()
+                    .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                        position,
+                        button: slint::platform::PointerEventButton::Left,
+                    });
+                app.window()
+                    .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                        position,
+                        button: slint::platform::PointerEventButton::Left,
+                    });
+            };
+            click(750.0, 115.0);
+            capture(&window, &clock, "export-resolution-options", width, height);
+            click(750.0, 151.0);
+            assert_eq!(app.get_export().resolution, 0, "pointer must choose 4K");
+            capture(&window, &clock, "export-resolution-selected", width, height);
+            let mut reset = app.get_export();
+            reset.resolution = 2;
+            app.set_export(reset);
+            let restored = capture(&window, &clock, "export-resolution-reset", width, height);
+            let label = |pixels: &[Pixel]| -> Vec<[u8; 3]> {
+                (105..125)
+                    .flat_map(|y| (618..795).map(move |x| pixels[y * 1400 + x].0))
+                    .collect()
+            };
+            assert_ne!(
+                label(&initial),
+                label(&selected),
+                "visible size must follow the chosen option"
+            );
+            assert_eq!(
+                label(&initial),
+                label(&restored),
+                "controller reset must restore visible size after a real dropdown click"
+            );
+        }
         app.set_export(crate::ui::ExportData::default());
     }
 }
