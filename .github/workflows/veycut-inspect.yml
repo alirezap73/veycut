@@ -210,6 +210,20 @@ jobs:
               AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
               return [node] + (children as? [AXUIElement] ?? []).flatMap { snapshot($0, depth + 1) }
           }
+          func find(_ element: AXUIElement, role: String, title: String? = nil, depth: Int = 0) -> AXUIElement? {
+              guard depth < 24 else { return nil }
+              var value: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &value)
+              var text: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXTitle" as CFString, &text)
+              if (value as? String) == role && (title == nil || (text as? String) == title) { return element }
+              var children: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
+              for child in children as? [AXUIElement] ?? [] {
+                  if let found = find(child, role: role, title: title, depth: depth + 1) { return found }
+              }
+              return nil
+          }
           if action == "open" {
               key(31, .maskCommand)
               Thread.sleep(forTimeInterval: 3)
@@ -221,13 +235,16 @@ jobs:
               }
               key(5, [.maskCommand, .maskShift])
               Thread.sleep(forTimeInterval: 2)
-              NSPasteboard.general.clearContents()
-              NSPasteboard.general.setString(CommandLine.arguments[3], forType: .string)
-              key(9, .maskCommand)
+              guard let sheet = find(element, role: "AXSheet"), let field = find(sheet, role: "AXTextField") else { exit(6) }
+              AXUIElementSetAttributeValue(field, "AXFocused" as CFString, kCFBooleanTrue)
+              guard AXUIElementSetAttributeValue(field, "AXValue" as CFString, CommandLine.arguments[3] as CFString) == .success else { exit(7) }
+              var typed: CFTypeRef?
+              AXUIElementCopyAttributeValue(field, "AXValue" as CFString, &typed)
+              guard (typed as? String) == CommandLine.arguments[3] else { exit(8) }
               Thread.sleep(forTimeInterval: 1)
               key(36)
               Thread.sleep(forTimeInterval: 2)
-              key(36)
+              guard let open = find(element, role: "AXButton", title: "Open"), AXUIElementPerformAction(open, "AXPress" as CFString) == .success else { exit(9) }
               Thread.sleep(forTimeInterval: 8)
               print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
               print("native_picker_observed")
