@@ -24,6 +24,7 @@ pub mod cutout;
 pub mod dirs;
 pub mod enhance;
 pub mod export;
+pub mod export_paths;
 pub mod jobs;
 pub mod logs;
 pub mod media;

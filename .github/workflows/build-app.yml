@@ -412,6 +412,8 @@ jobs:
           PLIST
 
           cp LICENSE LICENSE-EXCEPTIONS.md SOURCE-NOTICES.md THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
+          mkdir -p "$app/Contents/Resources/licenses/fonts"
+          cp src/crates/concat-text/fonts/LICENSE-*.txt "$app/Contents/Resources/licenses/fonts/"
 
           # Every non-system dylib the binary (and those dylibs) load, copied
           # in and re-pointed at @executable_path/../Frameworks.
@@ -511,6 +513,8 @@ jobs:
           StartupWMClass=concat
           DESKTOP
           cp LICENSE LICENSE-EXCEPTIONS.md SOURCE-NOTICES.md THIRD_PARTY_NOTICES.md "stage/$name/"
+          mkdir -p "stage/$name/licenses/fonts"
+          cp src/crates/concat-text/fonts/LICENSE-*.txt "stage/$name/licenses/fonts/"
           # The binary must resolve every library from the folder alone.
           # The whole ldd report goes to the public summary when it does
           # not, so the failure names the library instead of just a step.
@@ -624,6 +628,7 @@ jobs:
           cp "$STAGE/concat.png" "$appdir/usr/share/icons/hicolor/256x256/apps/veycut.png"
           mkdir -p "$appdir/usr/share/doc/veycut"
           cp "$STAGE/LICENSE" "$STAGE/LICENSE-EXCEPTIONS.md" "$STAGE/SOURCE-NOTICES.md" "$STAGE/THIRD_PARTY_NOTICES.md" "$appdir/usr/share/doc/veycut/"
+          cp -R "$STAGE/licenses" "$appdir/usr/share/doc/veycut/"
           ln -s veycut.png "$appdir/.DirIcon"
           ln -s concat "$appdir/usr/bin/veycut"
           ln -s usr/bin/concat "$appdir/AppRun"
@@ -684,6 +689,8 @@ jobs:
           # The sherpa-onnx runtime, set aside by the download step above.
           Copy-Item "$env:SHERPA_DLL_DIR\*.dll" "stage\$name\"
           Copy-Item LICENSE, LICENSE-EXCEPTIONS.md, SOURCE-NOTICES.md, THIRD_PARTY_NOTICES.md "stage\$name\"
+          New-Item -ItemType Directory -Force "stage\$name\licenses\fonts" | Out-Null
+          Copy-Item "src\crates\concat-text\fonts\LICENSE-*.txt" "stage\$name\licenses\fonts\"
           # The installer, from that folder: Inno Setup, which the x64
           # image carries and the ARM image is given. See
           # assets/windows/concat.iss.

@@ -1,0 +1,19 @@
+id = "studio.persian-outline"
+name = "Persian caption · Outline"
+language = "Persian"
+order = 21
+offsetY = 0.24
+sample = "سلام"
+
+[style]
+content = "زیرنویس شما"
+fontFamily = "Vazirmatn"
+fontWeight = 800
+fontSize = 0.042
+color = "#ffffff"
+align = "center"
+shadow = true
+strokeWidth = 0.003
+strokeColor = "#000000"
+lineHeight = 1.2
+maxWidth = 0.82

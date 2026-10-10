@@ -1564,6 +1564,35 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.on_captions_cancel(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Cancel));
     }));
+    app.on_captions_section_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::SectionChanged(index)));
+    }));
+    app.on_captions_export_format_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::ExportFormatChanged(index)));
+    }));
+    app.on_captions_scope_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::ScopeChanged(index)));
+    }));
+    app.on_captions_offset_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::OffsetEdited(text.to_string())));
+    }));
+    app.on_captions_find_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::FindEdited(text.to_string())));
+    }));
+    app.on_captions_replacement_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::ReplacementEdited(
+            text.to_string(),
+        )));
+    }));
+    app.on_captions_shift_text(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::ShiftText));
+    }));
+    app.on_captions_restyle_text(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::RestyleText));
+    }));
+    app.on_captions_replace_text(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::ReplaceText));
+    }));
     app.on_captions_export_srt(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ExportSrt));
     }));
@@ -1580,7 +1609,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
             drop(studio);
             platform::pick_files_async(
                 &i18n::t("captions.importSrt"),
-                Some(("SubRip", &["srt"])),
+                Some(("Subtitles", &["srt", "vtt"])),
                 move |paths| {
                     if let Some(path) = paths.into_iter().next() {
                         host::on_ui_in_project(epoch, move |studio, _, _| {
@@ -1888,3 +1917,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
     log::info!("close: event loop exited (ok={})", result.is_ok());
     std::process::exit(0);
 }
+
+#[cfg(test)]
+mod ui_validation;

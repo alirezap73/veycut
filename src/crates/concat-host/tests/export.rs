@@ -1947,3 +1947,79 @@ fn a_reversed_span_plays_its_seconds_backwards() {
     heard.expect_tone(1.5);
     heard.expect_quiet(2.5);
 }
+
+/// The vertical caption workflow through the real export engine: bilingual
+/// WebVTT, overlapping title clips, bundled Persian font, stereo audio,
+/// save/reopen, and full decoding of a 720x1280/30 fps output.
+#[test]
+fn vertical_bilingual_captions_export_with_audio_and_reopen() {
+    use concat_project::subtitles::{
+        CaptionAppearance, caption_style, parse_vtt, timeline_cues, to_vtt,
+    };
+    let scratch = Scratch::new("veycut-vertical-captions");
+    let wav = scratch.path().join("sound.wav");
+    clock_wav(&wav, 2);
+    let mut studio = Studio::new(scratch.path(), "VeyCut vertical", video(720, 1280, 30, 1));
+    let sound = studio.import(&wav);
+    studio.apply(Command::AddClipAtFirstFree {
+        media_id: sound,
+        start: 0.0,
+    });
+    let cues = parse_vtt(
+        "WEBVTT\n\n00:00.000 --> 00:01.000\nسلام جهان\n\n00:00.800 --> 00:02.000\nVeyCut 2026",
+    )
+    .unwrap();
+    studio.apply(Command::Batch {
+        commands: cues
+            .iter()
+            .map(|cue| Command::AddTextClip {
+                track_id: None,
+                above: true,
+                start: cue.start,
+                duration: Some(cue.duration),
+                offset_y: Some(0.25),
+                style: Some(caption_style(
+                    cue.text.clone(),
+                    0.04,
+                    None,
+                    CaptionAppearance::Box,
+                )),
+            })
+            .collect(),
+    });
+    let reopened_cues =
+        parse_vtt(&to_vtt(&timeline_cues(studio.project().active())).unwrap()).unwrap();
+    assert_eq!(reopened_cues, cues);
+    let exported = studio.export("vertical bilingual captions");
+    exported.expect_length(2.0);
+    exported.expect_sound(2.0);
+    assert_eq!(exported.frames.len(), 60);
+    for frame in &exported.frames {
+        assert_eq!((frame.width(), frame.height()), (720, 1280));
+    }
+    for frame in [&exported.frames[0], &exported.frames[59]] {
+        assert!(
+            frame
+                .pixels()
+                .chunks_exact(4)
+                .any(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200),
+            "caption must be painted, not an empty frame"
+        );
+    }
+    if let Some(directory) = std::env::var_os("VEYCUT_ARTIFACT_DIR") {
+        let directory = PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("vertical-caption-frame.jpg"),
+            concat_media::jpeg(&exported.frames[15], 2).unwrap(),
+        )
+        .unwrap();
+        let video = studio.exports.join("01-vertical-bilingual-captions.mp4");
+        std::fs::copy(video, directory.join("vertical-bilingual-720p.mp4")).unwrap();
+        std::fs::write(
+            directory.join("vertical-captions.vtt"),
+            to_vtt(&cues).unwrap(),
+        )
+        .unwrap();
+    }
+}

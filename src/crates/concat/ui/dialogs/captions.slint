@@ -4,7 +4,7 @@
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
-import { Button, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../primitives/modal.slint";
+import { Button, Field, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 
@@ -36,6 +36,14 @@ export struct CaptionsSheetData {
     appearance: int,
     /// 0 timeline start, 1 playhead, used only for imported SRT.
     srt-origin: int,
+    section: int,
+    export-format: int,
+    scope: int,
+    text-count: int,
+    offset: string,
+    find: string,
+    replacement: string,
+    importing: bool,
     running: bool,
     /// 0..1
     progress: float,
@@ -58,15 +66,27 @@ export component CaptionsDialog inherits Modal {
     callback begin();
     callback cancel();
     callback import-srt();
+    callback section-changed(index: int);
+    callback export-format-changed(index: int);
+    callback scope-changed(index: int);
+    callback offset-edited(text: string);
+    callback find-edited(text: string);
+    callback replacement-edited(text: string);
+    callback shift-text();
+    callback restyle-text();
+    callback replace-text();
+
     callback export-srt();
     callback srt-origin-changed(index: int);
 
+    property <int> section: root.data.section;
     property <bool> from-sound: root.data.from-sound;
 
     open: root.data.open;
     title: I18n.t("captions.captions");
     glyph: Glyph.text-mark;
-    surface-width: 480px;
+    surface-width: 520px;
+    surface-height: 620px;
     dismissable: !root.data.running;
 
     // The script being typed, held apart from `data.text` the way the Field
@@ -84,8 +104,20 @@ export component CaptionsDialog inherits Modal {
     }
     init => { root.draft = root.data.text; }
 
-    VerticalLayout {
-        if !root.data.running && root.from-sound: DialogSection {
+    Flickable {
+        content-height: contents.preferred-height;
+        contents := VerticalLayout {
+        width: parent.width;
+        HorizontalLayout {
+            padding: 14px;
+            SegmentedControl {
+                options: [I18n.t("captions.createTab"), I18n.t("captions.filesTab"), I18n.t("captions.editTab")];
+                current: root.section;
+                enabled: !root.data.running;
+                changed(index) => { root.section-changed(index); }
+            }
+        }
+        if !root.data.running && root.section == 0 && root.from-sound: DialogSection {
             first: true;
             title: I18n.t("common.transcriber");
 
@@ -108,7 +140,7 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
-        if !root.data.running && !root.from-sound: DialogSection {
+        if !root.data.running && root.section == 0 && !root.from-sound: DialogSection {
             first: true;
             title: I18n.t("common.script");
 
@@ -159,7 +191,7 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
-        if !root.data.running: DialogSection {
+        if !root.data.running && root.section != 1: DialogSection {
             title: I18n.t("captions.captions");
 
             DialogRow {
@@ -240,7 +272,7 @@ export component CaptionsDialog inherits Modal {
 
                 Text {
                     horizontal-stretch: 1;
-                    text: root.data.progress < 0.02 ? I18n.t("captions.loadingTheModel") : I18n.t("captions.transcribing");
+                    text: root.data.importing ? I18n.t("captions.readingFile") : root.data.progress < 0.02 ? I18n.t("captions.loadingTheModel") : I18n.t("captions.transcribing");
                     color: Theme.fg;
                     font-size: Theme.fs;
                     vertical-alignment: center;
@@ -255,7 +287,7 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            if root.data.running: Progress { value: root.data.progress; }
+            if root.data.running && !root.data.importing: Progress { value: root.data.progress; }
 
             if root.data.running: HorizontalLayout {
                 alignment: start;
@@ -267,7 +299,7 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            if !root.data.running: HorizontalLayout {
+            if !root.data.running && root.section == 1: HorizontalLayout {
                 spacing: 8px;
                 Button {
                     block: true;
@@ -277,11 +309,20 @@ export component CaptionsDialog inherits Modal {
                 Button {
                     block: true;
                     label: I18n.t("captions.exportSrt");
+                    enabled: root.data.text-count > 0;
                     clicked => { root.export-srt(); }
                 }
             }
 
-            if !root.data.running: DialogRow {
+            if !root.data.running && root.section == 1: DialogRow {
+                label: I18n.t("captions.exportFormat");
+                SegmentedControl {
+                    options: ["SRT", "WebVTT"];
+                    current: root.data.export-format;
+                    changed(index) => { root.export-format-changed(index); }
+                }
+            }
+            if !root.data.running && root.section == 1: DialogRow {
                 label: I18n.t("captions.srtStart");
                 SegmentedControl {
                     options: [I18n.t("captions.timelineStart"), I18n.t("settings.playhead")];
@@ -290,14 +331,59 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            if !root.data.running: Text {
+            if !root.data.running && root.section == 1: Text {
                 text: I18n.t("captions.srtTimingHint");
                 color: Theme.fg-muted;
                 font-size: Theme.fs-sm;
                 wrap: word-wrap;
             }
 
-            if !root.data.running: Button {
+            if !root.data.running && root.section != 0: DialogRow {
+                label: I18n.t("captions.scope");
+                SegmentedControl {
+                    options: [I18n.t("captions.selectedText"), I18n.t("captions.allText")];
+                    current: root.data.scope;
+                    changed(index) => { root.scope-changed(index); }
+                }
+            }
+            if !root.data.running && root.section != 0: Text {
+                text: I18n.t1("captions.scopeCount", "" + root.data.text-count);
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+            if !root.data.running && root.section == 2: DialogRow {
+                label: I18n.t("captions.offsetSeconds");
+                Field { value: root.data.offset; technical: true; edited(text) => { root.offset-edited(text); } }
+            }
+            if !root.data.running && root.section == 2: Button {
+                block: true; label: I18n.t("captions.shiftText");
+                enabled: root.data.text-count > 0;
+                clicked => { root.shift-text(); }
+            }
+            if !root.data.running && root.section == 2: Button {
+                block: true; label: I18n.t("captions.restyleText");
+                enabled: root.data.text-count > 0;
+                clicked => { root.restyle-text(); }
+            }
+            if !root.data.running && root.section == 2: DialogRow {
+                label: I18n.t("captions.findText");
+                Field { value: root.data.find; edited(text) => { root.find-edited(text); } }
+            }
+            if !root.data.running && root.section == 2: DialogRow {
+                label: I18n.t("captions.replacement");
+                Field { value: root.data.replacement; edited(text) => { root.replacement-edited(text); } }
+            }
+            if !root.data.running && root.section == 2: Button {
+                block: true; label: I18n.t("captions.replaceText");
+                enabled: root.data.text-count > 0 && root.data.find != "";
+                clicked => { root.replace-text(); }
+            }
+            if !root.data.running && root.section == 2: Text {
+                text: I18n.t("captions.editHint");
+                color: Theme.fg-muted; font-size: Theme.fs-sm; wrap: word-wrap;
+            }
+            if !root.data.running && root.section == 0: Button {
                 block: true;
                 primary: true;
                 large: true;
@@ -307,5 +393,6 @@ export component CaptionsDialog inherits Modal {
                 clicked => { root.begin(); }
             }
         }
+    }
     }
 }

@@ -40,3 +40,8 @@ jobs:
           rustc --edition 2024 -D warnings --test crates/concat-host/src/subtitle_files.rs -o "$RUNNER_TEMP/subtitle-file-tests"
           "$RUNNER_TEMP/subtitle-file-tests" --test-threads=1
         working-directory: src
+      - name: Export path tests without media services
+        run: |
+          rustc --edition 2024 -D warnings --test crates/concat-host/src/export_paths.rs -o "$RUNNER_TEMP/export-path-tests"
+          "$RUNNER_TEMP/export-path-tests" --test-threads=1
+        working-directory: src

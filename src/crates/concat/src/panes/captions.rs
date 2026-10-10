@@ -16,8 +16,8 @@ use std::sync::Arc;
 use concat_project::Command;
 use concat_project::model::TextStyle;
 use concat_project::subtitles::{
-    CaptionAppearance, Cue, MAX_SRT_BYTES, caption_style, offset_cues, parse_srt, timeline_cues,
-    to_srt,
+    CaptionAppearance, Cue, MAX_SRT_BYTES, caption_style, offset_cues, parse_srt, parse_vtt,
+    to_srt, to_vtt,
 };
 use concat_speech::transcribe::Segment;
 
@@ -55,16 +55,32 @@ pub enum CaptionsMsg {
     ImportSrt(PathBuf),
     SrtOriginChanged(i32),
     ExportSrt,
+    SectionChanged(i32),
+    ExportFormatChanged(i32),
+    ScopeChanged(i32),
+    OffsetEdited(String),
+    FindEdited(String),
+    ReplacementEdited(String),
+    ShiftText,
+    RestyleText,
+    ReplaceText,
     SrtSaved(Result<PathBuf, String>),
     SrtLoaded {
         result: Result<Vec<Cue>, String>,
         look: CaptionLook,
         base: Option<Box<TextStyle>>,
+        run: u64,
     },
     /// The transcriber's worker reporting where it is, in percent.
-    Progress(i32),
+    Progress {
+        run: u64,
+        percent: i32,
+    },
     /// The transcriber's worker is done: what was said, or why not.
-    Finished(Result<Vec<Segment>, String>),
+    Finished {
+        run: u64,
+        result: Result<Vec<Segment>, String>,
+    },
 }
 
 /// The clip a transcription is running over, as the finished segments
@@ -96,6 +112,15 @@ pub struct CaptionsPane {
     pub appearance: usize,
     /// Whether imported SRT times are relative to the playhead snapshot.
     pub srt_at_playhead: bool,
+    pub section: usize,
+    pub export_vtt: bool,
+    pub all_text: bool,
+    pub offset: String,
+    pub find: String,
+    pub replacement: String,
+    /// Invalidates worker replies after cancellation or a new operation.
+    run: u64,
+    pub importing: bool,
     pub running: bool,
     pub progress: f32,
     /// Why the last run failed, when it did.
@@ -109,6 +134,51 @@ impl CaptionsPane {
     /// this runs the studio's copy of the pane is a blank it must not read.
     pub fn update(&mut self, msg: CaptionsMsg, studio: &mut Studio) {
         match msg {
+            CaptionsMsg::SectionChanged(index) => self.section = (index.max(0) as usize).min(2),
+            CaptionsMsg::ExportFormatChanged(index) => self.export_vtt = index == 1,
+            CaptionsMsg::ScopeChanged(index) => self.all_text = index == 1,
+            CaptionsMsg::OffsetEdited(text) => self.offset = text,
+            CaptionsMsg::FindEdited(text) => self.find = text,
+            CaptionsMsg::ReplacementEdited(text) => self.replacement = text,
+            CaptionsMsg::ShiftText | CaptionsMsg::RestyleText | CaptionsMsg::ReplaceText => {
+                if self.running || studio.session.is_none() {
+                    return;
+                }
+                let ids = (!self.all_text).then_some(studio.selection.as_slice());
+                let timeline = studio.project().active();
+                let result = match msg {
+                    CaptionsMsg::ShiftText => self
+                        .offset
+                        .trim()
+                        .parse::<f64>()
+                        .map_err(|_| t("captions.invalidOffset"))
+                        .and_then(|seconds| {
+                            concat_project::subtitle_edits::shift(timeline, ids, seconds)
+                        }),
+                    CaptionsMsg::RestyleText => {
+                        let (offset, size, appearance) = self.look();
+                        concat_project::subtitle_edits::restyle(
+                            timeline, ids, size, offset, appearance,
+                        )
+                    }
+                    _ => concat_project::subtitle_edits::replace(
+                        timeline,
+                        ids,
+                        &self.find,
+                        &self.replacement,
+                    ),
+                };
+                match result {
+                    Ok((command, count)) => match studio.apply_checked(command) {
+                        Ok(_) => {
+                            self.message.clear();
+                            studio.notify(&tf("captions.updatedText", &[&count]), false);
+                        }
+                        Err(error) => self.message = error,
+                    },
+                    Err(error) => self.message = error,
+                }
+            }
             CaptionsMsg::AppearanceChanged(index) => {
                 self.appearance = (index.max(0) as usize).min(2);
             }
@@ -127,6 +197,12 @@ impl CaptionsPane {
                 if self.running || studio.session.is_none() {
                     return;
                 }
+                self.run = self.run.wrapping_add(1);
+                let run = self.run;
+                self.running = true;
+                self.importing = true;
+                self.progress = 0.0;
+                self.message.clear();
                 let look = self.look();
                 let base = studio.prefs.title_style.clone().map(Box::new);
                 let offset = if self.srt_at_playhead {
@@ -138,34 +214,64 @@ impl CaptionsPane {
                     move || {
                         let text = concat_host::subtitle_files::read_utf8(&path, MAX_SRT_BYTES)
                             .map_err(|error| error.to_string())?;
-                        let mut cues = parse_srt(&text)?;
+                        let mut cues = if path
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("vtt"))
+                        {
+                            parse_vtt(&text)?
+                        } else {
+                            parse_srt(&text)?
+                        };
                         offset_cues(&mut cues, offset)?;
                         Ok(cues)
                     },
                     move |studio, _, _, result| {
-                        studio.handle(Msg::Captions(CaptionsMsg::SrtLoaded { result, look, base }))
+                        studio.handle(Msg::Captions(CaptionsMsg::SrtLoaded {
+                            result,
+                            look,
+                            base,
+                            run,
+                        }))
                     },
                 );
             }
-            CaptionsMsg::SrtLoaded { result, look, base } => match result {
-                Ok(cues) => {
-                    let count = cues.len();
-                    let commands = cues
-                        .into_iter()
-                        .map(|cue| {
-                            caption_clip(cue.text, cue.start, cue.duration, look, base.as_deref())
-                        })
-                        .collect();
-                    if studio.apply(Command::Batch { commands }).is_some() {
-                        self.open = false;
-                        self.message.clear();
-                        studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+            CaptionsMsg::SrtLoaded {
+                result,
+                look,
+                base,
+                run,
+            } => {
+                if run != self.run || !self.importing {
+                    return;
+                }
+                self.running = false;
+                self.importing = false;
+                match result {
+                    Ok(cues) => {
+                        let count = cues.len();
+                        let commands = cues
+                            .into_iter()
+                            .map(|cue| {
+                                caption_clip(
+                                    cue.text,
+                                    cue.start,
+                                    cue.duration,
+                                    look,
+                                    base.as_deref(),
+                                )
+                            })
+                            .collect();
+                        if studio.apply(Command::Batch { commands }).is_some() {
+                            self.open = false;
+                            self.message.clear();
+                            studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+                        }
+                    }
+                    Err(error) => {
+                        self.message = tf("captions.srtFailed", &[&error]);
                     }
                 }
-                Err(error) => {
-                    self.message = tf("captions.srtFailed", &[&error]);
-                }
-            },
+            }
             CaptionsMsg::Open => {
                 let installed = installed(&studio.settings.transcribers);
                 let model = installed.iter().position(|model| model.active).unwrap_or(0);
@@ -180,6 +286,8 @@ impl CaptionsPane {
                     model,
                     placement: 0,
                     size: 1,
+                    offset: "0.5".into(),
+                    run: self.run.wrapping_add(1),
                     ..CaptionsPane::default()
                 };
             }
@@ -191,6 +299,9 @@ impl CaptionsPane {
             }
             CaptionsMsg::SizeChanged(index) => self.size = (index.max(0) as usize).min(2),
             CaptionsMsg::Begin => {
+                if self.running {
+                    return;
+                }
                 if self.clip.is_some() {
                     self.run_sound(studio);
                 } else {
@@ -198,14 +309,23 @@ impl CaptionsPane {
                 }
             }
             CaptionsMsg::Cancel => {
+                self.run = self.run.wrapping_add(1);
+                self.subject = None;
+                self.importing = false;
                 studio.host.transcriber.cancel();
                 self.running = false;
                 self.open = false;
             }
-            CaptionsMsg::Progress(percent) => {
+            CaptionsMsg::Progress { run, percent } => {
+                if run != self.run || !self.running {
+                    return;
+                }
                 self.progress = (percent as f32 / 100.0).clamp(0.0, 1.0);
             }
-            CaptionsMsg::Finished(result) => {
+            CaptionsMsg::Finished { run, result } => {
+                if run != self.run || !self.running {
+                    return;
+                }
                 self.running = false;
                 let subject = self.subject.take();
                 match result {
@@ -256,7 +376,13 @@ impl CaptionsPane {
             return;
         };
         let directory = PathBuf::from(session.path());
-        let output = match to_srt(&timeline_cues(studio.project().active())) {
+        let ids = (!self.all_text).then_some(studio.selection.as_slice());
+        let cues = concat_project::subtitle_edits::selected_cues(studio.project().active(), ids);
+        let output = match if self.export_vtt {
+            to_vtt(&cues)
+        } else {
+            to_srt(&cues)
+        } {
             Ok(output) => output,
             Err(error) => {
                 self.message = tf("captions.srtExportFailed", &[&error]);
@@ -264,6 +390,8 @@ impl CaptionsPane {
             }
         };
         let epoch = crate::host::project_epoch();
+        let extension = if self.export_vtt { "vtt" } else { "srt" };
+        let format = if self.export_vtt { "WebVTT" } else { "SubRip" };
         let title = t("captions.exportSrt");
         // Defer the native dialog out of Slint's current callback, as the
         // frame/audio exporters do: macOS dialogs pump the event loop.
@@ -273,23 +401,23 @@ impl CaptionsPane {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos();
-                directory.join(format!("captions-{stamp}.srt"))
+                directory.join(format!("captions-{stamp}.{extension}"))
             } else {
                 let Some(file) = crate::platform::save_file(
                     &title,
                     &directory,
-                    "captions.srt",
-                    ("SubRip", &["srt"]),
+                    &format!("captions.{extension}"),
+                    (format, &[extension]),
                 ) else {
                     return;
                 };
                 if file
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("srt"))
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
                 {
                     file
                 } else {
-                    file.with_extension("srt")
+                    file.with_extension(extension)
                 }
             };
             if crate::host::project_epoch() != epoch {
@@ -370,6 +498,9 @@ impl CaptionsPane {
         };
         let dirs = studio.host.dirs.clone();
         let transcriber = Arc::clone(&studio.host.transcriber);
+        self.run = self.run.wrapping_add(1);
+        let run = self.run;
+        self.importing = false;
         self.subject = Some(Subject {
             start: clip.start,
             speed: clip.speed,
@@ -383,11 +514,13 @@ impl CaptionsPane {
             move || {
                 transcriber.transcribe(&dirs, &request, move |percent| {
                     on_ui_in_project(epoch, move |studio, _, _| {
-                        studio.handle(Msg::Captions(CaptionsMsg::Progress(percent)));
+                        studio.handle(Msg::Captions(CaptionsMsg::Progress { run, percent }));
                     });
                 })
             },
-            |studio, _, _, result| studio.handle(Msg::Captions(CaptionsMsg::Finished(result))),
+            move |studio, _, _, result| {
+                studio.handle(Msg::Captions(CaptionsMsg::Finished { run, result }))
+            },
         );
     }
 
@@ -402,6 +535,21 @@ impl CaptionsPane {
             size: self.size as i32,
             appearance: self.appearance as i32,
             srt_origin: i32::from(self.srt_at_playhead),
+            section: self.section as i32,
+            export_format: i32::from(self.export_vtt),
+            scope: i32::from(self.all_text),
+            text_count: if self.open {
+                concat_project::subtitle_edits::count(
+                    studio.project().active(),
+                    (!self.all_text).then_some(studio.selection.as_slice()),
+                ) as i32
+            } else {
+                0
+            },
+            offset: self.offset.as_str().into(),
+            find: self.find.as_str().into(),
+            replacement: self.replacement.as_str().into(),
+            importing: self.importing,
             running: self.running,
             progress: self.progress,
             ready: !installed(&studio.settings.transcribers).is_empty(),

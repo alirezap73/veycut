@@ -124,6 +124,14 @@ jobs:
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
           CONCAT_REQUIRE_GPU: "1"
+          VEYCUT_ARTIFACT_DIR: ${{ runner.temp }}/veycut-validation
+      - name: Retain VeyCut validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: veycut-validation-${{ github.sha }}
+          path: ${{ runner.temp }}/veycut-validation
+          if-no-files-found: warn
       # The performance table's quick scenarios against their budgets, in
       # the `quick` profile: planning, undo, the document, publishing.
       # The media scenarios need a machine that is not a shared runner.
@@ -239,12 +247,13 @@ jobs:
         with:
           workspaces: src
           key: check-${{ matrix.os }}
+          cache-on-failure: true
       - run: cargo check --workspace --all-targets
         if: runner.os != 'Windows'
         working-directory: src
       # One job at a time and no debug info, as on Linux. The timeout is
       # for a hang: concat-media's tests once hung here for good.
-      - run: cargo test --workspace -j 1
+      - run: cargo test --workspace -j 1 -- --test-threads=1 --nocapture
         if: runner.os == 'Windows'
         timeout-minutes: 90
         working-directory: src

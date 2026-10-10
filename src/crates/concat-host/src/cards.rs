@@ -602,6 +602,7 @@ mod tests {
         let mut failed = Vec::new();
         let cards = cards(Catalogue::builtin(), &dir);
         for card in &cards {
+            eprintln!("Drawing effect card: {}", card.id);
             let frame = match painter.frame(card) {
                 Ok(frame) => frame,
                 Err(error) => {

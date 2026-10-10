@@ -248,7 +248,8 @@ const BUNDLED: [&[u8]; 5] = [
 /// (regular) weight: fontdb sets no variation axes. Kosugi Maru carries
 /// Japanese, Secular One and Rubik Scribble Hebrew. The window registers the
 /// same bytes for its preset cards (concat's fonts.rs).
-pub const BASE_FONTS: [&[u8]; 41] = [
+pub const BASE_FONTS: [&[u8]; 42] = [
+    include_bytes!("../fonts/Vazirmatn-Variable.ttf"),
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-SemiBold.ttf"),
     include_bytes!("../fonts/Inter-Bold.ttf"),
@@ -1932,6 +1933,70 @@ mod tests {
         assert_eq!(face_of[mark], face_of[0]);
         let second = mark + '\u{301}'.len_utf8() + 1;
         assert_eq!(face_of[second], face_of[second - 1]);
+    }
+
+    /// Persian is available even with no system fonts. Contextual forms
+    /// and reading order are exercised, and CI retains rendered examples.
+    #[test]
+    fn persian_is_shaped_with_the_bundled_font_without_system_fonts() {
+        let bytes = include_bytes!("../fonts/Vazirmatn-Variable.ttf");
+        let face = rustybuzz::Face::from_slice(bytes, 0).expect("bundled Persian font");
+        let shape = |text: &str| {
+            let mut buffer = rustybuzz::UnicodeBuffer::new();
+            buffer.push_str(text);
+            buffer.set_direction(rustybuzz::Direction::RightToLeft);
+            buffer.guess_segment_properties();
+            rustybuzz::shape(&face, &[], buffer)
+                .glyph_infos()
+                .iter()
+                .map(|glyph| glyph.glyph_id)
+                .collect::<Vec<_>>()
+        };
+        let single = shape("ب");
+        let connected = shape("بب");
+        assert!(connected.iter().all(|glyph| *glyph != 0));
+        assert_ne!(
+            connected,
+            vec![single[0], single[0]],
+            "letters must use contextual forms"
+        );
+        let mut db = fontdb::Database::new();
+        for bytes in BUNDLED.iter().chain(BASE_FONTS.iter()) {
+            db.load_font_data(bytes.to_vec());
+        }
+        let fonts = Fonts {
+            db,
+            cache: Mutex::default(),
+        };
+        let mut title = style("سلام جهان");
+        title.font_family = "Vazirmatn".into();
+        title.max_width = 0.82;
+        title.font_size = 0.04;
+        let cast = fonts.cast(&title).expect("Persian casting");
+        for (data, index) in &cast.faces {
+            let face = ttf_parser::Face::parse((**data).as_ref(), *index).expect("font face");
+            assert!(draws(&face, 'س') && draws(&face, 'ژ'));
+        }
+        let out = render(&fonts, &title, 720, 1280).expect("renders Persian");
+        assert_eq!(out.words.len(), 2);
+        assert!(
+            out.words[0].x > out.words[1].x,
+            "Persian reading order: {:?}",
+            out.words
+        );
+        assert!(out.block_width <= 720 && out.block_height > 0);
+        title.content = "سلام جهان\nVeyCut 2026".into();
+        if let Some(directory) = std::env::var_os("VEYCUT_ARTIFACT_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).expect("artifact directory");
+            for look in ["plain", "box", "outline"] {
+                title.background = if look == "box" { "#000000cc" } else { "" }.into();
+                title.stroke_width = if look == "outline" { 0.003 } else { 0.0 };
+                let out = render(&fonts, &title, 720, 1280).expect("bilingual sample");
+                std::fs::write(directory.join(format!("persian-{look}.png")), out.png)
+                    .expect("sample artifact");
+            }
+        }
     }
 
     /// Right-to-left words are laid right to left: the first read is the

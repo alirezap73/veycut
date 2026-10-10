@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! UTF-8 SubRip cues, validated before any edit is made.
+//! UTF-8 subtitle cues, validated before any edit is made.
+
+mod vtt;
+pub use vtt::{parse_vtt, to_vtt};
 
 /// Import/export bound for a subtitle track (one mebibyte).
 pub const MAX_SRT_BYTES: usize = 1_048_576;
@@ -27,7 +30,15 @@ pub fn caption_style(
 ) -> crate::model::TextStyle {
     use crate::model::{TextAlign, TextStyle};
     let mut style = base.cloned().unwrap_or_else(|| TextStyle {
-        font_family: "Hanken Grotesk".to_owned(),
+        font_family: if content
+            .chars()
+            .any(|ch| matches!(ch, '؀'..='ࣿ' | 'ﭐ'..='﷿' | 'ﹰ'..='﻿'))
+        {
+            "Vazirmatn"
+        } else {
+            "Hanken Grotesk"
+        }
+        .to_owned(),
         font_weight: 600.0,
         ..TextStyle::default()
     });

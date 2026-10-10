@@ -1,0 +1,21 @@
+id = "studio.persian-box"
+name = "Persian caption · Box"
+language = "Persian"
+order = 20
+offsetY = 0.24
+sample = "سلام"
+
+[style]
+content = "زیرنویس شما"
+fontFamily = "Vazirmatn"
+fontWeight = 700
+fontSize = 0.038
+color = "#ffffff"
+align = "center"
+shadow = false
+background = "#000000cc"
+backgroundRadius = 0.009
+backgroundPaddingX = 0.014
+backgroundPaddingY = 0.009
+lineHeight = 1.2
+maxWidth = 0.82

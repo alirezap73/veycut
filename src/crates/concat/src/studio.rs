@@ -2296,6 +2296,18 @@ impl Studio {
     }
 
     pub fn apply(&mut self, command: Command) -> Option<String> {
+        match self.apply_checked(command) {
+            Ok(id) => id,
+            Err(error) => {
+                self.notify(&error, true);
+                None
+            }
+        }
+    }
+
+    /// Applies an edit and reports rejection separately from a successful
+    /// edit that creates no ID, such as a timing or appearance change.
+    pub fn apply_checked(&mut self, command: Command) -> Result<Option<String>, String> {
         // An edit ends whatever burst the view was in.
         self.end_burst();
         log::info!("edit: {}", command_name(&command));
@@ -2304,7 +2316,7 @@ impl Studio {
         // Anything but an inspector commit ends the coalescing window; the
         // commit path sets `last_commit` again right after calling here.
         self.last_commit = None;
-        let session = self.session.as_mut()?;
+        let session = self.session.as_mut().ok_or("No project is open")?;
         let chosen = matches!(command, Command::SetTimelineVideo { .. });
         let before = session.video().color_space;
         match session.apply(command) {
@@ -2314,12 +2326,9 @@ impl Studio {
                 if !chosen {
                     self.tell_of_hdr(before, after);
                 }
-                view.created_id
+                Ok(view.created_id)
             }
-            Err(error) => {
-                self.notify(&error, true);
-                None
-            }
+            Err(error) => Err(error),
         }
     }
 

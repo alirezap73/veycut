@@ -27,6 +27,8 @@ description: |
   with FFmpeg underneath and hardware-accelerated preview and export.
 
 contents:
+  - src: licenses/fonts/*.txt
+    dst: /usr/share/doc/veycut/licenses/fonts/
   - src: concat
     dst: /opt/veycut/concat
     file_info:

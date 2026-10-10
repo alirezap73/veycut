@@ -1330,26 +1330,28 @@ export component NewProjectDialog inherits Modal {
             }
         }
 
-        // One choice sets the complete vertical format. The 720p choice
-        // keeps a smaller frame available for machines with less headroom.
+        // One choice sets aspect, resolution and frame rate together.
         FormRow {
-            label: I18n.upper("start.verticalPresets");
+            label: I18n.upper("start.quickPresets");
             stacked: root.narrow;
-
             ChipRow {
                 options: [
-                    { label: "1080p · 30 fps", ratio: 0.5625 },
-                    { label: "720p · 30 fps", ratio: 0.5625 },
+                    { label: "9:16 · 1080p · 30 fps", ratio: 0.5625 },
+                    { label: "9:16 · 720p · 30 fps", ratio: 0.5625 },
+                    { label: "1:1 · 1080 · 30 fps", ratio: 1 },
+                    { label: "16:9 · 1080p · 30 fps", ratio: 1.7778 },
                 ];
-                current: root.data.aspect == 1 && root.data.rate == 6
-                    ? (root.data.size == 1 ? 0 : (root.data.size == 0 ? 1 : -1))
-                    : -1;
+                current: root.data.rate != 6 ? -1
+                    : root.data.aspect == 1 && root.data.size == 1 ? 0
+                    : root.data.aspect == 1 && root.data.size == 0 ? 1
+                    : root.data.aspect == 2 && root.data.size == 1 ? 2
+                    : root.data.aspect == 0 && root.data.size == 1 ? 3 : -1;
                 enabled: !root.data.busy;
-                block: root.narrow;
-                per-row: root.narrow ? 1 : 0;
+                block: true;
+                per-row: root.narrow ? 1 : 2;
                 changed(index) => {
-                    root.size-changed(index == 0 ? 1 : 0);
-                    root.aspect-changed(1);
+                    root.size-changed(index == 1 ? 0 : 1);
+                    root.aspect-changed(index < 2 ? 1 : (index == 2 ? 2 : 0));
                     root.rate-changed(6);
                 }
             }

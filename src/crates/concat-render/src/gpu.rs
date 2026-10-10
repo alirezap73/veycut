@@ -1174,7 +1174,10 @@ impl WgpuCompositor {
     /// device did not answer.
     pub fn finish(&self) -> bool {
         self.device
-            .poll(wgpu::PollType::wait_indefinitely())
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_secs(30)),
+            })
             .is_ok()
     }
 
@@ -1729,7 +1732,10 @@ impl WgpuCompositor {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = mapped_tx.send(result);
         });
-        let waited = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let waited = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        });
         self.retire();
         if waited.is_err() || !matches!(mapped_rx.try_recv(), Ok(Ok(()))) {
             return None;
@@ -3182,7 +3188,10 @@ impl WgpuCompositor {
         });
         // Each way the readback fails is said: these are the lines behind
         // "the GPU device was lost", and there were none (#223).
-        if let Err(error) = self.device.poll(wgpu::PollType::wait_indefinitely()) {
+        if let Err(error) = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        }) {
             log::error!("GPU readback: the device did not finish the frame: {error}");
             return None;
         }

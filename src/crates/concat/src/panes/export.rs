@@ -416,6 +416,17 @@ impl ExportPane {
             self.message = t("export.nothingTimelineExport");
             return;
         }
+        let output = match concat_host::export_paths::video_target(
+            std::path::Path::new(&self.folder),
+            &self.name,
+        ) {
+            Ok(path) => path.to_string_lossy().into_owned(),
+            Err(error) => {
+                self.phase = ExportPhase::Failed;
+                self.message = error;
+                return;
+            }
+        };
         let job = match studio.host.exporter.begin() {
             Ok(job) => job,
             Err(error) => {
@@ -424,11 +435,6 @@ impl ExportPane {
                 return;
             }
         };
-        let output = format!(
-            "{}/{}.mp4",
-            self.folder.trim_end_matches('/'),
-            self.name.trim()
-        );
         let spec = ExportSpec {
             output: output.clone(),
             crf: EXPORT_CRF[self.quality.min(2)],

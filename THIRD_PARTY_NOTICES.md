@@ -72,6 +72,8 @@ and registered with the window for the text presets. Each file's licence is
 beside it in `src/crates/concat-text/fonts/`, as `LICENSE-<Family>.txt`;
 OFL is the SIL Open Font License 1.1.
 
+- **Vazirmatn** — Copyright 2015 The Vazirmatn Project Authors. SIL Open Font License 1.1. Bundled Persian/Arabic font; variable font rendered at its default weight. Source: Google Fonts revision `8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5`, `ofl/vazirmatn/Vazirmatn[wght].ttf`. SHA-256: `696249a2c74b39ffdef55de4df2809c5b639d3ff80d618d8160a095d2fd49dca`. Full license: `src/crates/concat-text/fonts/LICENSE-Vazirmatn.txt`.
+
 - **Inter** — Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter). OFL. See `fonts/LICENSE-Inter.txt`.
 - **Montserrat** — Copyright 2024 The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat). OFL. See `fonts/LICENSE-Montserrat.txt`.
 - **Space Grotesk** — Copyright Florian Karsten. OFL. See `fonts/LICENSE-SpaceGrotesk.txt`.

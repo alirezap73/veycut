@@ -27,5 +27,7 @@ package() {
   install -Dm644 "$stage/LICENSE" "$pkgdir/usr/share/licenses/veycut/LICENSE"
   install -Dm644 "$stage/THIRD_PARTY_NOTICES.md" "$pkgdir/usr/share/licenses/veycut/THIRD_PARTY_NOTICES.md"
   install -Dm644 "$stage/LICENSE-EXCEPTIONS.md" "$pkgdir/usr/share/licenses/veycut/LICENSE-EXCEPTIONS.md"
+  mkdir -p "$pkgdir/usr/share/licenses/veycut/fonts"
+  cp "$stage/licenses/fonts/"*.txt "$pkgdir/usr/share/licenses/veycut/fonts/"
   install -Dm644 "$stage/SOURCE-NOTICES.md" "$pkgdir/usr/share/licenses/veycut/SOURCE-NOTICES.md"
 }

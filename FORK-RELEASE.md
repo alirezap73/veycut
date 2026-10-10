@@ -11,16 +11,16 @@
 ## Required before the first installer release
 
 - [x] Select VeyCut and the proposed destination `alirezap73/veycut`.
-- [ ] Replace user-facing name, icon, application IDs and platform bundle/package metadata.
-- [x] Replace desktop UI labels and icon, isolate app data, and prepare macOS bundle metadata. Windows/Linux/mobile package identity still needs review.
+- [x] Replace desktop name, icon, app-data ID and desktop package metadata. Mobile packaging remains unverified.
+- [x] Replace desktop UI labels and icon, isolate app data, and prepare macOS bundle metadata. Windows/Linux metadata has been updated; mobile packaging remains under review.
 - [x] Point the fork's version/update UI at its own release repository; upstream model download attribution stays separate.
-- [x] Set fork version 0.1.0 and write source-candidate notes distinguishing inherited features from added features.
+- [x] Set fork version 0.2.0 and write source-candidate notes distinguishing inherited features from added features.
 - [ ] Run Fork development checks and Fork full validation against the release commit.
-- [ ] Build the modified GUI and test the Captions dialog at normal and narrow window sizes.
+- [ ] Build the modified GUI and inspect server-rendered Captions and project forms at 1400×900, 900×600 and 360×640.
 - [ ] Import valid, corrupt, missing and mixed media through the native picker and drag/drop.
 - [ ] Import SRT at both origins; select all three appearances; confirm undo/redo and save/reopen.
-- [ ] Verify Persian shaping with a supported selected font; inspect multiline wrapping and backgrounds.
-- [ ] Export a short 720p video with audio; inspect dimensions, frame rate, duration, text and complete decode.
+- [ ] Run the bundled-font Persian shaping test and inspect the plain, boxed and outlined bilingual screenshots.
+- [ ] Pass the native bilingual 720×1280/30 fps export test with audio and complete decode; inspect its video and frame artifact.
 - [ ] Package an installer on GitHub and test it on a clean target machine.
 - [ ] Include source revision, license/notices, checksum and known limitations with the release.
 
@@ -35,3 +35,13 @@ Begin with one tested desktop target. Mark other desktop/mobile targets unverifi
 5. Run **VeyCut macOS candidate** to validate and build an Apple silicon test artifact on GitHub. This creates no public release. Test that artifact before releasing an installer.
 
 The inherited Release workflow is intentionally upstream-only. Fork full validation creates no public release and uploads no unbranded installer. Do not remove the publisher restriction until the fork's branding, update URLs and package scripts have been changed and tested.
+
+## 0.2.0 regression checks
+
+- [x] Project logic: WebVTT, selected scope, exact shift rejection, group styles, Unicode replacement and undo/redo.
+- [x] Standalone filename tests: Unicode boundaries, invalid/reserved names and preservation of an existing output.
+- [x] Translation inventory and targeted source formatting/lint.
+- [ ] Native tests, GUI screenshot review and package build at the final 0.2.0 commit.
+- [ ] Re-run Windows tests serially; inspect effect-card progress if they time out again.
+
+Publish source updates for server validation. Publish a desktop preview only after its native checks and build succeed, with unsigned/clean-machine limitations stated. A preview is not a verified stable installer.

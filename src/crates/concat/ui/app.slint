@@ -294,6 +294,16 @@ export component App inherits Window {
     callback captions-begin();
     callback captions-cancel();
     callback captions-import-srt();
+    callback captions-section-changed(index: int);
+    callback captions-export-format-changed(index: int);
+    callback captions-scope-changed(index: int);
+    callback captions-offset-edited(text: string);
+    callback captions-find-edited(text: string);
+    callback captions-replacement-edited(text: string);
+    callback captions-shift-text();
+    callback captions-restyle-text();
+    callback captions-replace-text();
+
     callback captions-export-srt();
     callback captions-srt-origin-changed(index: int);
 
@@ -838,6 +848,16 @@ export component App inherits Window {
         begin => { root.captions-begin(); }
         cancel => { root.captions-cancel(); }
         import-srt => { root.captions-import-srt(); }
+        section-changed(index) => { root.captions-section-changed(index); }
+        export-format-changed(index) => { root.captions-export-format-changed(index); }
+        scope-changed(index) => { root.captions-scope-changed(index); }
+        offset-edited(text) => { root.captions-offset-edited(text); }
+        find-edited(text) => { root.captions-find-edited(text); }
+        replacement-edited(text) => { root.captions-replacement-edited(text); }
+        shift-text => { root.captions-shift-text(); }
+        restyle-text => { root.captions-restyle-text(); }
+        replace-text => { root.captions-replace-text(); }
+
         export-srt => { root.captions-export-srt(); }
         srt-origin-changed(index) => { root.captions-srt-origin-changed(index); }
     }

@@ -27,6 +27,7 @@ pub mod editor;
 pub mod model;
 pub mod placement;
 pub mod speed;
+pub mod subtitle_edits;
 pub mod subtitles;
 
 pub use commands::{Command, CommandError, Outcome, why_not_merge};
