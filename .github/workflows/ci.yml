@@ -50,6 +50,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
 
       # Slint's Skia renderer links fontconfig and freetype; cpal links
       # ALSA; bindgen needs libclang; whisper.cpp is built by cmake; the
@@ -172,6 +174,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
           key: wasm32
       - run: >
           cargo clippy
@@ -250,6 +254,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
           key: check-${{ matrix.os }}
           cache-on-failure: true
       - run: cargo check --workspace --all-targets
