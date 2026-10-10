@@ -590,9 +590,14 @@ mod tests {
     #[test]
     fn every_card_draws_and_shows_its_package_at_work() {
         let Some(compositor) = WgpuCompositor::new() else {
+            assert!(
+                std::env::var_os("CONCAT_REQUIRE_GPU").is_none(),
+                "CONCAT_REQUIRE_GPU is set and no GPU adapter is usable"
+            );
             eprintln!("no usable GPU adapter; skipping");
             return;
         };
+        eprintln!("Effect thumbnail adapter: {:?}", compositor.adapter_info());
         let dir = std::env::var_os("CONCAT_CARDS_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| scratch("draw"));

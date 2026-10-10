@@ -650,6 +650,10 @@ jobs:
       # one - the program, then each installer - so SmartScreen and the
       # UAC prompt name the publisher instead of warning about an unknown
       # one; unsigned otherwise, which is what a fork's build gets.
+      - name: Microsoft shader compiler (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/prepare-dxc.ps1 -Architecture ${{ matrix.arch == 'aarch64' && 'arm64' || 'x64' }}
       - name: Stage (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -688,6 +692,9 @@ jobs:
           Copy-Item "$env:FFMPEG_DIR\bin\*.dll" "stage\$name\"
           # The sherpa-onnx runtime, set aside by the download step above.
           Copy-Item "$env:SHERPA_DLL_DIR\*.dll" "stage\$name\"
+          Copy-Item "$env:DXC_DIR\dxcompiler.dll", "$env:DXC_DIR\dxil.dll" "stage\$name\"
+          New-Item -ItemType Directory -Force "stage\$name\licenses\dxc" | Out-Null
+          Copy-Item "$env:DXC_LICENSE_DIR\LICENSE*" "stage\$name\licenses\dxc\"
           Copy-Item LICENSE, LICENSE-EXCEPTIONS.md, SOURCE-NOTICES.md, THIRD_PARTY_NOTICES.md "stage\$name\"
           New-Item -ItemType Directory -Force "stage\$name\licenses\fonts" | Out-Null
           Copy-Item "src\crates\concat-text\fonts\LICENSE-*.txt" "stage\$name\licenses\fonts\"

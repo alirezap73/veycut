@@ -682,10 +682,13 @@ impl WgpuCompositor {
     /// device.
     #[cfg(not(target_arch = "wasm32"))]
     fn on_backends(backends: wgpu::Backends, software_only: bool) -> Option<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+        let instance = wgpu::Instance::new(
+            wgpu::InstanceDescriptor {
+                backends,
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
+            }
+            .with_env(),
+        );
         let choices: &[bool] = if software_only {
             &[true]
         } else {

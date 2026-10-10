@@ -253,9 +253,31 @@ jobs:
         working-directory: src
       # One job at a time and no debug info, as on Linux. The timeout is
       # for a hang: concat-media's tests once hung here for good.
-      - run: cargo test --workspace -j 1 -- --test-threads=1 --nocapture
+      - name: Microsoft shader compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/prepare-dxc.ps1 -Architecture x64
+      - name: Compile Windows test binaries
         if: runner.os == 'Windows'
         timeout-minutes: 90
+        run: cargo test --workspace -j 1 --no-run
         working-directory: src
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
+      - name: Validate Windows effect thumbnails
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        run: cargo test -p concat-host -j 1 cards::tests::every_card_draws_and_shows_its_package_at_work -- --exact --nocapture
+        working-directory: src
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          WGPU_DX12_COMPILER: dxc
+          CONCAT_REQUIRE_GPU: "1"
+      - run: cargo test --workspace -j 1 -- --test-threads=1 --nocapture
+        if: runner.os == 'Windows'
+        timeout-minutes: 30
+        working-directory: src
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          WGPU_DX12_COMPILER: dxc
+          CONCAT_REQUIRE_GPU: "1"
