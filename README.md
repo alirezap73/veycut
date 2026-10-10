@@ -4,6 +4,10 @@
 
 VeyCut is a native video editor with timeline editing, video effects, transitions, titles, captions and local speech tools. Product repository: https://github.com/alirezap73/veycut.
 
+## Core beta development
+
+The next milestone is a reliable Apple silicon macOS beta covering media import, timeline edits, text/audio, save/reopen and export. The public preview stays at **0.2.0-preview.1**; the development candidate remains unpublished and its version is fixed. See [verified scope and remaining beta gates](docs/BETA-READINESS.md), the [small sample and manual editing check](docs/BETA-TEST.md), and the beta bug form in Issues. Development source is on [development/0.3.0](https://github.com/alirezap73/veycut/tree/development/0.3.0).
+
 ## Version 0.2.0 changes
 
 - **Caption workspace:** separate Create, Files and Edit tabs, with a scrolling dialog for smaller windows.
@@ -39,7 +43,7 @@ Rust 1.93 and the native dependencies documented in [src/README.md](src/README.m
 ```sh
 cd src
 cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
-cargo fmt --check
+cargo fmt --all --check
 cargo clippy --locked -j 1 -p concat-project --all-targets -- -D warnings
 ```
 
