@@ -561,9 +561,19 @@ impl Studio {
     /// the reopened one must flatten to the same clips: what was exported
     /// is what will be exported tomorrow.
     fn export_at(&mut self, label: &str, rate: Option<(i64, i64)>) -> Exported {
+        self.export_sized(label, rate, None)
+    }
+
+    fn export_sized(
+        &mut self,
+        label: &str,
+        rate: Option<(i64, i64)>,
+        size: Option<(u32, u32)>,
+    ) -> Exported {
         self.count += 1;
         let label = format!("{:02} {label}", self.count).replace('/', "-");
         let settings = self.session.settings();
+        let (width, height) = size.unwrap_or((settings.width, settings.height));
         let spec = ExportSpec {
             output: self
                 .exports
@@ -581,11 +591,13 @@ impl Studio {
         };
         let titles = self
             .titles
-            .clips(self.session.project(), settings.width, settings.height)
+            .clips(self.session.project(), width, height)
             .into_iter()
             .map(|title| title.clip)
             .collect();
         let mut request = export::request(&self.session, &spec, titles);
+        request.width = width;
+        request.height = height;
         if let Some((num, den)) = rate {
             request.rate_num = num;
             request.rate_den = den;
@@ -2019,6 +2031,73 @@ fn vertical_bilingual_captions_export_with_audio_and_reopen() {
         std::fs::write(
             directory.join("vertical-captions.vtt"),
             to_vtt(&cues).unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+/// The same portrait edit renders at a smaller size without mutating the project
+/// or losing the title's relative size/placement, timing or stereo audio.
+#[test]
+fn portrait_export_can_resize_without_changing_the_project() {
+    let scratch = Scratch::new("veycut-resized-portrait");
+    let wav = scratch.path().join("sound.wav");
+    clock_wav(&wav, 2);
+    let mut studio = Studio::new(scratch.path(), "Resize portrait", video(1080, 1920, 30, 1));
+    let media = studio.import(&wav);
+    studio.apply(Command::AddClipAtFirstFree {
+        media_id: media,
+        start: 0.0,
+    });
+    studio.apply(Command::AddTextClip {
+        track_id: None,
+        above: true,
+        start: 0.0,
+        duration: Some(2.0),
+        offset_y: Some(0.25),
+        style: Some(concat_project::subtitles::caption_style(
+            "سلام VeyCut".into(),
+            0.06,
+            None,
+            concat_project::subtitles::CaptionAppearance::Outline,
+        )),
+    });
+    let size = concat_host::export_paths::video_frame((1080, 1920), 360).unwrap();
+    let output = studio.export_sized("portrait at smaller size", None, Some(size));
+    output.expect_length(2.0);
+    output.expect_sound(2.0);
+    assert_eq!(output.frames.len(), 60);
+    let frame = &output.frames[15];
+    assert_eq!((frame.width(), frame.height()), (360, 640));
+    let mut bright = Vec::new();
+    for y in 0..640usize {
+        for x in 0..360usize {
+            let pixel = &frame.pixels()[(y * 360 + x) * 4..][..3];
+            if pixel.iter().all(|value| *value > 200) {
+                bright.push((x, y));
+            }
+        }
+    }
+    assert!(
+        !bright.is_empty(),
+        "resized bilingual title must be visible"
+    );
+    let center_y = bright.iter().map(|(_, y)| *y as f64).sum::<f64>() / bright.len() as f64;
+    assert!(
+        (430.0..550.0).contains(&center_y),
+        "caption retains lower placement: {center_y}"
+    );
+    assert_eq!(
+        (
+            studio.session.settings().width,
+            studio.session.settings().height
+        ),
+        (1080, 1920)
+    );
+    if let Some(directory) = std::env::var_os("VEYCUT_ARTIFACT_DIR") {
+        std::fs::write(
+            PathBuf::from(directory).join("resized-portrait-caption.jpg"),
+            concat_media::jpeg(frame, 2).unwrap(),
         )
         .unwrap();
     }

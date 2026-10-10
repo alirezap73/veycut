@@ -227,4 +227,43 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
         "Create thumb must reset on reopen"
     );
     app.set_captions(crate::ui::CaptionsSheetData::default());
+    // The actual export tree must also lay out at phone and desktop widths.
+    let strings = |values: &[&str]| {
+        slint::ModelRc::new(slint::VecModel::from(
+            values
+                .iter()
+                .map(|s| slint::SharedString::from(*s))
+                .collect::<Vec<_>>(),
+        ))
+    };
+    for (width, height) in [(1400, 900), (900, 600), (360, 640)] {
+        app.set_phone(width < 600);
+        app.set_export(crate::ui::ExportData {
+            open: true,
+            name: "Portrait captions".into(),
+            path: "Movies/Portrait captions.mp4".into(),
+            format: "720 × 1280 · 30 fps".into(),
+            duration: "0:02".into(),
+            contents: "3 clips · 2 titles".into(),
+            resolutions: strings(&["2160 × 3840", "1080 × 1920", "720 × 1280"]),
+            resolution_details: strings(&["4K", "1080p", "720p"]),
+            resolution_disabled: slint::ModelRc::new(slint::VecModel::from(vec![
+                false, false, false,
+            ])),
+            resolution: 2,
+            rates: strings(&["30 fps", "25 fps"]),
+            rate_details: strings(&["Timeline size", ""]),
+            h264_encodable: true,
+            hevc_encodable: true,
+            av1_encodable: true,
+            quality: 1,
+            encoding: "H.264 · 720p".into(),
+            size_high: "3 MB".into(),
+            size_balanced: "2 MB".into(),
+            size_small: "1 MB".into(),
+            ..Default::default()
+        });
+        capture(&window, &clock, "export-resized", width, height);
+        app.set_export(crate::ui::ExportData::default());
+    }
 }

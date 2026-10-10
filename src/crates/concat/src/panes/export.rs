@@ -17,7 +17,7 @@ use concat_host::export::{self, ExportSpec};
 use concat_media::ColorRange;
 
 use crate::format::{bytes, eta};
-use crate::host::{on_ui, spawn};
+use crate::host::{on_ui, project_epoch, spawn_in_project};
 use crate::i18n::{self, t, tf};
 use crate::panes::Msg;
 use crate::platform;
@@ -60,16 +60,28 @@ pub enum ExportMsg {
     Cancel,
     /// The render's worker reporting where it is.
     Progress {
+        /// The render that produced this reply.
+        generation: u64,
         /// Of the whole, `0..=1`.
         fraction: f32,
         /// What it is doing, in the person's language.
         stage: String,
     },
     /// The render's worker is done: the file written, or why not.
-    Finished(Result<String, String>),
+    Finished {
+        /// The render that produced this reply.
+        generation: u64,
+        /// The finished path or render error.
+        result: Result<String, String>,
+    },
     /// The phone has moved the file to where it shows it - the path under
     /// the phone's storage - or could not, and the file is where it was.
-    Published(Result<String, String>),
+    Published {
+        /// The render whose result was handed to the platform.
+        generation: u64,
+        /// The platform destination or publication error.
+        result: Result<String, String>,
+    },
 }
 
 /// The export sheet's state.
@@ -104,6 +116,8 @@ pub struct ExportPane {
     pub written: String,
     /// When the render started, for a real ETA.
     started_at: Option<std::time::Instant>,
+    generation: u64,
+    configured: bool,
 }
 
 impl Default for ExportPane {
@@ -128,6 +142,8 @@ impl Default for ExportPane {
             message: String::new(),
             written: String::new(),
             started_at: None,
+            generation: 0,
+            configured: false,
         }
     }
 }
@@ -138,23 +154,29 @@ impl ExportPane {
     /// `self`, and while this runs the studio's copy of it is a blank the
     /// pane must not read.
     pub fn update(&mut self, msg: ExportMsg, studio: &mut Studio) {
+        if !self.accepts_reply(&msg) {
+            return;
+        }
         match msg {
             ExportMsg::Open => {
                 self.open = true;
                 self.phase = ExportPhase::Idle;
                 self.message.clear();
-                // The timeline's own size: the one rung that can be picked;
-                // and its own rate, first on the rate list.
-                self.resolution = Self::own_rung(studio);
-                self.rate = 0;
+                // Default to the timeline's own size/rate; keep later choices
+                // when the sheet is dismissed and opened again.
+                if !self.configured {
+                    self.resolution = Self::own_rung(studio);
+                    self.rate = 0;
+                    self.configured = true;
+                }
             }
             ExportMsg::Close => self.open = false,
             ExportMsg::NameEdited(name) => self.name = name,
             ExportMsg::ResolutionChanged(index) => {
-                // Only the timeline's own rung is taken; the sheet greys the
-                // rest, and this is the same rule for a caller that did not.
-                let index = index.max(0) as usize;
-                if index == Self::own_rung(studio) {
+                if let Ok(index) = usize::try_from(index)
+                    && let Some(&short) = Self::ladder(studio).get(index)
+                    && concat_host::export_paths::video_frame(studio.output_size(), short).is_some()
+                {
                     self.resolution = index;
                 }
             }
@@ -183,10 +205,7 @@ impl ExportPane {
                     self.bitrate = value.clamp(100, 200_000);
                 }
             }
-            ExportMsg::Again => {
-                self.phase = ExportPhase::Idle;
-                self.progress = 0.0;
-            }
+            ExportMsg::Again => self.invalidate(&studio.host.exporter),
             ExportMsg::Browse => {
                 if let Some(folder) =
                     platform::pick_folder(&i18n::t("export.exportTo"), &self.folder)
@@ -203,40 +222,53 @@ impl ExportPane {
             }
             ExportMsg::Start => self.start(studio),
             ExportMsg::Cancel => {
-                studio.host.exporter.cancel();
-                self.phase = ExportPhase::Idle;
-                self.progress = 0.0;
+                self.invalidate(&studio.host.exporter);
             }
-            ExportMsg::Progress { fraction, stage } => {
+            ExportMsg::Progress {
+                fraction, stage, ..
+            } => {
                 if self.phase == ExportPhase::Running {
                     self.progress = fraction.clamp(0.0, 1.0);
                     self.stage = stage;
                 }
             }
-            ExportMsg::Finished(Ok(written)) => {
+            ExportMsg::Finished {
+                generation,
+                result: Ok(written),
+            } => {
                 self.phase = ExportPhase::Done;
                 self.progress = 1.0;
                 self.written = written.clone();
                 // A phone moves the file to where its gallery shows it, and
                 // the sheet says "finished" once it is there.
-                let handed = platform::publish_export(written.into(), |result| {
+                let epoch = project_epoch();
+                let handed = platform::publish_export(written.into(), move |result| {
                     on_ui(move |studio, _, _| {
-                        studio.handle(Msg::Export(ExportMsg::Published(result)));
+                        if project_epoch() != epoch {
+                            return;
+                        }
+                        studio.handle(Msg::Export(ExportMsg::Published { generation, result }));
                     });
                 });
                 if !handed {
                     studio.notify(&t("export.exportFinished"), false);
                 }
             }
-            ExportMsg::Published(Ok(path)) => {
+            ExportMsg::Published {
+                result: Ok(path), ..
+            } => {
                 self.written = path;
                 studio.notify(&t("export.exportFinished"), false);
             }
-            ExportMsg::Published(Err(error)) => {
+            ExportMsg::Published {
+                result: Err(error), ..
+            } => {
                 let folder = platform::published_folder().unwrap_or_default();
                 studio.notify(&tf("export.couldNotPublish", &[&folder, &error]), true);
             }
-            ExportMsg::Finished(Err(error)) => {
+            ExportMsg::Finished {
+                result: Err(error), ..
+            } => {
                 if self.phase == ExportPhase::Idle {
                     // Cancelled: the sheet already went back to idle.
                     return;
@@ -246,6 +278,41 @@ impl ExportPane {
                 studio.notify(&tf("export.exportFailed", &[&error]), true);
             }
         }
+    }
+
+    fn accepts_reply(&self, msg: &ExportMsg) -> bool {
+        match msg {
+            ExportMsg::Progress { generation, .. } | ExportMsg::Finished { generation, .. } => {
+                *generation == self.generation && self.phase == ExportPhase::Running
+            }
+            ExportMsg::Published { generation, .. } => {
+                *generation == self.generation && self.phase == ExportPhase::Done
+            }
+            _ => true,
+        }
+    }
+
+    /// Cancels this pane's job and rejects every queued reply from it.
+    fn invalidate(&mut self, exporter: &concat_host::export::Exporter) {
+        if self.phase == ExportPhase::Running {
+            exporter.cancel();
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.phase = ExportPhase::Idle;
+        self.progress = 0.0;
+        self.stage.clear();
+        self.message.clear();
+        self.written.clear();
+        self.started_at = None;
+    }
+
+    /// Clears project-owned export state when opening or closing a project.
+    pub fn reset_for_project(&mut self, exporter: &concat_host::export::Exporter) {
+        self.invalidate(exporter);
+        self.open = false;
+        self.resolution = 0;
+        self.rate = 0;
+        self.configured = false;
     }
 
     /// The resolution ladder for this project: the standard short sides,
@@ -307,9 +374,8 @@ impl ExportPane {
         width.min(height).max(2)
     }
 
-    /// The rung of the ladder that is the project's own size: the one
-    /// the sheet lets be picked, since an edit exports at the size it was
-    /// cut at. https://github.com/jub0t/Concat/issues/109
+    /// The project's own resolution is the default; other safe rungs may
+    /// be selected without changing the editing timeline.
     fn own_rung(studio: &Studio) -> usize {
         let own = Self::own_short(studio);
         Self::ladder(studio)
@@ -321,14 +387,8 @@ impl ExportPane {
     /// `short` scaled along the project's aspect and rounded to even
     /// dimensions, which is what the encoder's chroma subsampling needs.
     fn frame_for(studio: &Studio, short: u32) -> (u32, u32) {
-        let (project_w, project_h) = studio.output_size();
-        let (project_w, project_h) = (project_w.max(1) as f64, project_h.max(1) as f64);
-        let even = |side: f64| ((side / 2.0).round() as u32 * 2).max(2);
-        if project_w >= project_h {
-            (even(short as f64 * project_w / project_h), short)
-        } else {
-            (short, even(short as f64 * project_h / project_w))
-        }
+        concat_host::export_paths::video_frame(studio.output_size(), short)
+            .unwrap_or_else(|| studio.output_size())
     }
 
     /// The frame the export renders at: the sheet's rung of the ladder,
@@ -408,6 +468,9 @@ impl ExportPane {
 
     /// Starts the render on a worker. Its reports come back as messages.
     fn start(&mut self, studio: &mut Studio) {
+        if self.phase == ExportPhase::Running {
+            return;
+        }
         let Some(session) = studio.session.as_ref() else {
             return;
         };
@@ -454,7 +517,7 @@ impl ExportPane {
             color_range: self.color_range(),
             hdr: self.hdr(studio),
         };
-        let (frame_w, frame_h) = studio.output_size();
+        let (frame_w, frame_h) = self.size(studio);
         let titles = studio
             .host
             .titles
@@ -471,6 +534,9 @@ impl ExportPane {
         request.rate_den = den;
 
         studio.pause();
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let epoch = project_epoch();
         self.phase = ExportPhase::Running;
         self.progress = 0.0;
         self.stage = t("export.renderingVideo");
@@ -485,7 +551,7 @@ impl ExportPane {
         // the log (issue #202). None without a GPU here, and the render then
         // opens what it can.
         let compositor = studio.host.monitor.sibling();
-        spawn(
+        spawn_in_project(
             move || {
                 let job = job;
                 export::run_on(&request, compositor, job.cancel_flag(), |progress| {
@@ -501,11 +567,20 @@ impl ExportPane {
                         other => other.to_owned(),
                     };
                     on_ui(move |studio, _, _| {
-                        studio.handle(Msg::Export(ExportMsg::Progress { fraction, stage }));
+                        if project_epoch() != epoch {
+                            return;
+                        }
+                        studio.handle(Msg::Export(ExportMsg::Progress {
+                            generation,
+                            fraction,
+                            stage,
+                        }));
                     });
                 })
             },
-            |studio, _, _, result| studio.handle(Msg::Export(ExportMsg::Finished(result))),
+            move |studio, _, _, result| {
+                studio.handle(Msg::Export(ExportMsg::Finished { generation, result }))
+            },
         );
     }
 
@@ -528,7 +603,14 @@ impl ExportPane {
             // shows, not the app's own that the export writes into.
             path: match platform::published_folder() {
                 Some(folder) => format!("{folder}/{}.mp4", self.name),
-                None => format!("{}/{}.mp4", self.folder.trim_end_matches('/'), self.name),
+                None => {
+                    let name = concat_host::export_paths::video_name(&self.name)
+                        .unwrap_or_else(|_| self.name.clone());
+                    std::path::Path::new(&self.folder)
+                        .join(format!("{name}.mp4"))
+                        .to_string_lossy()
+                        .into_owned()
+                }
             }
             .into(),
             format: format!("{width} × {height} · {rate:.2} fps").into(),
@@ -567,9 +649,12 @@ impl ExportPane {
                 ModelRc::new(VecModel::from(names))
             },
             resolution_disabled: {
-                let own = Self::own_rung(studio);
-                let off: Vec<bool> = (0..Self::ladder(studio).len())
-                    .map(|rung| rung != own)
+                let off: Vec<bool> = Self::ladder(studio)
+                    .iter()
+                    .map(|short| {
+                        concat_host::export_paths::video_frame(studio.output_size(), *short)
+                            .is_none()
+                    })
                     .collect();
                 ModelRc::new(VecModel::from(off))
             },
@@ -663,6 +748,51 @@ impl ExportPane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancelled_and_replaced_jobs_cannot_report_success_or_progress() {
+        let exporter = concat_host::export::Exporter::new();
+        let mut pane = ExportPane {
+            phase: ExportPhase::Running,
+            generation: 7,
+            ..Default::default()
+        };
+        let finished = ExportMsg::Finished {
+            generation: 7,
+            result: Ok("old.mp4".into()),
+        };
+        assert!(pane.accepts_reply(&finished));
+        pane.invalidate(&exporter);
+        assert!(!pane.accepts_reply(&finished));
+        pane.phase = ExportPhase::Running;
+        assert!(!pane.accepts_reply(&finished));
+        assert!(!pane.accepts_reply(&ExportMsg::Progress {
+            generation: 7,
+            fraction: 1.0,
+            stage: "done".into()
+        }));
+        assert!(pane.accepts_reply(&ExportMsg::Finished {
+            generation: 8,
+            result: Err("failure".into())
+        }));
+        pane.phase = ExportPhase::Done;
+        assert!(!pane.accepts_reply(&ExportMsg::Progress {
+            generation: 8,
+            fraction: 0.5,
+            stage: "late".into()
+        }));
+        assert!(pane.accepts_reply(&ExportMsg::Published {
+            generation: 8,
+            result: Ok("published.mp4".into())
+        }));
+        pane.reset_for_project(&exporter);
+        assert!(!pane.accepts_reply(&ExportMsg::Published {
+            generation: 8,
+            result: Ok("published.mp4".into())
+        }));
+        assert!(!pane.open);
+        assert!(pane.written.is_empty());
+    }
 
     /// The timeline's rate leads the list and is not offered twice; the
     /// NTSC fractions keep their camera names.

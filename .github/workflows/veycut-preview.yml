@@ -12,7 +12,7 @@ on:
       tag:
         description: Preview tag matching the workspace version
         required: true
-        default: v0.2.0-preview.1
+        default: v0.3.0-preview.1
         type: string
 
 permissions:

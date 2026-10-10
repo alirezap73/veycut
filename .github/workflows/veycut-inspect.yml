@@ -30,7 +30,7 @@ jobs:
           [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > "$RUNNER_TEMP/candidate.json"
           python3 - <<'PYTHON'
-          import json, os, pathlib, subprocess
+          import json, os, pathlib, re, subprocess
           run = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'candidate.json').read_text())
           assert run['path'] == '.github/workflows/veycut-candidate.yml'
           assert run['status'] == 'completed' and run['conclusion'] == 'success'
@@ -40,6 +40,9 @@ jobs:
           assert all(p.endswith('.md') or p.startswith('docs/') or p == '.github/workflows/veycut-inspect.yml' for p in changed), changed
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write('PACKAGE_REVISION=' + revision + '\n')
+              manifest = subprocess.check_output(['git', 'show', revision + ':src/Cargo.toml'], text=True)
+              version = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"', manifest, re.M).group(1)
+              f.write('PACKAGE_VERSION=' + version + '\n')
           PYTHON
       - uses: actions/download-artifact@v8
         with:
@@ -51,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence "$RUNNER_TEMP/veycut-mount"
-          dmg=bundles/VeyCut-0.2.0-macos-arm64.dmg
+          dmg="bundles/VeyCut-${PACKAGE_VERSION}-macos-arm64.dmg"
           test -s "$dmg"
           shasum -a 256 "$dmg" | tee evidence/package.sha256
           hdiutil verify "$dmg" | tee evidence/dmg-verification.txt

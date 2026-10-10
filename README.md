@@ -4,6 +4,14 @@
 
 VeyCut is a native video editor with timeline editing, video effects, transitions, titles, captions and local speech tools. Product repository: https://github.com/alirezap73/veycut.
 
+## Version 0.3.0 source changes
+
+This development source adds selectable export resolutions without changing the editing project. Titles and captions are rasterized at the selected output size. Export files are isolated per job; the finished output refuses an existing file, including one created during rendering, and failed/cancelled jobs clean up their own work files. Cancelled jobs and replies from an earlier project cannot replace the current export status.
+
+The shipping profile uses thin LTO to reduce build time; speed improvements require measurement on GitHub. Windows effect tests execute the exact previously compiled test binary, keeping compilation outside the GPU-test timeout. Missing first-start effect previews use placeholders while cards are being generated. New log headers and filenames use VeyCut.
+
+0.3.0 native validation and packaging are pending. The download below remains the previously verified **0.2.0 experimental preview** until a new candidate passes.
+
 ## Version 0.2.0 changes
 
 - **Caption workspace:** separate Create, Files and Edit tabs, with a scrolling dialog for smaller windows.

@@ -22,6 +22,7 @@
 
 pub mod chains;
 pub mod flatten;
+mod output_file;
 mod resolve;
 
 use resolve::{BuiltTimeline, TransitionSpan, Treatment, animation_of, build_timeline, quantise};
@@ -894,6 +895,8 @@ pub fn render_on(
         )
     })?;
     let output = PathBuf::from(&request.output);
+    let files = output_file::OutputFiles::new(&output)?;
+    reporter.cancelled()?;
 
     // Transitions become overlaps, ramps and fade filters before anything
     // else reads the clip list, so the picture and sound paths below never
@@ -945,24 +948,9 @@ pub fn render_on(
         return Err("the timeline is empty".to_owned());
     }
 
-    // Render into siblings of the output so the move at the end stays on one
-    // filesystem, then clean up whatever we made.
-    let stem = output
-        .file_stem()
-        .map_or_else(|| "concat".into(), |s| s.to_string_lossy());
-    let directory = output.parent().unwrap_or(Path::new("."));
-    // The folder the file goes in is made when it is not there. A phone's
-    // Movies folder under the app's own files does not exist until the
-    // first export, and every phone's first export stopped at "no such
-    // file or directory" before a frame was drawn (#280, #147).
-    if let Err(error) = std::fs::create_dir_all(directory) {
-        return Err(format!(
-            "could not create the folder {}: {error}",
-            directory.display()
-        ));
-    }
-    let silent = directory.join(format!(".{stem}.concat-video.mp4"));
-    let mixed = directory.join(format!(".{stem}.concat-audio.m4a"));
+    let silent = files.video();
+    let mixed = files.audio();
+    let complete = files.complete();
 
     let result = (|| -> Result<(), String> {
         render_picture(
@@ -977,8 +965,8 @@ pub fn render_on(
         )?;
 
         if sound.is_empty() {
-            std::fs::rename(&silent, &output)
-                .map_err(|error| format!("could not write {}: {error}", output.display()))?;
+            reporter.cancelled()?;
+            files.publish(&silent)?;
             return Ok(());
         }
 
@@ -989,11 +977,10 @@ pub fn render_on(
 
         reporter.cancelled()?;
         reporter.emit(total_frames, total_frames, "muxing");
-        audio::mux(&silent, &mixed, &output).map_err(|error| error.to_string())
+        audio::mux(&silent, &mixed, &complete).map_err(|error| error.to_string())?;
+        reporter.cancelled()?;
+        files.publish(&complete)
     })();
-
-    let _ = std::fs::remove_file(&silent);
-    let _ = std::fs::remove_file(&mixed);
 
     result.map(|()| output.to_string_lossy().into_owned())
 }

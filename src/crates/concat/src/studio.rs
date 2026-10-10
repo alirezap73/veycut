@@ -1085,11 +1085,17 @@ fn shelves(
                     .folder
                     .as_deref()
                     .and_then(|folder| {
-                        slint::Image::load_from_path(&folder.join("preview.png")).ok()
+                        let preview = folder.join("preview.png");
+                        preview
+                            .is_file()
+                            .then(|| slint::Image::load_from_path(&preview).ok())
+                            .flatten()
                     })
                     .or_else(|| {
                         let card = card_paths.get(&meta.id)?;
-                        slint::Image::load_from_path(card).ok()
+                        card.is_file()
+                            .then(|| slint::Image::load_from_path(card).ok())
+                            .flatten()
                     })
                     .unwrap_or_default()
             })
@@ -6885,6 +6891,7 @@ impl Studio {
                 if swept > 0 {
                     log::info!("{swept} stale proxies swept from {}", project_dir.display());
                 }
+                self.export.reset_for_project(&self.host.exporter);
                 self.session = Some(session);
                 crate::host::next_project_epoch();
                 self.forget_art();
@@ -7031,6 +7038,7 @@ impl Studio {
         if let Some(session) = self.session.as_ref() {
             self.host.open_projects.release(session.path());
         }
+        self.export.reset_for_project(&self.host.exporter);
         self.session = None;
         // Whatever a worker still brings back for this project is dropped
         // at delivery; the sheets that were waiting on one stop waiting.

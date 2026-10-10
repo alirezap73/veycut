@@ -50,3 +50,16 @@ Publish source updates for server validation. Publish a Mac preview only after i
 ## Published preview
 
 [VeyCut 0.2.0 preview.1](https://github.com/alirezap73/veycut/releases/tag/v0.2.0-preview.1) was published from `18dd62d3fff2edca5a61caae7c9b544eadd7108e`. [Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38024725413) and [package inspection](https://github.com/alirezap73/veycut/actions/runs/38027085464) passed. The app is ad-hoc signed and not Apple-notarized; no Windows, Linux or mobile installer is included. [Windows validation](https://github.com/alirezap73/veycut/actions/runs/38024989783) remains separate.
+
+## 0.3.0 source candidate
+
+- [x] Selectable output resolutions with aspect preservation and even encoder dimensions.
+- [x] Per-job work files and final publication that refuses an existing destination.
+- [x] Generation/project guards for cancelled export replies.
+- [x] Five filesystem regression checks and five export path/dimension checks pass without media services.
+- [x] Windows GPU-test timeout excludes compilation by executing its exact compiled binary.
+- [ ] Native tests, resized caption/audio export and export-form screenshots reviewed.
+- [ ] New Mac package built, inspected and published from the exact candidate.
+- [ ] Windows native validation passes; Windows installer remains separate.
+
+The 0.2.0 public preview remains available during validation. No 0.3.0 installer is advertised before these package checks pass.

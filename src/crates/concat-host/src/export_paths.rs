@@ -4,6 +4,22 @@
 
 use std::path::{Path, PathBuf};
 
+/// Scales a project to an export short side, retaining its aspect ratio.
+/// Encoder dimensions are even and bounded to 16,384 pixels on each side.
+pub fn video_frame(project: (u32, u32), short: u32) -> Option<(u32, u32)> {
+    let (width, height) = project;
+    if width == 0 || height == 0 || !(2..=16_384).contains(&short) {
+        return None;
+    }
+    let scale = f64::from(short) / f64::from(width.min(height));
+    let even = |side: u32| ((f64::from(side) * scale / 2.0).round() * 2.0).max(2.0);
+    let (width, height) = (even(width), even(height));
+    if width > 16_384.0 || height > 16_384.0 {
+        return None;
+    }
+    Some((width as u32, height as u32))
+}
+
 /// Validates one filename, stripping a single optional `.mp4` suffix.
 /// Folder separators, control characters, reserved device names and
 /// platform-specific filename punctuation are rejected before rendering.
@@ -45,8 +61,12 @@ pub fn video_target(directory: &Path, name: &str) -> Result<PathBuf, String> {
         return Err("Choose an export folder".into());
     }
     let path = directory.join(format!("{}.mp4", video_name(name)?));
-    if path.try_exists().map_err(|error| error.to_string())? {
-        return Err("An output with this name already exists; choose another file name".into());
+    match path.symlink_metadata() {
+        Ok(_) => {
+            return Err("An output with this name already exists; choose another file name".into());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
     }
     Ok(path)
 }
@@ -54,6 +74,16 @@ pub fn video_target(directory: &Path, name: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn export_sizes_preserve_portrait_landscape_square_and_custom_aspects() {
+        assert_eq!(video_frame((1080, 1920), 720), Some((720, 1280)));
+        assert_eq!(video_frame((1920, 1080), 2160), Some((3840, 2160)));
+        assert_eq!(video_frame((1080, 1080), 720), Some((720, 720)));
+        assert_eq!(video_frame((101, 57), 720), Some((1276, 720)));
+        assert_eq!(video_frame((0, 1920), 720), None);
+        assert_eq!(video_frame((1, u32::MAX), 720), None);
+        assert_eq!(video_frame((1920, 1080), 1), None);
+    }
     #[test]
     fn multilingual_names_and_optional_extensions_are_kept() {
         assert_eq!(video_name("  ویدئوی من.MP4 ").unwrap(), "ویدئوی من");

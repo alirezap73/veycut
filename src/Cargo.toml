@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-or-later"  # + plugin exception, see LICENSE-EXCEPTIONS.md
@@ -102,9 +102,10 @@ codegen-units = 256
 #     file changes it.
 [profile.app]
 inherits = "release"
-# Fat LTO: re-optimise the whole dependency graph - slint, skia, winit and
-# the UI crate - as one unit, so calls across crate boundaries inline.
-lto = "fat"
+# Thin LTO balances cross-crate optimisation with preview build time.
+# The 0.2.0 fat-LTO Mac package took 37m33s on its GitHub runner; native
+# export and performance checks still gate changes to this profile.
+lto = "thin"
 # No unwind tables and no landing pads: every call site loses its unwind
 # edge, which frees the optimiser and shrinks the binary. This is a GUI
 # binary with no tests, and unwinding through the ObjC frames of the macOS

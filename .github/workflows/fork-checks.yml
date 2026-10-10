@@ -45,6 +45,8 @@ jobs:
           rustc --edition 2024 -D warnings --test crates/concat-host/src/export_paths.rs -o "$RUNNER_TEMP/export-path-tests"
           "$RUNNER_TEMP/export-path-tests" --test-threads=1
         working-directory: src
+      - name: Isolated export files and no-replace publication
+        run: python3 scripts/test_export_files.py
       - name: VeyCut release metadata tests
         run: python3 scripts/test_veycut_release.py
       - name: Mac preview validation policy tests

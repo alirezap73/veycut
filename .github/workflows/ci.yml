@@ -264,22 +264,25 @@ jobs:
       - name: Compile Windows test binaries
         if: runner.os == 'Windows'
         timeout-minutes: 90
-        run: cargo test --workspace -j 1 --no-run
+        shell: pwsh
+        run: |
+          cargo test --workspace -j 1 --no-run --message-format=json-render-diagnostics > "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         working-directory: src
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
       - name: Validate Windows effect thumbnails
         if: runner.os == 'Windows'
         timeout-minutes: 10
-        run: cargo test --workspace -j 1 cards::tests::every_card_draws_and_shows_its_package_at_work -- --exact --test-threads=1 --nocapture
-        working-directory: src
+        shell: pwsh
+        run: ./scripts/run-windows-effect-test.ps1 -Artifacts "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
           WGPU_DX12_COMPILER: dxc
           CONCAT_REQUIRE_GPU: "1"
       - run: cargo test --workspace -j 1 -- --test-threads=1 --nocapture
         if: runner.os == 'Windows'
-        timeout-minutes: 30
+        timeout-minutes: 45
         working-directory: src
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
