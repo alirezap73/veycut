@@ -74,6 +74,12 @@ jobs:
           run-id: ${{ inputs.candidate_run }}
           name: VeyCut-macos-arm64
           path: bundles
+      - name: Ensure independent video decoder for GUI export checks
+        if: contains(inputs.gui_actions, 'video-check')
+        run: |
+          if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
+          fi
       - name: Inspect mounted package and launch editor
         env:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
@@ -272,7 +278,9 @@ jobs:
                     let x = bounds["X"], let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"], width >= 900 else { exit(14) }
               let location = CGPoint(x: x + width * point[0], y: y + height * point[1])
               for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-                  CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: location, mouseButton: .left)!.post(tap: .cghidEventTap)
+                  let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: location, mouseButton: .left)!
+                  event.flags = []
+                  event.post(tap: .cghidEventTap)
                   Thread.sleep(forTimeInterval: 0.2)
               }
               print("native_click \(location.x),\(location.y)")
@@ -388,8 +396,11 @@ jobs:
               fixture = {'concat': os.environ['PACKAGE_VERSION'], 'version': 1, 'name': 'VeyCut GUI fixture', 'video': video, 'media': [{'id': 'm1', 'path': str(sample), 'name': sample.name, 'kind': 'video', 'duration': 2, 'width': 720, 'height': 1280, 'frameRate': 30, 'frameRateFraction': '30/1', 'hasAudio': True}], 'activeTimelineId': 'TL1', 'timelines': [{'id': 'TL1', 'name': 'Timeline 1', 'video': video, 'tracks': [{'id': 'T1', 'visible': True, 'muted': False}], 'clips': [clip]}]}
               manifest = project / 'concat.json'
               manifest.write_text(json.dumps(fixture))
+              ui_calls = []
               def ui(process, action, path=project):
-                  with open(f'evidence/ui-action-{process.pid}-{action}.txt', 'w') as output:
+                  ui_calls.append({'pid': process.pid, 'action': action, 'argument': str(path)})
+                  pathlib.Path('evidence/UI-CALLS.json').write_text(json.dumps(ui_calls, indent=2))
+                  with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
                       subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
               actions = json.loads(os.environ['GUI_ACTIONS'])
               assert isinstance(actions, list) and len(actions) <= 48
@@ -460,6 +471,8 @@ jobs:
                               ui(process, 'snapshot', pathlib.Path('evidence/export-sheet.png').resolve())
                               ui(process, 'dismiss')
                           if cycle == 2:
+                              if any(step['action'] == 'video-check' for step in actions):
+                                  assert not (pathlib.Path.home() / 'Movies' / 'VeyCut GUI fixture.mp4').exists(), 'GUI export destination was not fresh'
                               for index, step in enumerate(actions):
                                   action = step['action']
                                   argument = step.get('arg', '')
@@ -482,6 +495,55 @@ jobs:
                                           assert abs(pieces[1]['start'] - pieces[0]['duration']) < 0.04
                                           assert abs(pieces[1]['sourceStart'] - pieces[0]['duration']) < 0.04
                                           core['split_verified'] = True
+                                  elif action == 'caption-check':
+                                      state = json.loads(manifest.read_text())
+                                      titles = [c for c in state['clips'] if c['kind'] == 'text']
+                                      wanted = [('سلام جهان', 0, 1), (argument or 'VeyCut 2026', 0.8, 1.2)]
+                                      assert len(titles) == 2
+                                      for content, start, duration in wanted:
+                                          assert any(c['text']['content'] == content and abs(c['start'] - start) < 0.04 and abs(c['duration'] - duration) < 0.04 for c in titles), wanted
+                                      core['subtitle_verified'] = True
+                                  elif action == 'subtitle-file-check':
+                                      text = (project / 'captions.vtt').read_text(encoding='utf-8')
+                                      assert text.startswith('WEBVTT') and 'سلام جهان' in text and (argument or 'VeyCut 2026') in text
+                                      assert '00:00:00.000 --> 00:00:01.000' in text and '00:00:00.800 --> 00:00:02.000' in text
+                                      pathlib.Path('evidence/exported-captions.vtt').write_text(text, encoding='utf-8')
+                                      core['subtitle_file_export_verified'] = True
+                                  elif action == 'reopen':
+                                      before_reopen = json.loads(manifest.read_text())
+                                      ui(process, 'close')
+                                      assert process.wait(timeout=30) == 0
+                                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
+                                      time.sleep(15)
+                                      ui(process, 'open')
+                                      ui(process, 'save')
+                                      after_reopen = json.loads(manifest.read_text())
+                                      assert after_reopen['clips'] == before_reopen['clips'] and after_reopen['media'] == before_reopen['media'], 'GUI reopen changed the saved edit'
+                                      core['edited_project_reopen_verified'] = True
+                                  elif action == 'video-check':
+                                      import array, math
+                                      target = pathlib.Path.home() / 'Movies' / 'VeyCut GUI fixture.mp4'
+                                      for _ in range(60):
+                                          if target.is_file():
+                                              break
+                                          assert process.poll() is None, 'Editor exited during GUI export'
+                                          time.sleep(2)
+                                      else:
+                                          raise AssertionError('GUI export did not publish the output')
+                                      probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(target)], text=True, timeout=30))
+                                      picture = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+                                      assert picture['width'] == 720 and picture['height'] == 1280 and picture['codec_name'] == 'h264'
+                                      assert 1.95 <= float(probe['format']['duration']) <= 2.1
+                                      assert any(s['codec_type'] == 'audio' for s in probe['streams'])
+                                      subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(target), '-map', '0', '-f', 'null', '-'], check=True, timeout=120)
+                                      for at in ('0.4', '1.4'):
+                                          subprocess.run(['ffmpeg', '-v', 'error', '-ss', at, '-i', str(target), '-frames:v', '1', f'evidence/export-frame-{at}.png'], check=True, timeout=30)
+                                      sound = array.array('f', subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(target), '-vn', '-ac', '1', '-ar', '8000', '-f', 'f32le', '-'], timeout=30))
+                                      rms = lambda values: math.sqrt(sum(v * v for v in values) / len(values))
+                                      assert len(sound) >= 15000 and rms(sound[800:6400]) < 0.005 and rms(sound[9600:14400]) > 0.02, 'Output silence/tone did not survive the split edit'
+                                      pathlib.Path('evidence/GUI-EXPORT-PROBE.json').write_text(json.dumps(probe, indent=2))
+                                      shutil.copyfile(target, 'evidence/gui-export.mp4')
+                                      core['gui_export_verified'] = True
                                   else:
                                       raise AssertionError('Unknown bounded GUI action: ' + action)
                                   core['steps'].append(step)
