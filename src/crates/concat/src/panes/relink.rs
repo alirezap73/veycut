@@ -239,7 +239,7 @@ mod tests {
             searching: true,
             generation: 7,
             cancelled: Some(Arc::clone(&cancelled)),
-            ..Default::default()
+            items: Vec::new(),
         };
         pane.reset();
         assert!(cancelled.load(Ordering::Relaxed));
@@ -251,8 +251,11 @@ mod tests {
     fn dropping_dialog_cancels_worker() {
         let cancelled = Arc::new(AtomicBool::new(false));
         let pane = RelinkPane {
+            open: false,
+            searching: false,
+            generation: 0,
+            items: Vec::new(),
             cancelled: Some(Arc::clone(&cancelled)),
-            ..Default::default()
         };
         drop(pane);
         assert!(cancelled.load(Ordering::Relaxed));
