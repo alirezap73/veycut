@@ -1,0 +1,122 @@
+name: VeyCut Mac package inspection
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful Mac candidate run to inspect without rebuilding
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    if: github.repository == 'alirezap73/veycut'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify candidate and unchanged package source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > "$RUNNER_TEMP/candidate.json"
+          python3 - <<'PYTHON'
+          import json, os, pathlib, subprocess
+          run = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'candidate.json').read_text())
+          assert run['path'] == '.github/workflows/veycut-candidate.yml'
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          revision = run['head_sha']
+          subprocess.run(['git', 'merge-base', '--is-ancestor', revision, 'HEAD'], check=True)
+          changed = subprocess.check_output(['git', 'diff', '--name-only', revision, 'HEAD'], text=True).splitlines()
+          assert all(p.endswith('.md') or p.startswith('docs/') or p == '.github/workflows/veycut-inspect.yml' for p in changed), changed
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('PACKAGE_REVISION=' + revision + '\n')
+          PYTHON
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run }}
+          name: VeyCut-macos-arm64
+          path: bundles
+      - name: Inspect mounted package and launch editor
+        run: |
+          set -euo pipefail
+          mkdir -p evidence "$RUNNER_TEMP/veycut-mount"
+          dmg=bundles/VeyCut-0.2.0-macos-arm64.dmg
+          test -s "$dmg"
+          shasum -a 256 "$dmg" | tee evidence/package.sha256
+          hdiutil verify "$dmg" | tee evidence/dmg-verification.txt
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$RUNNER_TEMP/veycut-mount"
+          trap 'hdiutil detach "$RUNNER_TEMP/veycut-mount" || true' EXIT
+          ditto "$RUNNER_TEMP/veycut-mount/VeyCut.app" "$RUNNER_TEMP/VeyCut.app"
+          app="$RUNNER_TEMP/VeyCut.app"
+          codesign --verify --deep --strict "$app" 2>&1 | tee evidence/signature-verification.txt
+          codesign -dv --verbose=4 "$app" 2> evidence/signature-details.txt
+          plutil -p "$app/Contents/Info.plist" > evidence/bundle-info.txt
+          test -s "$app/Contents/Resources/SOURCE-NOTICES.md"
+          test -s "$app/Contents/Resources/THIRD_PARTY_NOTICES.md"
+          test -d "$app/Contents/Resources/licenses/fonts"
+          python3 - <<'PYTHON'
+          import os, pathlib, subprocess
+          app = pathlib.Path(os.environ['RUNNER_TEMP']) / 'VeyCut.app'
+          output = []
+          for path in [app / 'Contents/MacOS/concat', *sorted((app / 'Contents/Frameworks').glob('*.dylib'))]:
+              text = subprocess.check_output(['otool', '-L', str(path)], text=True)
+              output.append(text)
+              for line in text.splitlines()[1:]:
+                  dependency = line.strip().split(' (')[0]
+                  assert not dependency.startswith('/') or dependency.startswith(('/usr/lib/', '/System/Library/')), dependency
+          pathlib.Path('evidence/library-paths.txt').write_text('\n'.join(output))
+          PYTHON
+          cat > "$RUNNER_TEMP/window.swift" <<'SWIFT'
+          import Foundation
+          import CoreGraphics
+          let pid = Int(CommandLine.arguments[1])!
+          let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+          let own = windows.filter {
+              ($0[kCGWindowOwnerPID as String] as? Int) == pid &&
+              ($0[kCGWindowLayer as String] as? Int) == 0 &&
+              (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) >= 200 &&
+              (($0[kCGWindowBounds as String] as? [String: Any])?["Height"] as? Double ?? 0) >= 200
+          }
+          print(String(data: try JSONSerialization.data(withJSONObject: own, options: [.prettyPrinted]), encoding: .utf8)!)
+          exit(own.isEmpty ? 1 : 0)
+          SWIFT
+          python3 - <<'PYTHON'
+          import json, os, pathlib, subprocess, time
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          with open('evidence/startup.log', 'w') as log:
+              process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
+              try:
+                  for _ in range(30):
+                      time.sleep(1)
+                      assert process.poll() is None, 'Packaged editor exited during startup'
+                  with open('evidence/editor-window.json', 'w') as window:
+                      subprocess.run(['swift', str(temp / 'window.swift'), str(process.pid)], stdout=window, check=True)
+                  assert process.poll() is None, 'Packaged editor exited before window inspection'
+                  report = {'source_revision': os.environ['PACKAGE_REVISION'], 'platform': 'macos-arm64', 'runner': 'macos-15', 'startup_seconds': 30, 'window_observed': True, 'clean_machine_installation_verified': False, 'native_picker_verified': False, 'long_session_verified': False}
+                  pathlib.Path('evidence/PACKAGE-INSPECTION.json').write_text(json.dumps(report, indent=2) + '\n')
+              finally:
+                  if process.poll() is None:
+                      process.terminate()
+                      try:
+                          process.wait(timeout=10)
+                      except subprocess.TimeoutExpired:
+                          process.kill()
+                          process.wait()
+          PYTHON
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: VeyCut-Mac-package-inspection
+          path: evidence/
+          if-no-files-found: error
