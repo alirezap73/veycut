@@ -12,7 +12,7 @@ Change version numbers only when releasing a tested milestone. Small fixes and m
 
 [Native validation](https://github.com/alirezap73/veycut/actions/runs/38057090804) passed Linux engine tests and lints, macOS compilation and WebAssembly checks: 772 successful native test invocations. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38057087322) passed 222 successful test invocations. Counts describe test executions, not distinct features or a completeness percentage.
 
-The combined changes preserve active export cancellation, report rejected caption edits, order project saves, keep the editor open when saving fails, cancel stale captions across successful project switches, and probe replacement files before applying media recovery. A [new Mac candidate build](https://github.com/alirezap73/veycut/actions/runs/38059935774) is in progress for this source. The package evidence below belongs to the older source and does not yet verify the updated package. No external model provider is connected.
+The combined changes preserve active export cancellation, report rejected caption edits, order project saves, keep the editor open when saving fails, cancel stale captions across successful project switches, and probe replacement files before applying media recovery. The [updated Mac candidate build](https://github.com/alirezap73/veycut/actions/runs/38059935774) and [package inspection](https://github.com/alirezap73/veycut/actions/runs/38062388110) passed for this exact source. Inspection verified the DMG, strict ad-hoc signature, bundled library paths and a native 1024×681 VeyCut window after 30 seconds. Installer SHA-256: `ebbd8910e011976594e72b374fd7a982a3a8d718b97b468f8a5001e6da909908`. The package is a workflow artifact, not a new public release. Independent installation, native picker/drag-drop and complete longer editing sessions remain unverified. The earlier package evidence below remains historical. No external model provider is connected.
 
 ## Earlier package evidence at source 231e726
 
@@ -44,7 +44,7 @@ Use the [manual core check and small generated media sample](BETA-TEST.md) to re
 3. Fix observed blocking failures and rerun the affected checks. Rebuild and reinspect if the runtime or package changes; keep source and package identity explicit.
 4. Publish a beta only with completed evidence, checksums, installation instructions and actual remaining limitations. Do not describe server form fixtures as verified user media playback.
 
-Full builds and media/GUI tests stay on GitHub runners when local laptop use must remain light. The development shipping workflow now keeps compiled workspace crates under a new cache-policy key; the previous candidate's cache excluded them and rebuilt them in 32m06s. The new policy needs a first warm build, and no speed improvement is claimed until measured.
+Full builds and media/GUI tests stay on GitHub runners when local laptop use must remain light. The development shipping workflow now keeps compiled workspace crates under a new cache-policy key; the previous candidate's cache excluded them and rebuilt them in 32m06s. The updated candidate completed with the new policy. No controlled speed comparison has established an improvement.
 
 ## معیار بتا
 
