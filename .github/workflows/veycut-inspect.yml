@@ -15,6 +15,10 @@ on:
         description: Launches on the same runner profile (1 to 3)
         type: string
         default: '1'
+      accessibility_probe:
+        description: Inspect native UI automation capability on the runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +66,7 @@ jobs:
         env:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
+          ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
         run: |
           set -euo pipefail
           mkdir -p evidence "$RUNNER_TEMP/veycut-mount"
@@ -105,6 +110,35 @@ jobs:
           print(String(data: try JSONSerialization.data(withJSONObject: own, options: [.prettyPrinted]), encoding: .utf8)!)
           exit(own.isEmpty ? 1 : 0)
           SWIFT
+          cat > "$RUNNER_TEMP/accessibility.swift" <<'SWIFT'
+          import Foundation
+          import ApplicationServices
+          import AppKit
+          let pid = pid_t(CommandLine.arguments[1])!
+          func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+              var value: CFTypeRef?
+              let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+              return status == .success ? value : nil
+          }
+          var nodes = [[String: Any]]()
+          func walk(_ element: AXUIElement, _ depth: Int) {
+              guard depth < 24 && nodes.count < 2000 else { return }
+              var node: [String: Any] = ["depth": depth]
+              for name in ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXIdentifier"] {
+                  if let value = attribute(element, name) { node[name] = String(describing: value) }
+              }
+              nodes.append(node)
+              let children = attribute(element, "AXChildren") as? [AXUIElement] ?? []
+              for child in children { walk(child, depth + 1) }
+          }
+          let app = AXUIElementCreateApplication(pid)
+          AXUIElementSetMessagingTimeout(app, 3)
+          NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+          let trusted = AXIsProcessTrusted()
+          if trusted { walk(app, 0) }
+          let report: [String: Any] = ["trusted": trusted, "node_count": nodes.count, "nodes": nodes, "interaction_verified": false]
+          print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]), encoding: .utf8)!)
+          SWIFT
           python3 - <<'PYTHON'
           import json, os, pathlib, subprocess, time
           temp = pathlib.Path(os.environ['RUNNER_TEMP'])
@@ -129,6 +163,9 @@ jobs:
                               assert any(w.get('kCGWindowName') == 'VeyCut' and w.get('kCGWindowIsOnscreen') for w in windows), 'Visible VeyCut editor window missing'
                               usage = subprocess.check_output(['ps', '-p', str(process.pid), '-o', 'rss=', '-o', '%cpu='], text=True, timeout=10).split()
                               samples.append({'elapsed_seconds': elapsed, 'rss_kib': int(usage[0]), 'cpu_percent': float(usage[1])})
+                              if cycle == 1 and elapsed == 30 and os.environ['ACCESSIBILITY_PROBE'] == 'true':
+                                  with open('evidence/accessibility-probe.json', 'w') as output:
+                                      subprocess.run(['swift', str(temp / 'accessibility.swift'), str(process.pid)], stdout=output, check=True, timeout=60)
                       assert process.poll() is None, 'Packaged editor exited before session inspection'
                       log.flush()
                       startup = log_path.read_text().lower()
