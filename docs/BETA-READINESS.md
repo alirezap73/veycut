@@ -14,6 +14,8 @@ Change version numbers only when releasing a tested milestone. Small fixes and m
 
 The combined changes preserve active export cancellation, report rejected caption edits, order project saves, keep the editor open when saving fails, cancel stale captions across successful project switches, and probe replacement files before applying media recovery. The [updated Mac candidate build](https://github.com/alirezap73/veycut/actions/runs/38059935774) and [package inspection](https://github.com/alirezap73/veycut/actions/runs/38062388110) passed for this exact source. Inspection verified the DMG, strict ad-hoc signature, bundled library paths and a native 1024×681 VeyCut window after 30 seconds. Installer SHA-256: `ebbd8910e011976594e72b374fd7a982a3a8d718b97b468f8a5001e6da909908`. The package is a workflow artifact, not a new public release. Independent installation, native picker/drag-drop and complete longer editing sessions remain unverified. The earlier package evidence below remains historical. No external model provider is connected.
 
+[Repeated-launch inspection](https://github.com/alirezap73/veycut/actions/runs/38062789609) also passed on the same package: two launches using the same runner profile, 120 seconds of idle observation each, and four visible-window samples per launch. The app remained alive throughout both observations. The process was terminated with SIGTERM between launches; this does not verify menu-driven quit, editing, native picker/drag-drop, saving through the GUI or export through the GUI. Resource samples are runner-only measurements, not a laptop performance guarantee.
+
 ## Earlier package evidence at source 231e726
 
 | Main path | Verified evidence | Remaining scope |
