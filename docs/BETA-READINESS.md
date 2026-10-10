@@ -4,7 +4,17 @@ The target is a reliable beta for Apple silicon macOS with the main editing path
 
 The public preview stays at 0.2.0-preview.1. The existing 0.3.0 build is an unpublished development candidate, not a new public milestone. Keep its version fixed while this beta work continues. Raise the version only for a documented, tested milestone, rather than for each feature or commit.
 
-## Evidence at source 231e726
+## Version numbering
+
+Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
+
+## Current source validation at e5d667c
+
+[Native validation](https://github.com/alirezap73/veycut/actions/runs/38057090804) passed Linux engine tests and lints, macOS compilation and WebAssembly checks: 772 successful native test invocations. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38057087322) passed 222 successful test invocations. Counts describe test executions, not distinct features or a completeness percentage.
+
+The combined changes preserve active export cancellation, report rejected caption edits, order project saves, keep the editor open when saving fails, cancel stale captions across successful project switches, and probe replacement files before applying media recovery. A [new Mac candidate build](https://github.com/alirezap73/veycut/actions/runs/38059935774) is in progress for this source. The package evidence below belongs to the older source and does not yet verify the updated package. No external model provider is connected.
+
+## Earlier package evidence at source 231e726
 
 | Main path | Verified evidence | Remaining scope |
 | --- | --- | --- |
