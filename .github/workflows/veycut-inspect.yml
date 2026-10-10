@@ -31,6 +31,10 @@ on:
         description: Bounded JSON GUI steps using screenshot-confirmed window coordinates
         type: string
         default: '[]'
+      core_gui:
+        description: Run the committed import, split, captions, reopen and video export scenario
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -75,7 +79,7 @@ jobs:
           name: VeyCut-macos-arm64
           path: bundles
       - name: Ensure independent video decoder for GUI export checks
-        if: contains(inputs.gui_actions, 'video-check')
+        if: inputs.core_gui || contains(inputs.gui_actions, 'video-check')
         run: |
           if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
@@ -85,7 +89,8 @@ jobs:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
           ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
-          PROJECT_SMOKE: ${{ inputs.project_smoke }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui }}
+          CORE_GUI: ${{ inputs.core_gui }}
           EDITOR_PROBE: ${{ inputs.editor_probe }}
           GUI_ACTIONS: ${{ inputs.gui_actions }}
         run: |
@@ -177,8 +182,10 @@ jobs:
           AXUIElementSetAttributeValue(application, "AXFrontmost" as CFString, kCFBooleanTrue)
           var windowList: CFTypeRef?
           AXUIElementCopyAttributeValue(application, "AXWindows" as CFString, &windowList)
-          for window in windowList as? [AXUIElement] ?? [] {
-              AXUIElementPerformAction(window, "AXRaise" as CFString)
+          if action != "caption-pick" && action != "caption-save" {
+              for window in windowList as? [AXUIElement] ?? [] {
+                  AXUIElementPerformAction(window, "AXRaise" as CFString)
+              }
           }
           func key(_ code: CGKeyCode, _ flags: CGEventFlags = []) {
               let modifiers: [CGKeyCode] = (flags.contains(.maskCommand) ? [55] : []) + (flags.contains(.maskShift) ? [56] : [])
@@ -256,6 +263,8 @@ jobs:
               }
               key(5, [.maskCommand, .maskShift])
               Thread.sleep(forTimeInterval: 2)
+              print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+              fflush(stdout)
               guard let sheet = find(element, role: "AXSheet"), let field = find(sheet, role: "AXTextField") else { exit(6) }
               AXUIElementSetAttributeValue(field, "AXFocused" as CFString, kCFBooleanTrue)
               guard AXUIElementSetAttributeValue(field, "AXValue" as CFString, CommandLine.arguments[3] as CFString) == .success else { exit(7) }
@@ -419,7 +428,7 @@ jobs:
                   pathlib.Path('evidence/UI-CALLS.json').write_text(json.dumps(ui_calls, indent=2))
                   with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
                       subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
-              actions = json.loads(os.environ['GUI_ACTIONS'])
+              actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text()) if os.environ['CORE_GUI'] == 'true' else json.loads(os.environ['GUI_ACTIONS'])
               assert isinstance(actions, list) and len(actions) <= 64
               core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
               for cycle in range(1, 3):
@@ -542,10 +551,15 @@ jobs:
                                       before_reopen = json.loads(manifest.read_text())
                                       ui(process, 'close')
                                       assert process.wait(timeout=30) == 0
+                                      saved_before_reopen = manifest.stat().st_mtime_ns
+                                      log_offset = ui_log.stat().st_size
                                       process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
                                       time.sleep(15)
                                       ui(process, 'open')
                                       ui(process, 'save')
+                                      assert manifest.stat().st_mtime_ns > saved_before_reopen, 'Reopened editor did not publish a fresh save'
+                                      fresh_log = ui_log.read_text()[log_offset:]
+                                      assert 'project: opening' in fresh_log and 'menu: save' in fresh_log, 'Reopened editor did not receive native open/save actions'
                                       after_reopen = json.loads(manifest.read_text())
                                       assert after_reopen['clips'] == before_reopen['clips'] and after_reopen['media'] == before_reopen['media'], 'GUI reopen changed the saved edit'
                                       core['edited_project_reopen_verified'] = True

@@ -1,0 +1,193 @@
+[
+  {
+    "action": "select-all"
+  },
+  {
+    "action": "click",
+    "arg": "0.2294921875,0.6989720999"
+  },
+  {
+    "action": "double-click",
+    "arg": "0.2578125000,0.2364170338"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "placement-check"
+  },
+  {
+    "action": "click",
+    "arg": "0.2119140625,0.7474302496"
+  },
+  {
+    "action": "split"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "split-check"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "split-undo-check"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "split-check"
+  },
+  {
+    "action": "click",
+    "arg": "0.4580078125,0.6989720999"
+  },
+  {
+    "action": "click",
+    "arg": "0.5000000000,0.1483113069"
+  },
+  {
+    "action": "click",
+    "arg": "0.3750000000,0.2305433186"
+  },
+  {
+    "action": "caption-pick"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "caption-check"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "caption-undo-check"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "caption-check"
+  },
+  {
+    "action": "click",
+    "arg": "0.4580078125,0.6989720999"
+  },
+  {
+    "action": "click",
+    "arg": "0.6582031250,0.1483113069"
+  },
+  {
+    "action": "click",
+    "arg": "0.6396484375,0.4434654919"
+  },
+  {
+    "action": "click",
+    "arg": "0.5371093750,0.7033773862"
+  },
+  {
+    "action": "type-text",
+    "arg": "VeyCut 2026"
+  },
+  {
+    "action": "click",
+    "arg": "0.5371093750,0.7591776799"
+  },
+  {
+    "action": "type-text",
+    "arg": "GUI subtitle pass"
+  },
+  {
+    "action": "click",
+    "arg": "0.5000000000,0.8164464023"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.7294921875,0.0748898678"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "caption-check",
+    "arg": "GUI subtitle pass"
+  },
+  {
+    "action": "click",
+    "arg": "0.4580078125,0.6989720999"
+  },
+  {
+    "action": "click",
+    "arg": "0.5000000000,0.1483113069"
+  },
+  {
+    "action": "click",
+    "arg": "0.6396484375,0.4566813510"
+  },
+  {
+    "action": "click",
+    "arg": "0.6396484375,0.2878120411"
+  },
+  {
+    "action": "click",
+    "arg": "0.6250000000,0.2305433186"
+  },
+  {
+    "action": "caption-save"
+  },
+  {
+    "action": "subtitle-file-check",
+    "arg": "GUI subtitle pass"
+  },
+  {
+    "action": "click",
+    "arg": "0.7294921875,0.0748898678"
+  },
+  {
+    "action": "reopen"
+  },
+  {
+    "action": "caption-check",
+    "arg": "GUI subtitle pass"
+  },
+  {
+    "action": "export-open"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.8291015625,0.9544787078"
+  },
+  {
+    "action": "video-check"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.9726562500,0.0367107195"
+  }
+]
