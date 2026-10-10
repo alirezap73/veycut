@@ -22,6 +22,8 @@ Windows compilation completed, but the effect-thumbnail test reported GPU device
 
 ## Release gates
 
+Use the [manual core check and small generated media sample](BETA-TEST.md) to report reproducible results. The sample is a short fixture, not a substitute for user footage or an independent-machine check.
+
 1. Run the complete main path in the packaged editor on an independent Apple silicon Mac, using a short landscape clip, a portrait clip, audio and bilingual text. Check the saved/reopened project and the decoded output.
 2. Verify missing/corrupt media and cancellation leave the project and existing output files intact.
 3. Fix observed blocking failures and rerun the affected checks. Rebuild and reinspect if the runtime or package changes; keep source and package identity explicit.

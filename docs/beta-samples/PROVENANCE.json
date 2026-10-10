@@ -1,0 +1,24 @@
+{
+  "source_revision": "231e726a5466b1b2538181e2dd25ad648d54ea4e",
+  "validation_run": 38033881735,
+  "test": "vertical_bilingual_captions_export_with_audio_and_reopen",
+  "media": {
+    "width": 720,
+    "height": 1280,
+    "frames": 60,
+    "fps": 30,
+    "duration_seconds": 2,
+    "audio": "Synthetic stereo tone in the second second; the first second is silent",
+    "image": "Black background with rendered bilingual captions; generated fixture, not camera footage"
+  },
+  "files": {
+    "portrait-2s.mp4": {
+      "bytes": 52581,
+      "sha256": "a4397e4ce8aee4b572a4c3abbcd0bde738adc9a72e6a55c135eb0962d023d54b"
+    },
+    "captions-2s.vtt": {
+      "bytes": 100,
+      "sha256": "5601a934c939f5f6320592c4740e1dd68598905cfc8d1f1e8990fc76dfeebc1f"
+    }
+  }
+}

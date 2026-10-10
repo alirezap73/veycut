@@ -1,0 +1,51 @@
+name: Core beta bug
+description: Report a failure in import, editing, save/reopen or export.
+title: "[Beta] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "Follow docs/BETA-TEST.md when possible. Report the first failed step and the actual build version. The candidate and public preview can have different versions."
+  - type: input
+    id: build
+    attributes:
+      label: VeyCut build
+      description: Version shown in the app, and source revision if built from source.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and chip
+      description: Exact macOS version and Apple silicon chip for the current beta target; identify other platforms explicitly.
+    validations:
+      required: true
+  - type: dropdown
+    id: path
+    attributes:
+      label: First failing operation
+      options:
+        - Installation or startup
+        - Import or drag/drop
+        - Preview or audio
+        - Split, trim or move
+        - Text or subtitles
+        - Save or reopen
+        - Export or cancel
+        - Missing-media recovery
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the beta checklist step, media format/duration, and a small shareable sample when needed.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+      description: Describe both, including any error text. Attach screenshots or reviewed logs if useful.
+    validations:
+      required: true
