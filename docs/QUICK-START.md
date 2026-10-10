@@ -1,6 +1,6 @@
 # VeyCut quick start
 
-The public 0.2.0 preview has an Apple silicon macOS DMG. Version 0.3.0 source adds the export and media recovery improvements below; its installer is pending validation. Use the release linked from the repository README, rather than another project's download page.
+The public 0.2.0 preview has an Apple silicon macOS DMG. Version 0.3.0 source adds the export and media recovery improvements below; its built installer remains an unpublished candidate while the beta editing path is verified. Use the release linked from the repository README, rather than another project's download page.
 
 1. Download the macos-arm64 DMG from the VeyCut release and copy VeyCut into Applications. This experimental app is ad-hoc signed and not Apple-notarized. macOS may require explicit approval to open it.
 2. Open VeyCut and create a project. Choose a portrait, landscape or square frame and name the project.
@@ -21,7 +21,7 @@ Open an [issue](https://github.com/alirezap73/veycut/issues) with the VeyCut ver
 
 # شروع سریع وی‌کات
 
-نسخهٔ عمومی ۰٫۲ برای مک با تراشهٔ Apple silicon فایل DMG دارد. سورس ۰٫۳ بهبودهای خروجی و بازیابی رسانهٔ بالا را اضافه می‌کند؛ فایل نصبی آن هنوز در حال اعتبارسنجی است. لینک معتبر دانلود در README همین مخزن قرار دارد.
+نسخهٔ عمومی ۰٫۲ برای مک با تراشهٔ Apple silicon فایل DMG دارد. سورس ۰٫۳ بهبودهای خروجی و بازیابی رسانهٔ بالا را اضافه می‌کند؛ فایل نصبی آن ساخته و بررسی شده، اما تا تأیید مسیر اصلی بتا منتشر نمی‌شود. لینک معتبر دانلود در README همین مخزن قرار دارد.
 
 ۱. فایل macos-arm64 DMG را دانلود کنید و VeyCut را به Applications ببرید. نسخه آزمایشی است و تأیید Apple notarization ندارد؛ ممکن است macOS برای بازکردن آن تأیید شما را بخواهد.
 

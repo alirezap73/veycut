@@ -60,8 +60,9 @@ Publish source updates for server validation. Publish a Mac preview only after i
 - [x] Generation/project guards for cancelled export replies.
 - [x] Five filesystem regression checks and five export path/dimension checks pass without media services.
 - [x] Windows GPU-test timeout excludes compilation by executing its exact compiled binary.
-- [ ] Native tests, resized caption/audio export and export-form screenshots reviewed.
-- [ ] New Mac package built, inspected and published from the exact candidate.
-- [ ] Windows native validation passes; Windows installer remains separate.
+- [x] 763 Linux native test invocations, macOS compilation, wasm and 209 development checks passed; resized caption/audio output and actual export dropdown selection/reset reviewed.
+- [x] Exact source `231e726` built and Mac package inspected; checksum and native startup verified.
+- [ ] Publish a new preview after completing the beta milestone; the 0.3.0 draft remains unpublished.
+- [ ] Windows native validation passes. Compilation completed, then the effect test reported GPU device loss and reached its timeout; Windows is outside the Mac beta scope.
 
-The 0.2.0 public preview remains available during validation. No 0.3.0 installer is advertised before these package checks pass.
+The public preview remains 0.2.0-preview.1. The 0.3.0 package is an unpublished candidate; see [beta criteria](docs/BETA-READINESS.md). Keep the development version fixed until a tested milestone is ready.

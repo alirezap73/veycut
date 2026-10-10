@@ -328,10 +328,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
-          key: ${{ matrix.target }}
+          # Use a new policy key: existing exact cache entries are immutable
+          # and were saved without the workspace's compiled crates.
+          key: ${{ matrix.target }}-workspace-v1
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
           env-vars: CARGO CC CFLAGS CXX CMAKE RUST GGML
 
-      # The shipping profile: fat LTO, panic=abort, stripped. See the
+      # The shipping profile: thin LTO, panic=abort, stripped. See the
       # workspace Cargo.toml for what each knob costs.
       #
       # Bash on every platform, teed to a log: raw job logs need a login to

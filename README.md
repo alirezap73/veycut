@@ -8,11 +8,11 @@ VeyCut is a native video editor with timeline editing, video effects, transition
 
 This development source adds selectable export resolutions without changing the editing project. Titles and captions are rasterized at the selected output size. Export files are isolated per job; the finished output refuses an existing file, including one created during rendering, and failed/cancelled jobs clean up their own work files. Cancelled jobs and replies from an earlier project cannot replace the current export status.
 
-The shipping profile uses thin LTO to reduce build time; speed improvements require measurement on GitHub. Windows effect tests execute the exact previously compiled test binary, keeping compilation outside the GPU-test timeout. Missing first-start effect previews use placeholders while cards are being generated. New log headers and filenames use VeyCut.
+The shipping profile uses thin LTO. A build-speed improvement has not been established by a controlled comparison. The package cache now retains workspace crates under a new policy key; its first warm build and speed measurement remain pending. Windows effect tests execute the exact previously compiled test binary, keeping compilation outside the GPU-test timeout. Missing first-start effect previews use placeholders while cards are being generated. New log headers and filenames use VeyCut.
 
 Missing-media recovery runs in a cancellable background search. Duplicate filenames are left offline, symlinks are not followed and bounded or unreadable searches make no edits. See the [English/Persian quick start](docs/QUICK-START.md).
 
-0.3.0 native validation and packaging are pending. The download below remains the previously verified **0.2.0 experimental preview** until a new candidate passes.
+The 0.3.0 development candidate passed native Linux/macOS/wasm checks, its Mac build and package inspection. It remains **unpublished** while the main editing path is verified for the [beta milestone](docs/BETA-READINESS.md). The public download stays at **0.2.0-preview.1**; the development version will not increase for each commit.
 
 ## Version 0.2.0 changes
 
@@ -49,7 +49,7 @@ Rust 1.93 and the native dependencies documented in [src/README.md](src/README.m
 ```sh
 cd src
 cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
-cargo fmt --check
+cargo fmt --all --check
 cargo clippy --locked -j 1 -p concat-project --all-targets -- -D warnings
 ```
 
