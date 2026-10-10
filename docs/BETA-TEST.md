@@ -16,6 +16,27 @@ The [portrait sample](beta-samples/portrait-2s.mp4) is a two-second, 720×1280, 
 
 Submit failures through the repository's beta bug form. Include the first failed step, expected/actual result and reproducible media if shareable. A passed tiny fixture does not satisfy the independent-machine or longer-session gates in [beta readiness](BETA-READINESS.md).
 
+## Repeatable GUI scenario on a Mac runner
+
+The package inspection workflow can run the committed
+[55-step scenario](beta-tests/core-gui.json) against a successful Mac candidate,
+without rebuilding it. Use `core_gui=true` and the candidate run ID. The source
+identity gate rejects changes to runtime or packaging since that candidate.
+
+```sh
+gh workflow run veycut-inspect.yml --ref development/0.3.0 \
+  -f candidate_run=38069013402 -f core_gui=true
+```
+
+The scenario places a file imported through the native picker onto the timeline,
+splits it with undo/redo, imports editable bilingual captions, replaces the English
+caption with `GUI subtitle pass`, exports WebVTT, saves/reopens, and exports video
+through the visible export controls. Evidence includes project snapshots, native
+action logs, screenshots, the subtitle file and independently decoded output.
+Inspect `export-frame-1.4.png` for the unique replacement caption before reporting
+caption rendering as passed: the fixture itself already contains baked captions.
+Each check must pass; a partially completed run does not establish beta readiness.
+
 ## Save and recovery regressions in the development source
 
 Use disposable copies of the sample project for these failure checks. An older
