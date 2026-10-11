@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(existing.len(), 1);
         let first = existing[0].0;
         let han: Script = "Hani".parse().expect("Han");
-        collection.append_fallbacks(han, [first]);
+        collection.append_fallbacks(han, [first].into_iter());
         let arabic: Script = "Arab".parse().expect("Arabic");
         let latin: Script = "Latn".parse().expect("Latin");
         let arabic_before: Vec<_> = collection.fallback_families(arabic).collect();

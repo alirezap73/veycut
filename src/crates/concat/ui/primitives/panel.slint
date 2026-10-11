@@ -248,6 +248,9 @@ export component IconButton inherits Rectangle {
 
     callback clicked();
 
+    accessible-role: button;
+    accessible-label: root.label;
+
     property <bool> lit: touch.has-hover && root.enabled;
     // Checked is a lime *glyph* on a darker chip, never dark ink on a lime
     // slab and not a lime-tinted one either: an activated tool button is a
