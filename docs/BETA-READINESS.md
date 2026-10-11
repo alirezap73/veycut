@@ -8,6 +8,18 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
+## Latest CJK and accessibility runtime at 974c65e
+
+Source `974c65e` adds a shared 2.74 MB bundled CJK fallback for the UI and title
+renderer, plus accessible icon-button roles and names. Common subset coverage
+and Simplified Chinese glyph-form limitations apply. The earlier CJK run
+[38116050056](https://github.com/alirezap73/veycut/actions/runs/38116050056)
+failed to compile a newly added array-iterator test; this was a test-compilation
+failure, not evidence of failed CJK rendering. That test is corrected, but
+[full validation](https://github.com/alirezap73/veycut/actions/runs/38117995463)
+is pending. There is no matching packaged GUI result for this latest runtime.
+Do not extend earlier passing results to these changes.
+
 ## Stereo layout and GPU failure runtime at e6bce73
 
 Source `e6bce73` fixes the initial/resized meter width through nested layouts,
@@ -22,10 +34,10 @@ captured/uncaptured GPU-validation regression passed. The Mac job compiles
 rather than executing native tests.
 
 [Its Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38115406465)
-is building. The previous navigation candidate built successfully, with
-[caption navigation inspection](https://github.com/alirezap73/veycut/actions/runs/38115397274)
-and [core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38115400994)
-running on its fixed inspection reference. Those inspections do not include
+built successfully. Matching [extended](https://github.com/alirezap73/veycut/actions/runs/38117957948),
+[core](https://github.com/alirezap73/veycut/actions/runs/38118020433) and
+[caption-navigation](https://github.com/alirezap73/veycut/actions/runs/38118025361)
+GUI inspections are pending. Earlier passing inspections below do not include
 the later meter/GPU changes. Development version remains **0.3.1**.
 
 ## Validated navigation runtime at 36e98b7
@@ -44,11 +56,36 @@ The Mac job compiles targets rather than executing native tests. The same run
 passed **263 development invocations** (249 Rust and 14 Python).
 
 The [matching candidate](https://github.com/alirezap73/veycut/actions/runs/38108844684)
-built successfully from source `af14bfb` with the same runtime. The intervening change only teaches the package gate to verify the known full-check wrapper, including its successful quick/native jobs; 13 gate tests pass. New GUI navigation and duplicate-selection
-checks remain pending; the earlier package below does not contain these changes.
-The extended scenario now has 98 entries, including a keyboard-only
-new-copy deletion/undo/redo check that verifies exact IDs and preserved originals.
-A scenario definition is not passing evidence. Development remains **0.3.1**.
+built successfully from source `af14bfb` with the same runtime. The intervening change only teaches the package gate to verify the known full-check wrapper, including its successful quick/native jobs; 13 gate tests pass. The [core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38115400994)
+passed **55 steps**, including native import/placement, split undo/redo,
+bilingual caption editing, subtitle export, save/reopen and a fully decoded
+two-second H.264/AAC export. Extracted frames show Persian shaping and a
+coloured emoji using an available system font; this does not prove COLR portability.
+
+[Caption navigation](https://github.com/alirezap73/veycut/actions/runs/38115397274)
+passed **23 steps** with **55 cues** imported through the UI. Pointer, Enter and
+Space each selected one cue and sought to its original start, verified through
+copy/delete/paste timing and property checks. Page two showed chronological cues
+51–55 and the correct range/count. Cleanup and reopen preserved the full baseline.
+
+[Extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38116397350)
+passed **98 actions** on test/package source `af14bfb`, runtime `36e98b7`.
+Group copy/paste, new-copy selection/deletion, single-step duplicate Undo/Redo
+with exact IDs/properties, move, head/tail trim, top/bottom track placement and
+reopen passed. Both native import panels were held for four seconds during
+playback. Pause positions after cancellation and acceptance were **17.569** and
+**29.848 seconds**, satisfying `4 <= paused < 32`; cancellation preserved media
+and clips, and acceptance added one media item without changing the timeline.
+Pause used a screenshot-confirmed native pointer coordinate; **AX Pause controls
+and timer updates during the held panel were not verified**.
+
+The extended export fully decoded all streams: H.264, **720×1280**, **30 fps**,
+**960 frames**, **32 seconds**; AAC **48 kHz stereo**, 31.978667 seconds. Audio
+length and alternating silence/tone checks passed. This is a repeated synthetic
+two-second sample, not real user footage or an independent installation. Split
+and subtitle editing were exercised by the core scenario, not the extended one.
+These results do not validate later meter/GPU or CJK/accessibility changes.
+Development remains **0.3.1**.
 
 ## Validated runtime source at 32acd2f
 
@@ -72,11 +109,7 @@ built successfully from source `57337d63761060124cdf0acd8b80be8d92eaeb41`.
 Commits after runtime `32acd2f` change validation infrastructure only; candidate
 policy checks confirmed runtime identity. [Core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108357089) passed all 55 steps: native import/placement, split undo/redo, editable bilingual subtitles, replacement, subtitle-file export, save/reopen and video export. The fully decoded output is H.264/AAC at 720×1280, 30 fps and 60 frames over two seconds. Extracted frames visually show Persian shaping and the unique English caption with a coloured emoji; this uses the available system font and does not establish COLR portability. The DMG checksum is `63cd403e001e3faa3aa34b99db82a311861d4ba63538b08c8fa73e70929b3533`.
 
-[Extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) failed the playback-position assertion after cancelling a held native import panel. It did not reach accepted-panel or 32-second export verification. A screenshot also shows the default meter pane clipping its right channel: layout correction is required. [The diagnostic repeat](https://github.com/alirezap73/veycut/actions/runs/38109391594) also failed: playback started at zero, no pause log was observed after 21.39 seconds, and no audio-unavailable error was recorded. The missing pause action is under investigation; the assertion remains unchanged and no accepted-panel or longer-export pass is claimed.
-The earlier fixed inspection reference uses a 97-entry scenario, including observed
-native import panels held for four seconds during playback, cancellation and
-acceptance; the scenario itself is not passing evidence until run against a
-matching package. No earlier package contains all these source changes.
+[Extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) failed the playback-position assertion after cancelling a held native import panel. It did not reach accepted-panel or 32-second export verification. A screenshot also shows the default meter pane clipping its right channel: the later `e6bce73` source corrects this layout, with four passing layout regressions; matching GUI inspection is pending. [The diagnostic repeat](https://github.com/alirezap73/veycut/actions/runs/38109391594) also failed: playback started at zero, no pause log was observed after 21.39 seconds, and no audio-unavailable error was recorded. A later [AX-control attempt](https://github.com/alirezap73/veycut/actions/runs/38115584879) failed because the older icon button did not expose an accessible Pause name; that failure did not prove a playback fault. The unchanged strict playback assertion subsequently passed on runtime `36e98b7` using the screenshot-confirmed coordinate route documented above, including accepted-panel and longer-export checks. These historical failures remain distinct from later passing evidence. No earlier package contains all the later source changes.
 Development remains 0.3.1 and the public preview is unchanged.
 
 ## Prior validated source at 9a7b5e7
@@ -141,4 +174,4 @@ Full builds and media/GUI tests stay on GitHub runners when local laptop use mus
 
 هدف، بتای قابل‌اعتماد برای مک Apple silicon است: ورود رسانه، برش و جابه‌جایی، متن و صدا، ذخیره و بازکردن، و خروجی. نسخهٔ عمومی فعلاً ۰٫۲ می‌ماند؛ شمارهٔ کاندید توسعه افزایش نمی‌یابد. درصد نزدیکی به محصولات دیگر تعیین نشده است.
 
-آزمون موتور، خروجی واقعی و بازشدن بسته موفق بوده‌اند. استفادهٔ کامل از رابط برنامه روی دستگاه مستقل، ورود فایل از پنجرهٔ انتخاب/کشیدن‌ورهاکردن و جلسات طولانی هنوز تأیید نشده‌اند. انتشار بعدی به تکمیل این بررسی‌ها و رفع خطاهای مشاهده‌شده وابسته است. مشکل گرافیک ویندوز ثبت شده و فایل نصب ویندوز در این بتا ارائه نمی‌شود.
+آزمون موتور، خروجی واقعی و بازشدن بسته موفق بوده‌اند. ورود فایل از پنجرهٔ انتخاب، جابه‌جایی و کوتاه‌کردن کلیپ، و خروجی ۳۲ ثانیه‌ای با نمونهٔ مصنوعی روی سرور تأیید شده‌اند. استفادهٔ کامل روی دستگاه مستقل، کشیدن‌ورهاکردن و جلسات طولانی با فایل واقعی هنوز تأیید نشده‌اند. آخرین تغییرات کد نیز در انتظار آزمون مطابق همان نسخه هستند. انتشار بعدی به تکمیل این بررسی‌ها و رفع خطاهای مشاهده‌شده وابسته است. مشکل گرافیک ویندوز ثبت شده و فایل نصب ویندوز در این بتا ارائه نمی‌شود.
