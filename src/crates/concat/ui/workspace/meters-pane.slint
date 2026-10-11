@@ -5,10 +5,12 @@
 // plays. A slim column beside the timeline by default. Each bar is the
 // peak level on a decibel scale - 0 dB at the top, -60 at the foot -
 // with the loudest of the last moment held as a line, and a light at the
-// top that stays red once the mix has clipped, until it is clicked.
+// top that shows the held peak in dB and stays red once the mix has
+// clipped, until it is clicked.
 
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
+import { Fmt } from "../util.slint";
 import { LevelMeter } from "../primitives/level-meter.slint";
 import { Tip } from "../primitives/tooltip.slint";
 import { Pane } from "pane.slint";
@@ -35,11 +37,31 @@ export component MetersPane inherits Pane {
 
     /// The scale's floor, in dB: the meters' 0 is this, their 1 is 0 dB.
     property <float> floor-db: -60;
-    property <[float]> marks: [0, -6, -12, -24, -36, -48];
+    property <[int]> ticks: [0, -3, -6, -9, -12, -15, -18, -21, -24, -27, -30, -33, -36, -39, -42, -45, -48, -51, -54, -57, -60];
+    property <[int]> marks: [0, -6, -12, -18, -24, -36, -48, -60];
+
+    // Fit the dock's 64px minimum: 22px ruler, two 12px bars, two
+    // 3px gaps and 6px padding per side. The peak shares the clip light
+    // rather than adding a row, so the 140px minimum stays useful.
+    property <length> scale-w: 22px;
+    property <length> bar-w: 12px;
+    property <length> bar-gap: 3px;
+    property <length> pair-w: 2 * root.bar-w + root.bar-gap;
+
+    pure function y-of(db: float, height: length) -> length {
+        return (1 - (db - root.floor-db) / (0 - root.floor-db)) * height;
+    }
+
+    pure function peak-text() -> string {
+        if (Meters.hold-left < 0 && Meters.hold-right < 0) {
+            return "–";
+        }
+        return "\{Math.round(root.floor-db + Fmt.clamp(Math.max(Meters.hold-left, Meters.hold-right), 0, 1) * (0 - root.floor-db))}";
+    }
 
     VerticalLayout {
-        // The other panes' bar height, and only the switcher in it: the
-        // column is too narrow for a name, and the bars say what it is.
+        // Preserve the other panes' header height and switcher position.
+        // The column is too narrow for a name; the bars identify it.
         Rectangle {
             height: 52px;
             Rectangle {
@@ -63,21 +85,36 @@ export component MetersPane inherits Pane {
         }
 
         VerticalLayout {
-            padding: 8px;
-            spacing: 6px;
+            padding-left: 6px;
+            padding-right: 6px;
+            padding-top: 4px;
+            padding-bottom: 4px;
+            spacing: root.bar-gap;
 
-            // The clip light: red once the mix has hit full scale, until
-            // clicked.
+            // The held peak and clip light share the space over the bars.
+            // A negative hold means no reading; clicking still clears clipping.
             HorizontalLayout {
                 alignment: center;
+                spacing: root.bar-gap;
+                Rectangle { width: root.scale-w; }
                 light := Rectangle {
-                    width: 30px;
-                    height: 8px;
+                    width: root.pair-w;
+                    height: 16px;
                     border-radius: 2px;
                     background: Meters.clipped ? Theme.danger : Theme.field;
                     border-width: 1px;
                     border-color: Meters.clipped ? Theme.danger : Theme.line;
 
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: root.peak-text();
+                        color: Theme.fg;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
                     light-touch := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { Meters.clip-cleared(); }
@@ -93,14 +130,33 @@ export component MetersPane inherits Pane {
             HorizontalLayout {
                 vertical-stretch: 1;
                 alignment: center;
-                spacing: 3px;
+                spacing: root.bar-gap;
 
                 scale := Rectangle {
-                    width: 20px;
-                    for db in root.marks: Text {
+                    width: root.scale-w;
+                    Rectangle {
+                        x: parent.width - 1px;
+                        width: 1px;
+                        height: parent.height;
+                        background: Theme.line;
+                    }
+                    for db in root.ticks: Rectangle {
+                        property <bool> major: Math.mod(db, 6) == 0;
                         x: parent.width - self.width;
-                        y: (1 - (db - root.floor-db) / (0 - root.floor-db)) * parent.height
-                            - self.height / 2;
+                        y: Fmt.clamp(root.y-of(db, parent.height) / 1px, 0, Math.max(0, parent.height / 1px - 1)) * 1px;
+                        width: self.major ? 4px : 2px;
+                        height: 1px;
+                        background: self.major ? Theme.fg-dim : Theme.line-strong;
+                    }
+                    for db in root.marks: Text {
+                        // Keep labels apart when the pane is shortened. All
+                        // ticks remain; the floor and full-scale numbers stay.
+                        visible: parent.height >= 120px
+                            || (parent.height >= 80px && (db == -12 || db == -48))
+                            || db == 0 || db == -24 || db == -60;
+                        x: parent.width - 5px - self.width;
+                        y: Fmt.clamp((root.y-of(db, parent.height) - self.height / 2) / 1px,
+                            0, Math.max(0, (parent.height - self.height) / 1px)) * 1px;
                         text: "\{db}";
                         color: Theme.fg-dim;
                         font-family: Theme.font-technical;
@@ -109,13 +165,13 @@ export component MetersPane inherits Pane {
                 }
                 LevelMeter {
                     vertical: true;
-                    thickness: 10px;
+                    thickness: root.bar-w;
                     value: Meters.left;
                     peak: Meters.hold-left;
                 }
                 LevelMeter {
                     vertical: true;
-                    thickness: 10px;
+                    thickness: root.bar-w;
                     value: Meters.right;
                     peak: Meters.hold-right;
                 }
@@ -123,17 +179,26 @@ export component MetersPane inherits Pane {
 
             HorizontalLayout {
                 alignment: center;
-                spacing: 3px;
-                Rectangle { width: 20px; }
+                spacing: root.bar-gap;
+                Rectangle {
+                    width: root.scale-w;
+                    Text {
+                        x: parent.width - 5px - self.width;
+                        text: "dB";
+                        color: Theme.fg-dim;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-xs;
+                    }
+                }
                 Text {
-                    width: 10px;
+                    width: root.bar-w;
                     text: "L";
                     color: Theme.fg-dim;
                     font-size: Theme.fs-xs;
                     horizontal-alignment: center;
                 }
                 Text {
-                    width: 10px;
+                    width: root.bar-w;
                     text: "R";
                     color: Theme.fg-dim;
                     font-size: Theme.fs-xs;

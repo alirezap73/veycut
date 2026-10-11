@@ -29,6 +29,11 @@ pub enum RelinkMsg {
     Show(Vec<MissingMedia>),
     /// Pick a folder and look for every missing file inside it.
     RelinkAll,
+    /// Folder chosen for this dialog generation.
+    RelinkIn {
+        generation: u64,
+        folder: std::path::PathBuf,
+    },
     /// A background search completed for this dialog generation.
     Found {
         /// The search generation that produced these matches.
@@ -61,7 +66,27 @@ impl RelinkPane {
                 self.open = true;
                 self.items = items;
             }
-            RelinkMsg::RelinkAll => self.relink_all(studio),
+            RelinkMsg::RelinkAll => {
+                if self.searching || !self.open || studio.session.is_none() {
+                    return;
+                }
+                let generation = self.generation;
+                let title = t("relink.selectFolderContainingMedia");
+                crate::host::after_dialog(
+                    move || platform::pick_folder(&title, ""),
+                    move |studio, _, _, folder| {
+                        studio.handle(crate::panes::Msg::Relink(RelinkMsg::RelinkIn {
+                            generation,
+                            folder,
+                        }));
+                    },
+                );
+            }
+            RelinkMsg::RelinkIn { generation, folder } => {
+                if self.open && self.generation == generation {
+                    self.relink_in(studio, folder);
+                }
+            }
             RelinkMsg::Found {
                 generation,
                 items,
@@ -84,15 +109,10 @@ impl RelinkPane {
     /// whose basename matches. The user picks one folder; each missing item
     /// looks for its own filename inside it. Successful relinks go through
     /// the editor as `UpdateMediaPath`, so undo covers the whole batch.
-    fn relink_all(&mut self, studio: &mut Studio) {
+    fn relink_in(&mut self, studio: &mut Studio, folder: std::path::PathBuf) {
         if self.searching || studio.session.is_none() {
             return;
         }
-        let Some(folder) = platform::pick_folder(&t("relink.selectFolderContainingMedia"), "")
-        else {
-            return;
-        };
-
         // Snapshot the missing list now: as relinks land the list shrinks,
         // and we want a stable target for the toast count.
         let items: Vec<(String, String)> = self

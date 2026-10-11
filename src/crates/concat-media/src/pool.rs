@@ -763,9 +763,11 @@ impl ReaderPool {
         let index = facts.index_at(request.time);
         // A still is cut to the size asked for: one decode, kept, and the
         // levels of a photograph are not worth a photograph's worth of
-        // memory each.
+        // memory each. A decoder scales by stretching, so the still must
+        // use its fitted picture size, not the compositor cover dimensions.
         let (width, height) = match facts.size {
             Some(size) if !facts.still => level_for(size, request.cover),
+            _ if facts.still => even(request.size.0, request.size.1),
             _ => even(request.cover.0, request.cover.1),
         };
         // A proxy is read as it is tagged: it was written from the
@@ -1269,6 +1271,32 @@ pub(crate) mod tests {
         assert!(cache.get(&key(1)).is_none(), "coldest was evicted");
         assert!(cache.get(&key(2)).is_some());
         assert_eq!(cache.held(), 32);
+    }
+
+    /// A fitted portrait photograph keeps its aspect ratio when the GPU
+    /// asks for its source under a landscape cover. Cache keys follow the
+    /// actual decoded dimensions, including when the fitted size changes.
+    #[test]
+    fn a_still_source_uses_its_fitted_size_instead_of_the_cover() {
+        let pool = ReaderPool::new(1024, 1);
+        // Still facts do not probe or open a file; only source-key selection
+        // is exercised here, without invoking a decoder or allocating pixels.
+        let request = FrameRequest::new("synthetic-portrait.jpg", Rational::ZERO, 270, 480)
+            .as_still(true)
+            .covering(960, 540)
+            .at_any_size(true);
+        let (_, portrait) = pool.locate(&request).expect("still source key");
+        assert_eq!((portrait.width, portrait.height), (270, 480));
+        let (_, same) = pool.locate(&request.clone().covering(1920, 1080)).unwrap();
+        assert_eq!(portrait, same, "cover changes do not stretch the still");
+        let mut smaller = request.clone();
+        smaller.size = (135, 241);
+        let (_, smaller) = pool.locate(&smaller).unwrap();
+        assert_eq!((smaller.width, smaller.height), (134, 240));
+        assert_ne!(
+            portrait, smaller,
+            "different fitted dimensions use different cache entries"
+        );
     }
 
     /// A still held in memory is served under its name at the size asked

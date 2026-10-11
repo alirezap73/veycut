@@ -23,6 +23,14 @@ class PreviewChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify(self.run, self.jobs, 'b' * 40, False, [])
 
+    def test_documentation_does_not_invalidate_runtime_evidence(self):
+        changed = ['README.md', 'CONTRIBUTING.md', 'docs/VERSIONING.md']
+        result = verify(self.run, self.jobs, 'b' * 40, True, changed)
+        self.assertEqual(result['infrastructure_changes'], sorted(changed))
+        for path in ['src/notes.md', 'docs/model.wgsl', 'assets/version.json']:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                verify(self.run, self.jobs, 'b' * 40, True, [path])
+
     def test_missing_or_failed_native_checks_are_rejected(self):
         for jobs in [self.jobs[:-1], [dict(name=name, status='completed', conclusion='failure') for name in REQUIRED]]:
             with self.assertRaises(ValueError):

@@ -54,6 +54,8 @@ pub enum ExportMsg {
     Again,
     /// Pick the destination folder.
     Browse,
+    /// Destination returned by the native picker.
+    FolderChosen(String),
     /// Show the finished file in the file manager.
     Reveal,
     Start,
@@ -204,12 +206,21 @@ impl ExportPane {
             }
             ExportMsg::Again => self.invalidate(&studio.host.exporter),
             ExportMsg::Browse => {
-                if let Some(folder) =
-                    platform::pick_folder(&i18n::t("export.exportTo"), &self.folder)
-                {
-                    self.folder = folder.to_string_lossy().into_owned();
-                }
+                let title = i18n::t("export.exportTo");
+                let current = self.folder.clone();
+                let generation = self.generation;
+                crate::host::after_dialog(
+                    move || platform::pick_folder(&title, &current),
+                    move |studio, _, _, folder| {
+                        if studio.export.generation == generation {
+                            studio.handle(Msg::Export(ExportMsg::FolderChosen(
+                                folder.to_string_lossy().into_owned(),
+                            )));
+                        }
+                    },
+                );
             }
+            ExportMsg::FolderChosen(folder) => self.folder = folder,
             ExportMsg::Reveal => {
                 if !self.written.is_empty()
                     && let Err(error) = platform::reveal(&self.written)

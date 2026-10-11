@@ -7,6 +7,11 @@
 - Audio meter labels display their actual negative dB values.
 - Copy/paste preserves a selected group's timing, track layout and full clip properties across timelines; invalid destinations refuse the whole edit.
 - The duplicate shortcut accepts multiple selected clips.
+- Titles and captions render supported PNG/BGRA colour font glyphs, with bounded decoding, bitmap fallback and word-highlight/background preservation. COLR/SVG colour fonts and identical Slint text-widget rendering are outside this change.
+- The audio meter adds a dB ruler, stereo labels and a held-peak reading, retaining the compact dock and clickable clip indicator.
+- Still-image reads preserve fitted dimensions, and unusable container frame rates fall back before reaching frame arithmetic.
+- Native folder dialogs run without borrowing editor state across their nested event loop; replies from a previous project are discarded.
+- Invalid oversized project/export dimensions and extreme loaded clip times are bounded; unreadable sought video frames fail export instead of silently omitting a layer.
 - Packaged-editor scenarios exercise clip movement, both edge trims, grouped clipboard operations, track placement and a 32-second repeated-media export on a Mac runner. A failed run remains partial evidence until its corrected scenario passes.
 
 Native validation and a matching installer inspection are required for these source changes. The previously verified 0.3.0 package does not contain them. This patch increment does not create a public beta release.

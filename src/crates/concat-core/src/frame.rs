@@ -25,6 +25,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Bytes per pixel of an eight-bit frame, the format nearly everything uses.
 pub const BYTES_PER_PIXEL: usize = 4;
 
+/// Maximum supported frame dimension: the 8K downlevel texture limit.
+/// Documents and render requests share this ceiling before allocating textures.
+pub const MAX_SIDE: u32 = 8192;
+
 /// How many bits a channel a frame's pixels hold.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Depth {

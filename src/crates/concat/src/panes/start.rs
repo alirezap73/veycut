@@ -35,6 +35,8 @@ pub enum StartMsg {
     DismissError,
     /// Pick where the project folder goes.
     Browse,
+    /// The folder the picker answered with.
+    FolderChosen(String),
     Create,
     /// Open a project that already exists, picked from disk.
     Open,
@@ -139,13 +141,21 @@ impl StartPane {
             }
             StartMsg::CustomFps(fps) => self.custom_rate = custom_rate(f64::from(fps)),
             StartMsg::DismissError => self.error.clear(),
+            // The picker runs with the studio unborrowed and answers as a
+            // message of its own; see `host::after_dialog`.
             StartMsg::Browse => {
-                if let Some(folder) =
-                    platform::pick_folder(&t("start.whereShouldProjectFolder"), &self.location)
-                {
-                    self.location = folder.to_string_lossy().into_owned();
-                }
+                let title = t("start.whereShouldProjectFolder");
+                let current = self.location.clone();
+                crate::host::after_dialog(
+                    move || platform::pick_folder(&title, &current),
+                    |studio, _, _, folder| {
+                        studio.handle(crate::panes::Msg::Start(StartMsg::FolderChosen(
+                            folder.to_string_lossy().into_owned(),
+                        )));
+                    },
+                );
             }
+            StartMsg::FolderChosen(folder) => self.location = folder,
             StartMsg::Create => self.create(studio),
             StartMsg::Open => self.open(studio),
             // Both of the grid's verbs report through the toast, as Open
@@ -206,18 +216,23 @@ impl StartPane {
     /// through the toast rather than through the sheet's notice: the sheet
     /// is down when this is pressed, and half the presses of this never see
     /// the launch screen at all.
-    fn open(&mut self, studio: &mut Studio) {
-        let Some(folder) = platform::pick_folder(&t("start.openAProject"), &self.location) else {
-            return;
-        };
-        let path = folder.to_string_lossy().into_owned();
-        if !projects::is_project(&folder) {
-            studio.notify(&tf("start.notConcatProjectFolder", &[&path]), true);
-            return;
-        }
-        if let Err(error) = projects::open(&path).and_then(|info| studio.open_project(info)) {
-            studio.notify(&error, true);
-        }
+    fn open(&mut self, _studio: &mut Studio) {
+        let title = t("start.openAProject");
+        let current = self.location.clone();
+        crate::host::after_dialog(
+            move || platform::pick_folder(&title, &current),
+            |studio, _, _, folder| {
+                let path = folder.to_string_lossy().into_owned();
+                if !projects::is_project(&folder) {
+                    studio.notify(&tf("start.notConcatProjectFolder", &[&path]), true);
+                    return;
+                }
+                if let Err(error) = projects::open(&path).and_then(|info| studio.open_project(info))
+                {
+                    studio.notify(&error, true);
+                }
+            },
+        );
     }
 
     /// Whether the frame is typed rather than picked.

@@ -337,6 +337,26 @@ pub fn on_ui_in_project(
     on_ui_gated(Some(epoch), body);
 }
 
+/// Opens a native dialog without borrowing the studio. Native macOS panels
+/// process timers while open; borrowing across the panel would panic playback.
+/// Answers are discarded if the project changes while the panel is open.
+pub fn after_dialog<T: Send + 'static>(
+    ask: impl FnOnce() -> Option<T> + Send + 'static,
+    then: impl FnOnce(&mut Studio, &App, &Models, T) + Send + 'static,
+) {
+    let epoch = project_epoch();
+    let _ = slint::invoke_from_event_loop(move || {
+        if stale(Some(epoch)) {
+            return;
+        }
+        if let Some(answer) = ask() {
+            on_ui_in_project(epoch, move |studio, app, models| {
+                then(studio, app, models, answer);
+            });
+        }
+    });
+}
+
 fn on_ui_gated(epoch: Option<u64>, body: impl FnOnce(&mut Studio, &App, &Models) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || {
         Shell::with(|shell, app| {

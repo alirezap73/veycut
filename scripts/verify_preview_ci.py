@@ -18,12 +18,19 @@ INFRASTRUCTURE = {
 REQUIRED = ('Engine tests and lints', 'Engine on wasm32', 'Compiles on macos-15')
 
 
+def infrastructure_only(path):
+    source = pathlib.PurePosixPath(path)
+    return path in INFRASTRUCTURE or (
+        source.suffix == '.md' and (len(source.parts) == 1 or source.parts[0] == 'docs')
+    )
+
+
 def verify(run, jobs, revision, ancestor, changed):
     if run['path'] != '.github/workflows/ci.yml':
         raise ValueError('Expected the native CI workflow')
     if run['repository']['full_name'] != 'alirezap73/veycut':
         raise ValueError('Expected the VeyCut repository')
-    if not ancestor or set(changed) - INFRASTRUCTURE:
+    if not ancestor or any(not infrastructure_only(path) for path in changed):
         raise ValueError('Runtime or packaging source differs from the validated revision')
     for name in REQUIRED:
         matches = [job for job in jobs if job['name'] == name]
