@@ -54,6 +54,11 @@ on:
         type: boolean
         default: false
 
+      media_failure_gui:
+        description: Check missing and corrupt imported media export errors with preserved project and decoded recovery
+        type: boolean
+        default: false
+
 permissions:
   contents: read
   actions: read
@@ -101,7 +106,7 @@ jobs:
           name: VeyCut-macos-arm64
           path: bundles
       - name: Ensure independent video decoder for GUI export checks
-        if: inputs.core_gui || inputs.extended_gui || inputs.real_media_probe || inputs.export_protection_gui || contains(inputs.gui_actions, 'video-check')
+        if: inputs.core_gui || inputs.extended_gui || inputs.real_media_probe || inputs.export_protection_gui || inputs.media_failure_gui || contains(inputs.gui_actions, 'video-check')
         run: |
           if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
@@ -126,10 +131,11 @@ jobs:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
           ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
-          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui || inputs.real_media_probe || inputs.export_protection_gui }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui || inputs.real_media_probe || inputs.export_protection_gui || inputs.media_failure_gui }}
           CORE_GUI: ${{ inputs.core_gui }}
           EXTENDED_GUI: ${{ inputs.extended_gui }}
           CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
+          MEDIA_FAILURE_GUI: ${{ inputs.media_failure_gui }}
           EXPORT_PROTECTION_GUI: ${{ inputs.export_protection_gui }}
           REAL_MEDIA_PROBE: ${{ inputs.real_media_probe }}
           EDITOR_PROBE: ${{ inputs.editor_probe }}
@@ -382,8 +388,12 @@ jobs:
 
           } else if action == "export-protection-control" {
               let spec = try JSONSerialization.jsonObject(with: Data(CommandLine.arguments[3].utf8)) as! [String: String]
-              guard let mode = spec["mode"], ["collision", "cancel"].contains(mode),
+              guard let mode = spec["mode"], ["collision", "cancel", "media-failure"].contains(mode),
                     let reportPath = spec["report"], let folder = spec["folder"] else { exit(50) }
+              if mode == "media-failure" {
+                  guard let prefix = spec["error_prefix"], prefix.hasPrefix("open failed for /"),
+                        prefix.hasSuffix(": "), prefix.contains("native-import-copy.mp4") else { exit(50) }
+              }
               let manager = FileManager.default
               let reportURL = URL(fileURLWithPath: reportPath)
               var report: [String: Any] = ["mode": mode, "outcome": "pending"]
@@ -512,7 +522,19 @@ jobs:
               while Date() < deadline {
                   let all = nodes(application)
                   let text = all.flatMap { Array(labels($0)) }
-                  if mode == "collision" {
+                  if mode == "media-failure" {
+                      let prefix = spec["error_prefix"]!
+                      let errors = Array(Set(text.filter { $0.hasPrefix(prefix) && $0.count > prefix.count }))
+                      if errors.count == 1 {
+                          guard !text.contains("Cancel export"), !text.contains(where: { $0.hasPrefix("Exported ·") }),
+                                unique(all, { $0.hasPrefix("Export · ~") }) != nil else { fail("unexpected_export_state") }
+                          report["outcome"] = "decoder_error_observed"
+                          report["decoder_error"] = errors[0]
+                          report["error_ax"] = snapshot(application)
+                          writeReport()
+                          exit(0)
+                      }
+                  } else if mode == "collision" {
                       if text.contains("An output with this name already exists; choose another file name") {
                           guard !text.contains("Cancel export"), !text.contains(where: { $0.hasPrefix("Exported ·") }) else { fail("unexpected_export_state") }
                           report["outcome"] = "collision_message_observed"
@@ -563,7 +585,7 @@ jobs:
                   }
                   Thread.sleep(forTimeInterval: 0.1)
               }
-              fail(mode == "collision" ? "collision_error_unobserved" : "cancellation_unobserved")
+              fail(mode == "collision" ? "collision_error_unobserved" : mode == "media-failure" ? "decoder_error_unobserved" : "cancellation_unobserved")
           } else if action == "caption-control" {
               let spec = try JSONSerialization.jsonObject(with: Data(CommandLine.arguments[3].utf8)) as! [String: String]
               let needle = spec["contains"] ?? ""
@@ -886,7 +908,7 @@ jobs:
                   pathlib.Path('evidence/UI-CALLS.json').write_text(json.dumps(ui_calls, indent=2))
                   with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
                       subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
-              assert sum(os.environ[name] == 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI', 'REAL_MEDIA_PROBE', 'EXPORT_PROTECTION_GUI')) <= 1, 'Choose one committed GUI scenario per run'
+              assert sum(os.environ[name] == 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI', 'REAL_MEDIA_PROBE', 'EXPORT_PROTECTION_GUI', 'MEDIA_FAILURE_GUI')) <= 1, 'Choose one committed GUI scenario per run'
               actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text()) if os.environ['CORE_GUI'] == 'true' else json.loads(os.environ['GUI_ACTIONS'])
               if os.environ['EXTENDED_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
@@ -894,6 +916,20 @@ jobs:
               if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true' and os.environ['EXTENDED_GUI'] != 'true', 'Choose one committed GUI scenario per run'
                   actions = json.loads(pathlib.Path('docs/beta-tests/caption-navigation-gui.json').read_text())
+              if os.environ['MEDIA_FAILURE_GUI'] == 'true':
+                  assert json.loads(os.environ['GUI_ACTIONS']) == []
+                  core_actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text())
+                  stop = next(i for i, step in enumerate(core_actions) if step['action'] == 'placement-check')
+                  actions = core_actions[:stop + 1]
+                  for failure_case in ('missing', 'corrupt'):
+                      actions += [
+                          {'action': 'media-failure-check', 'arg': failure_case},
+                          {'action': 'export-open'},
+                          {'action': 'click', 'arg': '0.8291015625,0.9544787078'},
+                          {'action': 'video-check', 'arg': '2'},
+                          {'action': 'media-failure-retry-check', 'arg': failure_case},
+                      ]
+                  actions += [{'action': 'reopen'}]
               if os.environ['EXPORT_PROTECTION_GUI'] == 'true':
                   assert json.loads(os.environ['GUI_ACTIONS']) == []
                   extended_actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
@@ -1279,6 +1315,134 @@ jobs:
                                       after_reopen = json.loads(manifest.read_text())
                                       assert after_reopen['clips'] == before_reopen['clips'] and after_reopen['media'] == before_reopen['media'], 'GUI reopen changed the saved edit'
                                       core['edited_project_reopen_verified'] = True
+                                  elif action == 'media-failure-check':
+                                      import hashlib, uuid
+                                      assert argument in ('missing', 'corrupt')
+                                      if 'media_failure_report' not in locals():
+                                          media_failure_report = {
+                                              'source_revision': os.environ['PACKAGE_REVISION'],
+                                              'workflow_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                                              'fixture': 'two-second generated portrait media imported through native picker',
+                                              'cases': {},
+                                              'relocation_or_relink_picker_verified': False,
+                                              'independent_clean_installation_verified': False,
+                                              'real_camera_10_to_15_minute_session_verified': False,
+                                          }
+                                          media_original = imported_sample.read_bytes()
+                                          assert 0 < len(media_original) <= 1000000
+                                          assert media_original == sample.read_bytes()
+                                          media_original_sha = hashlib.sha256(media_original).hexdigest()
+                                          media_failure_folder = pathlib.Path.home() / 'Movies'
+                                          media_failure_folder.mkdir(exist_ok=True)
+                                          media_failure_target = media_failure_folder / 'VeyCut GUI fixture.mp4'
+                                          media_failure_keep = media_failure_folder / ('veycut-media-keep-' + uuid.uuid4().hex + '.txt')
+                                          media_keep_bytes = ('Run-owned unrelated file ' + uuid.uuid4().hex).encode()
+                                          with media_failure_keep.open('xb') as stream:
+                                              stream.write(media_keep_bytes)
+                                      def persist_media_failure():
+                                          pathlib.Path('evidence/MAC-MEDIA-FAILURE.json').write_text(json.dumps(media_failure_report, indent=2) + '\n')
+                                      persist_media_failure()
+                                      media_case = argument
+                                      media_case_baseline = json.loads(manifest.read_text())
+                                      assert len(media_case_baseline['clips']) == 1 and media_case_baseline['clips'][0]['mediaId'] != 'm1'
+                                      assert imported_sample.read_bytes() == media_original
+                                      assert not media_failure_target.exists() and not media_failure_target.is_symlink()
+                                      media_work_before = {p.name for p in media_failure_folder.iterdir() if p.name.startswith('.veycut-export-')}
+                                      parked = temp / ('native-import-parked-' + uuid.uuid4().hex + '.mp4')
+                                      damaged = b'VeyCut controlled invalid media container: ' + uuid.uuid4().hex.encode()
+                                      case_result = {'failure_error_gui_verified': False, 'restored_export_full_decode_verified': False}
+                                      media_failure_report['cases'][media_case] = case_result
+                                      persist_media_failure()
+                                      imported_sample.rename(parked)
+                                      if media_case == 'corrupt':
+                                          with imported_sample.open('xb') as stream:
+                                              stream.write(damaged)
+                                      try:
+                                          ui(process, 'export-open')
+                                          error_report_path = pathlib.Path('evidence/media-' + media_case + '-error-AX.json').resolve()
+                                          spec = {
+                                              'mode': 'media-failure',
+                                              'report': str(error_report_path),
+                                              'folder': str(media_failure_folder),
+                                              'error_prefix': 'open failed for ' + str(imported_sample) + ': ',
+                                          }
+                                          try:
+                                              ui(process, 'export-protection-control', json.dumps(spec))
+                                          except Exception:
+                                              if error_report_path.exists():
+                                                  case_result['driver_failure'] = json.loads(error_report_path.read_text())
+                                                  persist_media_failure()
+                                              try:
+                                                  ui(process, 'snapshot', pathlib.Path('evidence/media-' + media_case + '-unverified.png').resolve())
+                                              except Exception:
+                                                  pass
+                                              raise
+                                          failure = json.loads(error_report_path.read_text())
+                                          assert failure['outcome'] == 'decoder_error_observed'
+                                          ui(process, 'snapshot', pathlib.Path('evidence/media-' + media_case + '-error.png').resolve())
+                                          deadline = time.monotonic() + 20
+                                          while {p.name for p in media_failure_folder.iterdir() if p.name.startswith('.veycut-export-')} != media_work_before:
+                                              assert time.monotonic() < deadline
+                                              assert not media_failure_target.exists()
+                                              assert process.poll() is None
+                                              time.sleep(0.2)
+                                          for _ in range(20):
+                                              assert not media_failure_target.exists(), 'Failed export published a final file'
+                                              assert media_failure_keep.read_bytes() == media_keep_bytes
+                                              assert process.poll() is None
+                                              time.sleep(0.2)
+                                          ui(process, 'dismiss')
+                                          ui(process, 'save')
+                                          assert json.loads(manifest.read_text()) == media_case_baseline
+                                          case_result.update({
+                                              'failure_error_gui_verified': True,
+                                              'visible_error': failure['decoder_error'],
+                                              'no_final_output_and_work_files_cleaned': True,
+                                              'four_second_no_late_publication': True,
+                                              'full_saved_project_preserved': True,
+                                              'unrelated_file_sha256': hashlib.sha256(media_keep_bytes).hexdigest(),
+                                              'unrelated_file_preserved': True,
+                                              'input_media_unmodified_in_project': True,
+                                          })
+                                          persist_media_failure()
+                                      finally:
+                                          # Restore only this runner-owned source; refuse unexpected replacements.
+                                          assert parked.read_bytes() == media_original
+                                          if imported_sample.exists() or imported_sample.is_symlink():
+                                              assert media_case == 'corrupt' and not imported_sample.is_symlink()
+                                              assert imported_sample.read_bytes() == damaged
+                                              imported_sample.unlink()
+                                          parked.rename(imported_sample)
+                                          assert hashlib.sha256(imported_sample.read_bytes()).hexdigest() == media_original_sha
+                                          case_result["original_source_restored_after_attempt"] = True
+                                          persist_media_failure()
+                                  elif action == 'media-failure-retry-check':
+                                      assert argument == media_case and core['gui_export_verified'] and core['decoded_export_seconds'] == 2
+                                      assert imported_sample.read_bytes() == media_original
+                                      assert media_failure_keep.read_bytes() == media_keep_bytes
+                                      assert {p.name for p in media_failure_folder.iterdir() if p.name.startswith('.veycut-export-')} == media_work_before
+                                      ui(process, 'save')
+                                      assert json.loads(manifest.read_text()) == media_case_baseline
+                                      probe = json.loads(pathlib.Path('evidence/GUI-EXPORT-PROBE.json').read_text())
+                                      assert float(probe['format']['duration']) == 2
+                                      pathlib.Path('evidence/media-' + media_case + '-restored-export-probe.json').write_text(json.dumps(probe, indent=2))
+                                      exported_bytes = media_failure_target.read_bytes()
+                                      assert 0 < len(exported_bytes) <= 1000000
+                                      media_failure_report['cases'][media_case].update({
+                                          'restored_export_full_decode_verified': True,
+                                          'restored_media_sha256': media_original_sha,
+                                          'retry_export_sha256': hashlib.sha256(exported_bytes).hexdigest(),
+                                          'retry_export_bytes': len(exported_bytes),
+                                          'retry_duration_seconds': 2,
+                                          'project_and_unrelated_file_preserved_through_retry': True,
+                                      })
+                                      persist_media_failure()
+                                      # Remove only the verified run-owned retry output before the next case.
+                                      assert media_failure_target.read_bytes() == exported_bytes
+                                      media_failure_target.unlink()
+                                      if media_case == 'corrupt':
+                                          assert all(c['failure_error_gui_verified'] and c['restored_export_full_decode_verified'] for c in media_failure_report['cases'].values())
+                                          media_failure_keep.unlink()
                                   elif action == 'export-protection-check':
                                       import hashlib, uuid
                                       protection_baseline = json.loads(manifest.read_text())
@@ -1470,6 +1634,8 @@ jobs:
                               log_tail = stream.read(1024 * 1024)
                           ui_log.write_bytes(log_tail)
               result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'see_CORE-GUI-TEST.json' if actions else 'duplicate_undo_redo_only', 'native_split_verified': core['split_verified'], 'gui_export_verified': core['gui_export_verified'], 'editable_subtitle_verified': core['subtitle_verified'], 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
+              if os.environ['MEDIA_FAILURE_GUI'] == 'true':
+                  result['media_failure_verified'] = media_failure_report
               if os.environ['EXPORT_PROTECTION_GUI'] == 'true':
                   result['export_protection_verified'] = protection_report
               if real_media_probe:
