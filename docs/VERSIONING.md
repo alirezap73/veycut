@@ -15,9 +15,9 @@ The app version comes from `[workspace.package].version` in
 - Routine edits, commits, test runs and documentation updates do not change the
   app version. Version numbers do not measure feature coverage or product quality.
 
-Keep development source at **0.3.1** during the current validation. The public
-download remains **0.2.0-preview.1** until a separately validated release is
-published. A development commit or successful CI run alone is not a beta release.
+Keep development source at **0.3.1** during the current validation. The public experimental
+pre-release is **0.3.1-beta.2**, with documented package revisions, checksums
+and remaining limitations. A development commit or successful CI run alone is not a beta release.
 See [the beta gates](BETA-READINESS.md).
 
 ## Commit titles

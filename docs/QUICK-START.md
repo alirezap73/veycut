@@ -1,6 +1,6 @@
 # VeyCut quick start
 
-The public 0.2.0 preview has an Apple silicon macOS DMG. Development source is 0.3.1; its installer remains an unpublished candidate while the beta editing path is verified. Use the release linked from the repository README.
+The public experimental [0.3.1-beta.2 release](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) includes the Apple silicon Mac DMG and a downloadable Web prototype. The app version remains 0.3.1. Independent clean installation and longer real-footage editing remain unverified. Use the release notes for the Web HTTP-server instructions and package limits.
 
 1. Download the macos-arm64 DMG from the VeyCut release and copy VeyCut into Applications. This experimental app is ad-hoc signed and not Apple-notarized. macOS may require explicit approval to open it.
 2. Open VeyCut and create a project. Choose a portrait, landscape or square frame and name the project.

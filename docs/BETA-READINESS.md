@@ -2,7 +2,7 @@
 
 The target is a reliable beta for Apple silicon macOS with the main editing path: import media, arrange/trim/split clips, add text and sound, save/reopen, and export. Feature parity with other products and a completion percentage have not been established.
 
-The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. Keep 0.3.1 fixed while it is validated; more commits do not require another version increase or create a public beta.
+The public experimental pre-release is 0.3.1-beta.2. Development source is 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. Keep 0.3.1 fixed while it is validated; more commits do not require another version increase or create a public beta.
 
 ## Version numbering
 
@@ -23,7 +23,7 @@ The [final candidate](https://github.com/alirezap73/veycut/actions/runs/38119080
 
 [Exact-package real-movie import/reopen](https://github.com/alirezap73/veycut/actions/runs/38121129800) also passed with a 596.46-second, 640×359 H.264/AAC movie. This is import/reopen only; the movie was not placed on the timeline, edited or exported. CJK UI/raster regressions passed in source validation; these packaged scenarios are not a separate CJK-text GUI proof.
 
-The **69,563,828-byte** DMG SHA-256 is `2150c1b883449d1013a9e2d01a177b569795f4bc7244664d16bfd0b339829c1d`. `v0.3.1-beta.1` is staged as an **unpublished draft**; public downloads remain **0.2.0-preview.1**. An independent Mac/tester is available, but its actual installation and real-footage editing report is still pending. Earlier package results remain specific to their own source. Development remains 0.3.1 and no official beta is published.
+The **69,563,828-byte** DMG SHA-256 is `2150c1b883449d1013a9e2d01a177b569795f4bc7244664d16bfd0b339829c1d`. [v0.3.1-beta.2](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) is a **public experimental pre-release** with the unchanged validated Mac package and the newer Web prototype. An independent Mac/tester is available, but its actual installation and real-footage editing report is still pending. Earlier package results remain specific to their own source. Development remains 0.3.1; this experimental pre-release does not establish independent installation or real-footage reliability.
 
 ## Packaged export protection
 
