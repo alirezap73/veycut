@@ -96,7 +96,22 @@ window.VeyCutExporter = (() => {
       recorder.addEventListener('error',()=>fail(new Error('Browser recording failed.')));
       recorder.addEventListener('dataavailable',e=>{if(!e.data.size)return;bytes+=e.data.size;if(bytes>LIMITS.bytes){fail(new Error('Export exceeded the 64 MiB output limit.'));return;}chunks.push(e.data);});
       watchdog=setTimeout(()=>fail(new Error('Export exceeded its bounded wall-clock budget.')),duration*3000+30000);
-      await event(recorder,'start',signal,()=>recorder.start(500),3000);await recording(false);
+      // A drawing made before captureStream cannot provide its first captured
+      // frame. Feed the real initial black/gap frame after recording starts;
+      // keep feeding only until the bounded start event completes.
+      let startupFrame=0;
+      try {
+        await event(recorder,'start',signal,()=>{
+          recorder.start(500);
+          const firstFrames=()=>{
+            draw(0,false);
+            canvasStream.getVideoTracks()[0].requestFrame?.();
+            startupFrame=requestAnimationFrame(firstFrames);
+          };
+          firstFrames();
+        },3000);
+      } finally {cancelAnimationFrame(startupFrame);}
+      await recording(false);
       let cursor=0;
       for(const clip of spec.clips){await prepare(clip);if(clip.start>cursor+.00001){onState('recording');draw(cursor,false);await recording(true);await segment(cursor,clip.start-cursor,null);await recording(false);}await prepare(clip);draw(clip.start,true);await video.play();checkRun();onState('recording');await recording(true);await segment(clip.start,clip.out-clip.in,clip);await recording(false);cursor=clip.start+clip.out-clip.in;}
       checkRun();await event(recorder,'stop',signal,()=>recorder.stop(),5000);checkRun();
