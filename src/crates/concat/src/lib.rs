@@ -690,6 +690,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
             if shell.studio.borrow().session.is_none() {
                 return;
             }
+            let epoch = host::project_epoch();
             platform::pick_files_async(
                 &i18n::t("lib.importMedia"),
                 Some((
@@ -699,8 +700,10 @@ pub fn run() -> Result<(), slint::PlatformError> {
                         "flac", "ogg", "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff",
                     ],
                 )),
-                |paths| {
-                    on_ui(move |studio, _, _| studio.handle(Msg::Media(MediaMsg::Import(paths))))
+                move |paths| {
+                    host::on_ui_in_project(epoch, move |studio, _, _| {
+                        studio.handle(Msg::Media(MediaMsg::Import(paths)));
+                    });
                 },
             );
         });
@@ -715,10 +718,13 @@ pub fn run() -> Result<(), slint::PlatformError> {
             if shell.studio.borrow().session.is_none() {
                 return;
             }
+            let epoch = host::project_epoch();
             platform::pick_files_async(
                 &i18n::t("lib.importFont"),
                 Some((i18n::t("lib.fonts").as_str(), &["ttf", "otf", "ttc"])),
-                |paths| on_ui(move |studio, _, _| studio.import_fonts(paths)),
+                move |paths| {
+                    host::on_ui_in_project(epoch, move |studio, _, _| studio.import_fonts(paths));
+                },
             );
         });
     });
