@@ -12,6 +12,10 @@ on:
         description: Run only Windows validation, reusing its build cache
         type: boolean
         default: false
+      windows_effect_only:
+        description: Diagnostic host GPU test only; use with windows_only, not full Windows validation
+        type: boolean
+        default: false
       mac_beta:
         description: Validate the Mac beta (Linux engine, wasm and Mac compilation; excludes Windows)
         type: boolean
@@ -26,6 +30,9 @@ on:
         type: string
         default: ""
       windows_only:
+        type: boolean
+        default: false
+      windows_effect_only:
         type: boolean
         default: false
       mac_beta:
@@ -202,7 +209,7 @@ jobs:
   # not tested, and is tested where it is developed. No GPU on either
   # runner: the GPU tests skip rather than fail.
   desktop:
-    name: ${{ matrix.verb }} on ${{ matrix.os }}
+    name: ${{ inputs.windows_effect_only && 'GPU diagnostic' || matrix.verb }} on ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -282,22 +289,29 @@ jobs:
         timeout-minutes: 90
         shell: pwsh
         run: |
-          cargo test --workspace -j 1 --no-run --message-format=json-render-diagnostics > "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
+          if ($env:VEYCUT_EFFECT_ONLY -eq "true") {
+            cargo test -p concat-host --features gpu -j 1 --no-run --message-format=json-render-diagnostics > "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
+          } else {
+            cargo test --workspace -j 1 --no-run --message-format=json-render-diagnostics > "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         working-directory: src
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
+          VEYCUT_EFFECT_ONLY: ${{ inputs.windows_effect_only }}
       - name: Validate Windows effect thumbnails
         if: runner.os == 'Windows'
         timeout-minutes: 10
         shell: pwsh
         run: ./scripts/run-windows-effect-test.ps1 -Artifacts "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
         env:
+          VEYCUT_GPU_TEST_LOG: "1"
+          CONCAT_LOG: error
           CARGO_PROFILE_DEV_DEBUG: "0"
           WGPU_DX12_COMPILER: dxc
           CONCAT_REQUIRE_GPU: "1"
       - run: cargo test --workspace -j 1 -- --test-threads=1 --nocapture
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.windows_effect_only
         timeout-minutes: 45
         working-directory: src
         env:

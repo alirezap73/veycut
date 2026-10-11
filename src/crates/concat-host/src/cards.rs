@@ -589,6 +589,11 @@ mod tests {
     /// `CONCAT_CARDS_DIR` to keep the cards for a look.
     #[test]
     fn every_card_draws_and_shows_its_package_at_work() {
+        // Only the standalone CI subprocess installs this global logger.
+        // Full workspace tests include their own logger-installation tests.
+        if std::env::var("VEYCUT_GPU_TEST_LOG").as_deref() == Ok("1") {
+            crate::logs::open_console(None).expect("GPU test console logger");
+        }
         let Some(compositor) = WgpuCompositor::new() else {
             assert!(
                 std::env::var_os("CONCAT_REQUIRE_GPU").is_none(),
@@ -611,6 +616,7 @@ mod tests {
             let frame = match painter.frame(card) {
                 Ok(frame) => frame,
                 Err(error) => {
+                    eprintln!("Effect card failed: {}: {error}", card.id);
                     failed.push(format!("{}: {error}", card.id));
                     continue;
                 }
