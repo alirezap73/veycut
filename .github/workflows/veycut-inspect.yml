@@ -35,6 +35,10 @@ on:
         description: Run the committed import, split, captions, reopen and video export scenario
         type: boolean
         default: false
+      extended_gui:
+        description: Exercise clip movement, edge trims and a 32-second repeated-media export
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -79,7 +83,7 @@ jobs:
           name: VeyCut-macos-arm64
           path: bundles
       - name: Ensure independent video decoder for GUI export checks
-        if: inputs.core_gui || contains(inputs.gui_actions, 'video-check')
+        if: inputs.core_gui || inputs.extended_gui || contains(inputs.gui_actions, 'video-check')
         run: |
           if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
@@ -89,8 +93,9 @@ jobs:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
           ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
-          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui }}
           CORE_GUI: ${{ inputs.core_gui }}
+          EXTENDED_GUI: ${{ inputs.extended_gui }}
           EDITOR_PROBE: ${{ inputs.editor_probe }}
           GUI_ACTIONS: ${{ inputs.gui_actions }}
         run: |
@@ -278,6 +283,30 @@ jobs:
               Thread.sleep(forTimeInterval: 8)
               print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
               print("native_picker_observed")
+          } else if action == "drag" {
+              let points = CommandLine.arguments[3].split(separator: ",").compactMap { Double($0) }
+              guard points.count == 4, points.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { exit(19) }
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == 0 && (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) == 1024 }),
+                    let bounds = window[kCGWindowBounds as String] as? [String: Double],
+                    let x = bounds["X"], let y = bounds["Y"], bounds["Height"] == 681 else { exit(20) }
+              let start = CGPoint(x: x + 1024 * points[0], y: y + 681 * points[1])
+              let end = CGPoint(x: x + 1024 * points[2], y: y + 681 * points[3])
+              func mouse(_ type: CGEventType, _ position: CGPoint) {
+                  let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: .left)!
+                  event.flags = []
+                  event.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.08)
+              }
+              mouse(.mouseMoved, start)
+              mouse(.leftMouseDown, start)
+              for step in 1...12 {
+                  let fraction = Double(step) / 12
+                  mouse(.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction))
+              }
+              mouse(.leftMouseUp, end)
+              print("native_drag \(start) -> \(end)")
+              Thread.sleep(forTimeInterval: 2)
           } else if action == "click" || action == "double-click" {
               let point = CommandLine.arguments[3].split(separator: ",").compactMap { Double($0) }
               guard point.count == 2, point.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { exit(13) }
@@ -429,6 +458,9 @@ jobs:
                   with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
                       subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
               actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text()) if os.environ['CORE_GUI'] == 'true' else json.loads(os.environ['GUI_ACTIONS'])
+              if os.environ['EXTENDED_GUI'] == 'true':
+                  assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
+                  actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
               assert isinstance(actions, list) and len(actions) <= 64
               core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
               for cycle in range(1, 3):
@@ -506,15 +538,43 @@ jobs:
                                       ui(process, action, pathlib.Path(f'evidence/core-{index}.png').resolve())
                                   elif action == 'caption-pick':
                                       ui(process, action, pathlib.Path('docs/beta-samples/captions-2s.vtt').resolve())
-                                  elif action in ('click', 'double-click', 'paste-text', 'type-text'):
+                                  elif action in ('click', 'double-click', 'drag', 'paste-text', 'type-text'):
                                       ui(process, action, argument)
-                                  elif action in ('select-all', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
+                                  elif action in ('select-all', 'duplicate', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
                                       ui(process, action)
                                   elif action == 'placement-check':
                                       state = json.loads(manifest.read_text())
                                       imported_id = next(m['id'] for m in state['media'] if m['path'] == str(imported_sample))
                                       assert len(state['clips']) == 1 and state['clips'][0]['mediaId'] == imported_id and abs(state['clips'][0]['duration'] - 2) < 0.01 and abs(state['clips'][0]['start']) < 0.04
                                       core['imported_media_placement_verified'] = True
+                                      if 'original_imported_clip' not in locals():
+                                          original_imported_clip = state['clips'][0]
+                                  elif action == 'gesture-check':
+                                      state = json.loads(manifest.read_text())
+                                      assert len(state['clips']) == 1
+                                      current = state['clips'][0]
+                                      wanted = {'move': (2, 2, 0), 'tail': (2, 1.5, 0), 'head': (2.5, 1, 0.5)}[argument]
+                                      assert current['mediaId'] == imported_id and current['kind'] == 'video'
+                                      timing = ('start', 'duration', 'sourceStart')
+                                      assert {k: v for k, v in current.items() if k not in timing} == {k: v for k, v in original_imported_clip.items() if k not in timing}, 'Gesture changed unrelated clip properties'
+                                      assert all(abs(current[key] - value) <= 1 / 30 + 0.001 for key, value in zip(('start', 'duration', 'sourceStart'), wanted)), current
+                                      assert current['duration'] > 0 and current['sourceStart'] + current['duration'] <= 2.04
+                                      core[argument + '_gesture_verified'] = True
+                                  elif action == 'repeated-check':
+                                      count = int(argument)
+                                      assert count in (2, 4, 8, 16)
+                                      state = json.loads(manifest.read_text())
+                                      pieces = sorted(state['clips'], key=lambda c: c['start'])
+                                      assert len(pieces) == count and len({c['id'] for c in pieces}) == count
+                                      for number, piece in enumerate(pieces):
+                                          assert piece['kind'] == 'video' and piece['mediaId'] == imported_id
+                                          assert {k: v for k, v in piece.items() if k not in ('id', 'start')} == {k: v for k, v in original_imported_clip.items() if k not in ('id', 'start')}, 'Duplicate changed clip source or styling'
+                                          assert abs(piece['start'] - 2 * number) < 0.001 and abs(piece['duration'] - 2) < 0.001 and abs(piece['sourceStart']) < 0.001 and piece['speed'] == 1
+                                      if count == 16:
+                                          if 'repeated_snapshot' in locals():
+                                              assert state['clips'] == repeated_snapshot['clips'] and state['media'] == repeated_snapshot['media'], 'Redo/reopen changed repeated clips'
+                                          repeated_snapshot = state
+                                          core['repeated_timeline_seconds'] = 32
                                   elif action in ('split-check', 'split-undo-check'):
                                       state = json.loads(manifest.read_text())
                                       pieces = sorted([c for c in state['clips'] if c['kind'] == 'video'], key=lambda c: c['start'])
@@ -565,8 +625,10 @@ jobs:
                                       core['edited_project_reopen_verified'] = True
                                   elif action == 'video-check':
                                       import array, math
+                                      expected_seconds = float(argument or '2')
+                                      assert expected_seconds in (2, 32)
                                       target = pathlib.Path.home() / 'Movies' / 'VeyCut GUI fixture.mp4'
-                                      for _ in range(60):
+                                      for _ in range(180 if expected_seconds > 2 else 60):
                                           if target.is_file():
                                               break
                                           assert process.poll() is None, 'Editor exited during GUI export'
@@ -576,18 +638,22 @@ jobs:
                                       probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(target)], text=True, timeout=30))
                                       picture = next(s for s in probe['streams'] if s['codec_type'] == 'video')
                                       assert picture['width'] == 720 and picture['height'] == 1280 and picture['codec_name'] == 'h264'
-                                      assert picture['r_frame_rate'] == '30/1' and int(picture['nb_frames']) == 60
-                                      assert 1.95 <= float(probe['format']['duration']) <= 2.1
+                                      assert picture['r_frame_rate'] == '30/1' and int(picture['nb_frames']) == int(expected_seconds * 30)
+                                      assert expected_seconds - 0.05 <= float(probe['format']['duration']) <= expected_seconds + 0.1
                                       assert any(s['codec_type'] == 'audio' for s in probe['streams'])
-                                      subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(target), '-map', '0', '-f', 'null', '-'], check=True, timeout=120)
-                                      for at in ('0.4', '1.4'):
+                                      subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(target), '-map', '0', '-f', 'null', '-'], check=True, timeout=180)
+                                      for at in ('0.4', str(expected_seconds - 0.6)):
                                           subprocess.run(['ffmpeg', '-v', 'error', '-ss', at, '-i', str(target), '-frames:v', '1', f'evidence/export-frame-{at}.png'], check=True, timeout=30)
-                                      sound = array.array('f', subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(target), '-vn', '-ac', '1', '-ar', '8000', '-f', 'f32le', '-'], timeout=30))
+                                      sound = array.array('f', subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(target), '-vn', '-ac', '1', '-ar', '8000', '-f', 'f32le', '-'], timeout=60))
                                       rms = lambda values: math.sqrt(sum(v * v for v in values) / len(values))
-                                      assert len(sound) >= 15000 and rms(sound[800:6400]) < 0.005 and rms(sound[9600:14400]) > 0.02, 'Output silence/tone did not survive the split edit'
+                                      assert len(sound) >= int((expected_seconds - 0.1) * 8000)
+                                      for period in range(int(expected_seconds / 2)):
+                                          offset = period * 16000
+                                          assert rms(sound[offset + 2000:offset + 6000]) < 0.005 and rms(sound[offset + 10000:offset + 14000]) > 0.02, 'Output silence/tone did not survive an edit'
                                       pathlib.Path('evidence/GUI-EXPORT-PROBE.json').write_text(json.dumps(probe, indent=2))
                                       shutil.copyfile(target, 'evidence/gui-export.mp4')
                                       core['gui_export_verified'] = True
+                                      core['decoded_export_seconds'] = expected_seconds
                                   else:
                                       raise AssertionError('Unknown bounded GUI action: ' + action)
                                   core['steps'].append(step)
