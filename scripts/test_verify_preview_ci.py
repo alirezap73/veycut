@@ -31,6 +31,15 @@ class PreviewChecks(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 verify(self.run, self.jobs, 'b' * 40, True, [path])
 
+    def test_inspection_only_changes_preserve_runtime_identity(self):
+        changed = ['.github/workflows/veycut-inspect.yml', 'docs/beta-tests/extended-gui.json']
+        # Scenario JSON is input to inspection rather than documentation:
+        # it still requires validation unless explicitly accounted for.
+        result = verify(self.run, self.jobs, 'b' * 40, True, changed[:1])
+        self.assertEqual(result['infrastructure_changes'], changed[:1])
+        with self.assertRaises(ValueError):
+            verify(self.run, self.jobs, 'b' * 40, True, changed)
+
     def test_missing_or_failed_native_checks_are_rejected(self):
         for jobs in [self.jobs[:-1], [dict(name=name, status='completed', conclusion='failure') for name in REQUIRED]]:
             with self.assertRaises(ValueError):

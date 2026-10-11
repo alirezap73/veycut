@@ -8,6 +8,7 @@ import sys
 INFRASTRUCTURE = {
     '.github/workflows/ci.yml',
     '.github/workflows/veycut-candidate.yml',
+    '.github/workflows/veycut-inspect.yml',
     '.github/workflows/veycut-preview.yml',
     '.github/workflows/fork-checks.yml',
     'scripts/verify_preview_ci.py',
