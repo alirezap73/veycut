@@ -57,7 +57,11 @@ jobs:
         run: |
           npm install --global @playwright/cli@0.1.22
           node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install --yes ffmpeg
           node --check web/app.js
+          node --check web/export.js
+          node --check scripts/veycut_web_browser_check.js
       - name: Run browser editing workflow
         shell: bash
         run: |
@@ -79,6 +83,29 @@ jobs:
           playwright-cli open http://127.0.0.1:4173/ --browser=chromium > output/playwright/open.log
           playwright-cli snapshot --filename=output/playwright/initial.yml
           playwright-cli run-code --filename=scripts/veycut_web_browser_check.js > output/playwright/edit.log
+          python3 - <<'PY'
+          import copy, json
+          from pathlib import Path
+          folder = Path('output/playwright')
+          project = json.loads((folder / 'project.json').read_text())
+          native = project['engineDocument']
+          ui_source, native_source = project['clips'][0], native['clips'][0]
+          duration = ui_source['out'] - ui_source['in']
+          assert abs(duration - .8) < .002
+          project['clips'], native['clips'] = [], []
+          for index in range(151):
+              identifier, position = 'browser-limit-' + str(index), .2 + index * duration
+              ui_clip, native_clip = copy.deepcopy(ui_source), copy.deepcopy(native_source)
+              ui_clip.update(id=identifier, timelineStart=position)
+              native_clip.update(id=identifier, start=position)
+              project['clips'].append(ui_clip)
+              native['clips'].append(native_clip)
+          active = [timeline for timeline in native['timelines'] if timeline['id'] == native['activeTimelineId']]
+          assert len(active) == 1
+          active[0]['clips'] = copy.deepcopy(native['clips'])
+          assert abs(native['clips'][-1]['start'] + duration - 121) < .002
+          (folder / 'limit-project.json').write_text(json.dumps(project))
+          PY
           playwright-cli snapshot --filename=output/playwright/reconnect.yml
           reconnect_ref=$(python3 - <<'PY'
           import re
@@ -92,13 +119,27 @@ jobs:
           playwright-cli click "$reconnect_ref"
           playwright-cli upload docs/beta-samples/portrait-2s.mp4
           playwright-cli run-code --filename=scripts/veycut_web_browser_check.js > output/playwright/check.log
+          playwright-cli snapshot --filename=output/playwright/limit-reconnect.yml
+          limit_ref=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          refs = re.findall(r'button "Reconnect selected media" \[ref=(e\d+)\]', Path('output/playwright/limit-reconnect.yml').read_text())
+          assert len(refs) == 1, refs
+          print(refs[0])
+          PY
+          )
+          playwright-cli click "$limit_ref"
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
+          playwright-cli run-code --filename=scripts/veycut_web_browser_check.js > output/playwright/limit-check.log
           python3 - <<'PY'
           from pathlib import Path
           import json
           report = json.loads(Path('output/playwright/browser-report.json').read_text())
           assert report['status'] == 'passed' and report['engine'] == 'wasm'
           assert report['clips'] == 2 and report['captions'] == 2 and report['language'] == 'fa'
-          assert len(report['checks']) == 9
+          assert len(report['checks']) == 15
+          assert report['export']['precision'] == 'realtime'
+          assert report['durationLimit'] == {'timelineSeconds': 121, 'limitSeconds': 120, 'downloaded': False}
           project = json.loads(Path('output/playwright/project.json').read_text())
           assert len(project['clips']) == 2
           assert project['engine'] == 'wasm'
@@ -108,7 +149,60 @@ jobs:
           assert abs(native[1]['sourceStart'] - 1) < .002
           assert all(abs(clip['duration'] - .8) < .002 for clip in native)
           assert 'blob:' not in json.dumps(project)
+          for name in ['cancel-after.json', 'export-after.json']:
+              assert json.loads(Path('output/playwright', name).read_text()) == project, name + ' changed saved edits'
           assert 'Web check سلام' in Path('output/playwright/subtitles.srt').read_text()
+          PY
+          python3 - <<'PY'
+          import array, json, math, subprocess
+          from pathlib import Path
+          folder = Path('output/playwright')
+          output = folder / 'browser-video.webm'
+          assert 0 < output.stat().st_size <= 64 * 1024 * 1024
+          def run(arguments, **kwargs):
+              return subprocess.run(arguments, check=True, timeout=90, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs).stdout
+          probe = json.loads(run(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(output)]))
+          (folder / 'webm-probe.json').write_text(json.dumps(probe, indent=2))
+          videos = [s for s in probe['streams'] if s['codec_type'] == 'video']
+          audios = [s for s in probe['streams'] if s['codec_type'] == 'audio']
+          assert len(videos) == len(audios) == 1, probe
+          assert (videos[0]['width'], videos[0]['height']) == (360, 640)
+          assert videos[0]['codec_name'] in ['vp8', 'vp9'] and audios[0]['codec_name'] == 'opus'
+          assert 'webm' in probe['format']['format_name']
+          run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(output), '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'])
+          frames = json.loads(run(['ffprobe', '-v', 'error', '-show_frames', '-show_entries', 'frame=media_type,best_effort_timestamp_time,pkt_duration_time', '-of', 'json', str(output)]))['frames']
+          decoded = {}
+          for kind, fallback in [('video', 1 / 30), ('audio', 960 / 48000)]:
+              selected = [f for f in frames if f['media_type'] == kind]
+              assert selected and all('best_effort_timestamp_time' in f for f in selected)
+              pts = [float(f['best_effort_timestamp_time']) for f in selected]
+              assert pts == sorted(pts), kind + ' timestamps out of order'
+              end = max(float(f['best_effort_timestamp_time']) + float(f.get('pkt_duration_time', fallback)) for f in selected)
+              assert 1.45 <= end <= 2.15, (kind, end)
+              decoded[kind] = {'frames': len(selected), 'ptsEndSeconds': end, 'lastFramePtsSeconds': max(pts)}
+          assert decoded['video']['frames'] >= 30
+          pcm = array.array('h')
+          pcm.frombytes(run(['ffmpeg', '-v', 'error', '-i', str(output), '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-']))
+          assert len(pcm) >= 10000
+          rms = math.sqrt(sum((sample / 32768) ** 2 for sample in pcm) / len(pcm))
+          assert rms > .001, 'Source tone missing from decoded audio'
+          def caption_frame(at, name):
+              run(['ffmpeg', '-v', 'error', '-ss', str(at), '-i', str(output), '-frames:v', '1', '-y', str(folder / name)])
+              rgb = run(['ffmpeg', '-v', 'error', '-i', str(folder / name), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+              assert len(rgb) == 360 * 640 * 3
+              return sum(min(rgb[(y * 360 + x) * 3:(y * 360 + x) * 3 + 3]) >= 180
+                         for y in range(int(640 * .82), int(640 * .94)) for x in range(18, 342))
+          caption_pixels = caption_frame(.4, 'export-caption-frame.png')
+          blank_at = max(.8, decoded['video']['lastFramePtsSeconds'] - .003)
+          blank_pixels = caption_frame(blank_at, 'export-caption-ended-frame.png')
+          assert caption_pixels > 100 and blank_pixels < max(40, caption_pixels * .05), (caption_pixels, blank_pixels)
+          evidence = {'status': 'passed', 'fullDecode': True, 'dimensions': [360, 640],
+              'expectedTimelineSeconds': 1.8, 'allowedPtsEndSeconds': [1.45, 2.15],
+              'decoded': decoded, 'audioRms': rms, 'captionRegionBrightPixels': caption_pixels,
+              'endedCaptionRegionBrightPixels': blank_pixels, 'endedCaptionFrameSeconds': blank_at,
+              'limits': 'Duration rejection and offered dimensions tested; size cap enforced on output, not stress-tested.',
+              'precision': 'Real-time browser output; this synthetic short fixture does not prove frame-accurate timing or real user footage.'}
+          (folder / 'webm-decoder-report.json').write_text(json.dumps(evidence, indent=2))
           PY
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log

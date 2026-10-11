@@ -25,6 +25,10 @@ The [final candidate](https://github.com/alirezap73/veycut/actions/runs/38119080
 
 The **69,563,828-byte** DMG SHA-256 is `2150c1b883449d1013a9e2d01a177b569795f4bc7244664d16bfd0b339829c1d`. `v0.3.1-beta.1` is staged as an **unpublished draft**; public downloads remain **0.2.0-preview.1**. An independent Mac/tester is available, but its actual installation and real-footage editing report is still pending. Earlier package results remain specific to their own source. Development remains 0.3.1 and no official beta is published.
 
+## Packaged export protection
+
+[Exact-package inspection](https://github.com/alirezap73/veycut/actions/runs/38128437896) passed on unchanged package source `39cc82c`. The GUI refused an existing output and preserved its SHA-256, then cancelled a real active render after progress and a non-empty temporary video were observed. The editor returned to idle, temporary export directories were removed, no output appeared during a further ten seconds, and the complete saved project remained identical. A subsequent 32-second H.264/AAC export fully decoded at 720×1280/30 fps, with 960 video frames and 48 kHz stereo; an unrelated sentinel file remained unchanged. The inspection driver checks fresh uniquely labelled controls before native clicks. These are generated-fixture tests on the server; destination creation during publication, missing/corrupt packaged media, independent clean installation and real-camera sessions remain separate checks.
+
 ## Exact-package light local check
 
 The final source `39cc82cebf1904c1b65f860d6fe674b0ca1aacd2` package was checked on the development Mac,

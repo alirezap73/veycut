@@ -13,6 +13,39 @@ async (page) => {
     await page.locator(button).click();
     await (await pending).saveAs(path);
   };
+  const rejectExport = async expected => {
+    const downloads = [];
+    const observed = item => downloads.push(item.suggestedFilename());
+    page.on('download', observed);
+    try {
+      await page.locator('#video-export').click();
+      await page.waitForFunction(() => document.querySelector('#export-status').dataset.state === 'error');
+      assert((await page.locator('#export-status').textContent()).includes(expected), 'Correct export refusal: ' + expected);
+      await page.waitForTimeout(300);
+      assert(downloads.length === 0, 'Rejected export must not download a file');
+    } finally { page.off('download', observed); }
+  };
+  const emitReport = async report => {
+    const pending = page.waitForEvent('download');
+    await page.evaluate(value => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], {type: 'application/json'}));
+      const link = document.createElement('a'); link.href = url; link.download = 'browser-report.json'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, report);
+    await (await pending).saveAs('output/playwright/browser-report.json');
+  };
+  if (await page.locator('body').getAttribute('data-check-stage') === 'limit') {
+    await page.waitForFunction(() => !document.querySelector('#play').disabled);
+    await count(151);
+    await rejectExport('120 seconds');
+    await count(151);
+    const report = JSON.parse(await page.locator('body').getAttribute('data-check-report'));
+    report.checks.push('duration-limit-refusal');
+    report.durationLimit = {timelineSeconds: 121, limitSeconds: 120, downloaded: false};
+    await page.screenshot({path: 'output/playwright/export-limit.png', fullPage: true});
+    await emitReport(report);
+    return;
+  }
   if (await page.locator('#timeline button').count() === 0) {
   await page.setViewportSize({width: 1440, height: 1100});
   await page.waitForFunction(() => document.querySelector('.badge').dataset.engine === 'wasm');
@@ -40,6 +73,8 @@ async (page) => {
   await count(2);
   await page.locator('#reselect').waitFor({state: 'visible'});
   assert(await page.locator('#play').isDisabled(), 'Reopened project must request media');
+  await rejectExport('Reconnect every original media file');
+  await count(2);
   return; // The CLI handles the native file chooser before stage two.
   }
   await page.waitForFunction(() => !document.querySelector('#play').disabled);
@@ -50,17 +85,47 @@ async (page) => {
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Invalid'));
   await count(2);
   assert(!await page.locator('#play').isDisabled(), 'Invalid project preserves connected media');
+  await page.locator('#export-size').selectOption('360x640');
+  const offeredSizes = await page.locator('#export-size option').evaluateAll(options => options.map(option => option.value.split('x').map(Number)));
+  assert(offeredSizes.every(pair => pair.length === 2 && pair.every(value => value > 0 && value <= 960)), 'Offered export dimensions stay bounded');
+  const cancelledDownloads = [];
+  const cancellationObserver = item => cancelledDownloads.push(item.suggestedFilename());
+  page.on('download', cancellationObserver);
+  try {
+    await page.locator('#video-export').click();
+    await page.waitForFunction(() => document.querySelector('#export-status').dataset.state === 'recording' && Number(document.querySelector('#export-progress').value) > 25);
+    await page.locator('#export-cancel').click();
+    await page.waitForFunction(() => document.querySelector('#export-status').dataset.state === 'cancelled' && !document.querySelector('#save').disabled);
+    await page.waitForTimeout(300);
+    assert(cancelledDownloads.length === 0, 'Cancelled export must not publish a complete file');
+  } finally { page.off('download', cancellationObserver); }
+  await count(2);
+  await download('#save', 'output/playwright/cancel-after.json');
+  const output = page.waitForEvent('download', {timeout: 30000});
+  await page.locator('#video-export').click();
+  const videoDownload = await output;
+  assert(videoDownload.suggestedFilename() === 'VeyCut-video.webm', 'Actual WebM output filename');
+  await videoDownload.saveAs('output/playwright/browser-video.webm');
+  await page.waitForFunction(() => document.querySelector('#export-status').dataset.state === 'done');
+  assert(Number(await page.locator('#export-progress').getAttribute('value')) === 100 ||
+    await page.locator('#export-progress').evaluate(element => element.value === 100), 'Completed export progress');
+  const mime = await page.locator('#export-status').getAttribute('data-mime');
+  assert(mime && mime.startsWith('video/webm'), 'Actual supported WebM MIME');
+  await download('#save', 'output/playwright/export-after.json');
+  await page.screenshot({path: 'output/playwright/export-done.png', fullPage: true});
   await page.locator('#language').selectOption('fa');
   assert(await page.locator('html').getAttribute('dir') === 'rtl', 'Persian direction');
   await page.setViewportSize({width: 390, height: 844});
   await page.screenshot({path: 'output/playwright/mobile-fa.png', fullPage: true});
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'No horizontal overflow');
-  const reportDownload = page.waitForEvent('download');
-  await page.evaluate(() => {
-    const report = {status: 'passed', engine: document.querySelector('.badge').dataset.engine, clips: document.querySelectorAll('#timeline button').length, captions: document.querySelector('#cue-select').options.length, language: document.documentElement.lang, checks: ['import', 'trim', 'split', 'undo-redo', 'project-reopen', 'media-reconnect', 'bilingual-srt', 'invalid-project-preservation', 'mobile-rtl']};
-    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'}));
-    const link = document.createElement('a'); link.href = url; link.download = 'browser-report.json'; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
-  await (await reportDownload).saveAs('output/playwright/browser-report.json');
+  const report = {status: 'passed', engine: await page.locator('.badge').getAttribute('data-engine'),
+    clips: 2, captions: 2, language: await page.locator('html').getAttribute('lang'),
+    export: {filename: 'VeyCut-video.webm', mime, width: 360, height: 640, expectedTimelineSeconds: 1.8, precision: 'realtime', cancellationDownloaded: false, disconnectedMediaDownloaded: false},
+    checks: ['import', 'trim', 'split', 'undo-redo', 'project-reopen', 'media-reconnect', 'bilingual-srt', 'invalid-project-preservation', 'mobile-rtl', 'disconnected-export-refusal', 'export-cancellation', 'export-edit-preservation', 'webm-download', 'offered-size-limit']};
+  await page.locator('body').evaluate((body, value) => { body.dataset.checkReport = JSON.stringify(value); body.dataset.checkStage = 'limit'; }, report);
+  await page.setViewportSize({width: 1440, height: 1100});
+  await page.locator('#language').selectOption('en');
+  await page.locator('#project-input').setInputFiles('output/playwright/limit-project.json');
+  await count(151);
+  await page.locator('#reselect').waitFor({state: 'visible'});
 }
