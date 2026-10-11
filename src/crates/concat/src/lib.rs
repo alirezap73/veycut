@@ -80,7 +80,7 @@ mod wayland_drop {
 }
 
 use dock::{Dock, METERS_MIN_W, SEAT_MIN_GRAB, SEAT_MIN_H, SEAT_MIN_W};
-use host::{Host, Shell, on_ui};
+use host::{Host, Shell};
 use panes::Msg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
