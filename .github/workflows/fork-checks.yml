@@ -1,7 +1,7 @@
 name: Fork development checks
 
 # Manual checks for the fork before a full desktop build. These jobs do
-# not render media, build the GUI, or publish a release.
+# not launch the GUI, export video, or publish a release.
 on:
   workflow_dispatch:
   workflow_call:
@@ -27,6 +27,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          key: fork-workspace-v2
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
       - name: Project source formatting
         run: cargo fmt -p concat-project -p concat-host --check
         working-directory: src
@@ -36,6 +39,9 @@ jobs:
         run: python3 scripts/test_model_trial.py
       - name: Core and project tests
         run: cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
+        working-directory: src
+      - name: Title shaping and colour glyph tests
+        run: cargo test --locked -j 1 -p concat-text -- --test-threads=1
         working-directory: src
       - name: Subtitle file tests without media services
         run: |
