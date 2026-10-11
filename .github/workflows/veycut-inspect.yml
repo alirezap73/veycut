@@ -49,6 +49,11 @@ on:
         type: boolean
         default: false
 
+      export_protection_gui:
+        description: Check packaged output collision refusal and actual-running cancellation with decoded retry
+        type: boolean
+        default: false
+
 permissions:
   contents: read
   actions: read
@@ -96,7 +101,7 @@ jobs:
           name: VeyCut-macos-arm64
           path: bundles
       - name: Ensure independent video decoder for GUI export checks
-        if: inputs.core_gui || inputs.extended_gui || inputs.real_media_probe || contains(inputs.gui_actions, 'video-check')
+        if: inputs.core_gui || inputs.extended_gui || inputs.real_media_probe || inputs.export_protection_gui || contains(inputs.gui_actions, 'video-check')
         run: |
           if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
@@ -121,10 +126,11 @@ jobs:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
           ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
-          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui || inputs.real_media_probe }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui || inputs.real_media_probe || inputs.export_protection_gui }}
           CORE_GUI: ${{ inputs.core_gui }}
           EXTENDED_GUI: ${{ inputs.extended_gui }}
           CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
+          EXPORT_PROTECTION_GUI: ${{ inputs.export_protection_gui }}
           REAL_MEDIA_PROBE: ${{ inputs.real_media_probe }}
           EDITOR_PROBE: ${{ inputs.editor_probe }}
           GUI_ACTIONS: ${{ inputs.gui_actions }}
@@ -374,6 +380,143 @@ jobs:
               print("native_click \(location.x),\(location.y)")
               Thread.sleep(forTimeInterval: 2)
 
+          } else if action == "export-protection-control" {
+              let spec = try JSONSerialization.jsonObject(with: Data(CommandLine.arguments[3].utf8)) as! [String: String]
+              guard let mode = spec["mode"], ["collision", "cancel"].contains(mode),
+                    let reportPath = spec["report"], let folder = spec["folder"] else { exit(50) }
+              let manager = FileManager.default
+              let reportURL = URL(fileURLWithPath: reportPath)
+              var report: [String: Any] = ["mode": mode, "outcome": "pending"]
+              func writeReport() {
+                  try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: reportURL)
+              }
+              func fail(_ reason: String) -> Never {
+                  report["outcome"] = reason
+                  report["final_ax"] = snapshot(application)
+                  writeReport()
+                  fputs(reason + "\n", stderr)
+                  exit(51)
+              }
+              func value(_ node: AXUIElement, _ name: String) -> CFTypeRef? {
+                  var result: CFTypeRef?
+                  return AXUIElementCopyAttributeValue(node, name as CFString, &result) == .success ? result : nil
+              }
+              func nodes(_ node: AXUIElement, _ depth: Int = 0) -> [AXUIElement] {
+                  guard depth < 20 else { return [] }
+                  return [node] + ((value(node, "AXChildren") as? [AXUIElement]) ?? []).flatMap { nodes($0, depth + 1) }
+              }
+              func labels(_ node: AXUIElement) -> Set<String> {
+                  Set(["AXTitle", "AXDescription", "AXValue"].compactMap { value(node, $0) as? String })
+              }
+              func visibleBounds(_ node: AXUIElement) -> CGRect? {
+                  guard let rawPoint = value(node, "AXPosition"),
+                        let rawSize = value(node, "AXSize"),
+                        CFGetTypeID(rawPoint) == AXValueGetTypeID(),
+                        CFGetTypeID(rawSize) == AXValueGetTypeID() else { return nil }
+                  var point = CGPoint.zero
+                  var size = CGSize.zero
+                  guard AXValueGetValue(rawPoint as! AXValue, .cgPoint, &point),
+                        AXValueGetValue(rawSize as! AXValue, .cgSize, &size),
+                        point.x.isFinite, point.y.isFinite, size.width.isFinite, size.height.isFinite,
+                        size.width > 2, size.height > 2 else { return nil }
+                  let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                  let own = windows.filter {
+                      ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == 0
+                  }.compactMap { $0[kCGWindowBounds as String] as? [String: Double] }
+                  guard own.count == 1, let b = own.first, let x = b["X"], let y = b["Y"],
+                        b["Width"] == 1024, b["Height"] == 681 else { return nil }
+                  let rectangle = CGRect(origin: point, size: size)
+                  guard CGRect(x: x, y: y, width: 1024, height: 681).contains(rectangle) else { return nil }
+                  return rectangle
+              }
+              func unique(_ all: [AXUIElement], _ match: (String) -> Bool) -> (AXUIElement, CGRect)? {
+                  let candidates = all.compactMap { node -> (AXUIElement, CGRect)? in
+                      guard labels(node).contains(where: match), let bounds = visibleBounds(node) else { return nil }
+                      return (node, bounds)
+                  }
+                  return candidates.count == 1 ? candidates.first : nil
+              }
+              func boundsReport(_ rectangle: CGRect) -> [String: Double] {
+                  ["x": rectangle.minX, "y": rectangle.minY, "width": rectangle.width, "height": rectangle.height]
+              }
+              func click(_ rectangle: CGRect, expected: (String) -> Bool) {
+                  guard let fresh = unique(nodes(application), expected), fresh.1 == rectangle else {
+                      fail("selector_unverified")
+                  }
+                  let point = CGPoint(x: rectangle.midX, y: rectangle.midY)
+                  for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                      let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!
+                      event.flags = []
+                      event.post(tap: .cghidEventTap)
+                      Thread.sleep(forTimeInterval: 0.04)
+                  }
+              }
+              func workDirectories() -> Set<String> {
+                  Set(((try? manager.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasPrefix(".veycut-export-") })
+              }
+              let originalDirectories = workDirectories()
+              guard let begin = unique(nodes(application), { $0.hasPrefix("Export · ~") }) else { fail("selector_unverified") }
+              report["begin_bounds"] = boundsReport(begin.1)
+              report["begin_ax"] = snapshot(application)
+              report["started_epoch_seconds"] = Date().timeIntervalSince1970
+              writeReport()
+              click(begin.1, expected: { $0.hasPrefix("Export · ~") })
+              let deadline = Date().addingTimeInterval(mode == "collision" ? 10 : 20)
+              while Date() < deadline {
+                  let all = nodes(application)
+                  let text = all.flatMap { Array(labels($0)) }
+                  if mode == "collision" {
+                      if text.contains("An output with this name already exists; choose another file name") {
+                          guard !text.contains("Cancel export"), !text.contains(where: { $0.hasPrefix("Exported ·") }) else { fail("unexpected_export_state") }
+                          report["outcome"] = "collision_message_observed"
+                          report["error_ax"] = snapshot(application)
+                          writeReport()
+                          exit(0)
+                      }
+                  } else {
+                      if text.contains(where: { $0.hasPrefix("Exported ·") }) { fail("cancellation_unobserved") }
+                      let percentages = Set(text.compactMap { label -> Int? in
+                          guard label.hasSuffix("%") else { return nil }
+                          return Int(label.dropLast())
+                      }.filter { $0 > 0 && $0 < 100 })
+                      let newDirectories = workDirectories().subtracting(originalDirectories)
+                      var work: [[String: Any]] = []
+                      for directory in newDirectories {
+                          let path = URL(fileURLWithPath: folder).appendingPathComponent(directory).appendingPathComponent("video.mp4").path
+                          if let attributes = try? manager.attributesOfItem(atPath: path),
+                             let bytes = attributes[.size] as? NSNumber, bytes.int64Value > 0 {
+                              work.append(["directory": directory, "video_bytes": bytes.int64Value, "observed_epoch_seconds": Date().timeIntervalSince1970])
+                          }
+                      }
+                      if text.contains("Rendering video"), percentages.count == 1, !work.isEmpty {
+                          guard let cancel = unique(all, { $0 == "Cancel export" }) else { fail("selector_unverified") }
+                          report["render_progress_percent"] = percentages.first!
+                          report["cancel_bounds"] = boundsReport(cancel.1)
+                          report["work_observations"] = work
+                          report["active_ax"] = snapshot(application)
+                          report["cancel_epoch_seconds"] = Date().timeIntervalSince1970
+                          writeReport()
+                          click(cancel.1, expected: { $0 == "Cancel export" })
+                          let settle = Date().addingTimeInterval(10)
+                          while Date() < settle {
+                              let current = nodes(application)
+                              let currentLabels = current.flatMap { Array(labels($0)) }
+                              if currentLabels.contains(where: { $0.hasPrefix("Exported ·") }) { fail("unexpected_late_success") }
+                              if !currentLabels.contains("Cancel export"),
+                                 unique(current, { $0.hasPrefix("Export · ~") }) != nil {
+                                  report["outcome"] = "cancelled_to_idle"
+                                  report["idle_ax"] = snapshot(application)
+                                  writeReport()
+                                  exit(0)
+                              }
+                              Thread.sleep(forTimeInterval: 0.1)
+                          }
+                          fail("idle_return_unobserved")
+                      }
+                  }
+                  Thread.sleep(forTimeInterval: 0.1)
+              }
+              fail(mode == "collision" ? "collision_error_unobserved" : "cancellation_unobserved")
           } else if action == "caption-control" {
               let spec = try JSONSerialization.jsonObject(with: Data(CommandLine.arguments[3].utf8)) as! [String: String]
               let needle = spec["contains"] ?? ""
@@ -696,7 +839,7 @@ jobs:
                   pathlib.Path('evidence/UI-CALLS.json').write_text(json.dumps(ui_calls, indent=2))
                   with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
                       subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
-              assert sum(os.environ[name] == 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI', 'REAL_MEDIA_PROBE')) <= 1, 'Choose one committed GUI scenario per run'
+              assert sum(os.environ[name] == 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI', 'REAL_MEDIA_PROBE', 'EXPORT_PROTECTION_GUI')) <= 1, 'Choose one committed GUI scenario per run'
               actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text()) if os.environ['CORE_GUI'] == 'true' else json.loads(os.environ['GUI_ACTIONS'])
               if os.environ['EXTENDED_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
@@ -704,6 +847,17 @@ jobs:
               if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true' and os.environ['EXTENDED_GUI'] != 'true', 'Choose one committed GUI scenario per run'
                   actions = json.loads(pathlib.Path('docs/beta-tests/caption-navigation-gui.json').read_text())
+              if os.environ['EXPORT_PROTECTION_GUI'] == 'true':
+                  assert json.loads(os.environ['GUI_ACTIONS']) == []
+                  extended_actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
+                  stop = next(i for i, step in enumerate(extended_actions) if step['action'] == 'playback-dialog-check')
+                  actions = extended_actions[:stop] + [
+                      {'action': 'export-protection-check'},
+                      {'action': 'export-open'},
+                      {'action': 'click', 'arg': '0.8291015625,0.9544787078'},
+                      {'action': 'video-check', 'arg': '32'},
+                      {'action': 'export-protection-retry-check'},
+                  ]
               if real_media_probe:
                   assert json.loads(os.environ['GUI_ACTIONS']) == []
                   actions = [
@@ -1078,6 +1232,129 @@ jobs:
                                       after_reopen = json.loads(manifest.read_text())
                                       assert after_reopen['clips'] == before_reopen['clips'] and after_reopen['media'] == before_reopen['media'], 'GUI reopen changed the saved edit'
                                       core['edited_project_reopen_verified'] = True
+                                  elif action == 'export-protection-check':
+                                      import hashlib, uuid
+                                      protection_baseline = json.loads(manifest.read_text())
+                                      assert len(protection_baseline['clips']) == 16
+                                      assert max(c['start'] + c['duration'] for c in protection_baseline['clips']) == 32
+                                      protection_folder = pathlib.Path.home() / 'Movies'
+                                      protection_folder.mkdir(exist_ok=True)
+                                      protection_target = protection_folder / 'VeyCut GUI fixture.mp4'
+                                      protection_keep = protection_folder / ('veycut-protection-keep-' + uuid.uuid4().hex + '.txt')
+                                      token = ('VeyCut export protection ' + os.environ['GITHUB_RUN_ID'] + ' ' + uuid.uuid4().hex).encode()
+                                      keep_token = b'Independent run-owned file: ' + token
+                                      def digest_bytes(path):
+                                          return hashlib.sha256(path.read_bytes()).hexdigest()
+                                      def work_names():
+                                          return {p.name for p in protection_folder.iterdir() if p.name.startswith('.veycut-export-')}
+                                      protection_report = {
+                                          'source_revision': os.environ['PACKAGE_REVISION'],
+                                          'workflow_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                                          'fixture': '32-second repeated generated portrait media',
+                                          'collision_refusal_gui_verified': False,
+                                          'active_export_cancel_gui_verified': False,
+                                          'cancelled_export_retry_gui_verified': False,
+                                          'publication_race_gui_verified': False,
+                                          'independent_clean_installation_verified': False,
+                                          'real_camera_10_to_15_minute_session_verified': False,
+                                      }
+                                      def persist_protection():
+                                          pathlib.Path('evidence/MAC-EXPORT-PROTECTION.json').write_text(json.dumps(protection_report, indent=2) + '\n')
+                                      persist_protection()
+                                      assert not protection_target.exists() and not protection_target.is_symlink(), 'Fresh export destination required'
+                                      with protection_target.open('xb') as stream:
+                                          stream.write(token)
+                                      with protection_keep.open('xb') as stream:
+                                          stream.write(keep_token)
+                                      protection_target_sha = hashlib.sha256(token).hexdigest()
+                                      protection_keep_sha = hashlib.sha256(keep_token).hexdigest()
+                                      protection_work_before = work_names()
+                                      def protection_control(mode):
+                                          report_path = pathlib.Path('evidence/export-protection-' + mode + '-AX.json').resolve()
+                                          spec = {'mode': mode, 'report': str(report_path), 'folder': str(protection_folder)}
+                                          try:
+                                              ui(process, 'export-protection-control', json.dumps(spec))
+                                          except Exception:
+                                              if report_path.exists():
+                                                  protection_report['driver_failure'] = json.loads(report_path.read_text())
+                                                  persist_protection()
+                                              try:
+                                                  ui(process, 'snapshot', pathlib.Path('evidence/export-protection-failure.png').resolve())
+                                              except Exception:
+                                                  pass
+                                              raise
+                                          return json.loads(report_path.read_text())
+                                      try:
+                                          ui(process, 'export-open')
+                                          collision = protection_control('collision')
+                                          ui(process, 'snapshot', pathlib.Path('evidence/export-collision.png').resolve())
+                                          assert collision['outcome'] == 'collision_message_observed'
+                                          assert digest_bytes(protection_target) == protection_target_sha
+                                          assert digest_bytes(protection_keep) == protection_keep_sha
+                                          assert work_names() == protection_work_before
+                                          assert process.poll() is None
+                                          protection_report.update({
+                                              'collision_refusal_gui_verified': True,
+                                              'collision_sentinel_sha256': protection_target_sha,
+                                              'unrelated_sentinel_sha256': protection_keep_sha,
+                                              'collision_control': collision,
+                                          })
+                                          persist_protection()
+                                          ui(process, 'dismiss')
+                                          ui(process, 'save')
+                                          assert json.loads(manifest.read_text()) == protection_baseline
+                                          assert protection_target.read_bytes() == token
+                                          protection_target.unlink()
+                                          ui(process, 'export-open')
+                                          cancelled = protection_control('cancel')
+                                          assert cancelled['outcome'] == 'cancelled_to_idle'
+                                          assert 0 < cancelled['render_progress_percent'] < 100 and cancelled['work_observations']
+                                          deadline = time.monotonic() + 30
+                                          while work_names() != protection_work_before:
+                                              assert time.monotonic() < deadline, 'Cancelled render leaked work directories'
+                                              assert not protection_target.exists(), 'Cancelled render published final output'
+                                              assert process.poll() is None
+                                              time.sleep(0.2)
+                                          for _ in range(50):
+                                              assert not protection_target.exists(), 'Cancelled worker published late output'
+                                              assert digest_bytes(protection_keep) == protection_keep_sha
+                                              assert process.poll() is None
+                                              time.sleep(0.2)
+                                          ui(process, 'snapshot', pathlib.Path('evidence/export-cancelled.png').resolve())
+                                          ui(process, 'dismiss')
+                                          ui(process, 'save')
+                                          assert json.loads(manifest.read_text()) == protection_baseline
+                                          protection_report.update({
+                                              'active_export_cancel_gui_verified': True,
+                                              'cancel_control': cancelled,
+                                              'work_directories_cleaned': True,
+                                              'ten_second_no_late_publication': True,
+                                              'project_preserved_after_collision_and_cancel': True,
+                                          })
+                                          persist_protection()
+                                      except Exception:
+                                          # Remove only exact run-owned sentinel bytes. Never remove an export
+                                          # or a replaced path, even when the scenario fails.
+                                          if protection_target.is_file() and protection_target.stat().st_size == len(token) and protection_target.read_bytes() == token:
+                                              protection_target.unlink()
+                                          if protection_keep.is_file() and protection_keep.read_bytes() == keep_token:
+                                              protection_keep.unlink()
+                                          raise
+                                  elif action == 'export-protection-retry-check':
+                                      assert core['gui_export_verified'] and core['decoded_export_seconds'] == 32
+                                      assert digest_bytes(protection_keep) == protection_keep_sha
+                                      assert work_names() == protection_work_before
+                                      ui(process, 'save')
+                                      assert json.loads(manifest.read_text()) == protection_baseline
+                                      protection_report.update({
+                                          'cancelled_export_retry_gui_verified': True,
+                                          'retry_export_bytes': protection_target.stat().st_size,
+                                          'retry_export_sha256': digest_bytes(protection_target),
+                                          'retry_export_full_video_audio_decode': True,
+                                          'unrelated_file_preserved_through_retry': True,
+                                      })
+                                      persist_protection()
+                                      protection_keep.unlink()
                                   elif action == 'video-check':
                                       import array, math
                                       expected_seconds = float(argument or '2')
@@ -1146,6 +1423,8 @@ jobs:
                               log_tail = stream.read(1024 * 1024)
                           ui_log.write_bytes(log_tail)
               result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'see_CORE-GUI-TEST.json' if actions else 'duplicate_undo_redo_only', 'native_split_verified': core['split_verified'], 'gui_export_verified': core['gui_export_verified'], 'editable_subtitle_verified': core['subtitle_verified'], 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
+              if os.environ['EXPORT_PROTECTION_GUI'] == 'true':
+                  result['export_protection_verified'] = protection_report
               if real_media_probe:
                   result['media_import_verified'] = 'official_full_movie_native_picker_and_reopen'
                   result['editing_verified'] = 'original_seed_clip_only; imported_movie_editing_not_tested'
