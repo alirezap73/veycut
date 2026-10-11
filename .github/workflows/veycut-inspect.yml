@@ -39,6 +39,10 @@ on:
         description: Exercise clip movement, edge trims and a 32-second repeated-media export
         type: boolean
         default: false
+      caption_navigation_gui:
+        description: Check packaged caption navigation via pointer, keyboard and 55-row pagination
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -93,9 +97,10 @@ jobs:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
           ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
-          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui }}
           CORE_GUI: ${{ inputs.core_gui }}
           EXTENDED_GUI: ${{ inputs.extended_gui }}
+          CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
           EDITOR_PROBE: ${{ inputs.editor_probe }}
           GUI_ACTIONS: ${{ inputs.gui_actions }}
         run: |
@@ -343,6 +348,85 @@ jobs:
               }
               print("native_click \(location.x),\(location.y)")
               Thread.sleep(forTimeInterval: 2)
+
+          } else if action == "caption-control" {
+              let spec = try JSONSerialization.jsonObject(with: Data(CommandLine.arguments[3].utf8)) as! [String: String]
+              let needle = spec["contains"] ?? ""
+              let mode = spec["mode"] ?? "inspect"
+              guard ["inspect", "pointer", "return", "space"].contains(mode), needle.count <= 200 else { exit(30) }
+              func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+                  var value: CFTypeRef?
+                  return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+              }
+              func label(_ element: AXUIElement) -> String {
+                  ["AXTitle", "AXDescription", "AXValue"].compactMap {
+                      attribute(element, $0) as? String
+                  }.joined(separator: " ")
+              }
+              func buttons(_ element: AXUIElement, _ depth: Int = 0) -> [AXUIElement] {
+                  guard depth < 24 else { return [] }
+                  let own = (attribute(element, "AXRole") as? String) == "AXButton" ? [element] : []
+                  let children = attribute(element, "AXChildren") as? [AXUIElement] ?? []
+                  return own + children.prefix(200).flatMap { buttons($0, depth + 1) }
+              }
+              func focusedMatches() -> Bool {
+                  guard let focused = attribute(application, "AXFocusedUIElement") else { return false }
+                  var node = focused as! AXUIElement
+                  for _ in 0..<8 {
+                      if label(node).contains(needle) { return true }
+                      guard let parent = attribute(node, "AXParent") else { return false }
+                      node = parent as! AXUIElement
+                  }
+                  return false
+              }
+              let beforeLabels = buttons(application).map { label($0) }
+              if mode != "inspect" {
+                  guard !needle.isEmpty else { exit(31) }
+                  if mode == "pointer" {
+                      let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                      guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == 0 && (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) >= 900 }),
+                            let bounds = window[kCGWindowBounds as String] as? [String: Double],
+                            let wx = bounds["X"], let wy = bounds["Y"], let ww = bounds["Width"], let wh = bounds["Height"] else { exit(32) }
+                      var location: CGPoint?
+                      for _ in 0..<7 {
+                          guard let target = buttons(application).first(where: { label($0).contains(needle) }),
+                                let rawPosition = attribute(target, "AXPosition"), let rawSize = attribute(target, "AXSize"),
+                                CFGetTypeID(rawPosition) == AXValueGetTypeID(), CFGetTypeID(rawSize) == AXValueGetTypeID() else { exit(33) }
+                          var position = CGPoint.zero
+                          var size = CGSize.zero
+                          guard AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position),
+                                AXValueGetValue(rawSize as! AXValue, .cgSize, &size) else { exit(34) }
+                          if size.width > 0 && size.height > 0 && position.x >= wx
+                              && position.x + size.width <= wx + ww
+                              && position.y >= wy + wh * 0.12 && position.y + size.height <= wy + wh * 0.90 {
+                              location = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+                              break
+                          }
+                          let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -160, wheel2: 0, wheel3: 0)!
+                          scroll.location = CGPoint(x: wx + ww * 0.5, y: wy + wh * 0.75)
+                          scroll.post(tap: .cghidEventTap)
+                          Thread.sleep(forTimeInterval: 1)
+                      }
+                      guard let point = location else { exit(35) }
+                      for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                          CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!.post(tap: .cghidEventTap)
+                          Thread.sleep(forTimeInterval: 0.1)
+                      }
+                  } else {
+                      // Exercise Tab/Enter/Space itself, not AXPress or an
+                      // internal application callback. Require focus evidence.
+                      for _ in 0..<80 {
+                          if focusedMatches() { break }
+                          key(48)
+                      }
+                      guard focusedMatches() else { exit(36) }
+                      key(mode == "return" ? 36 : 49)
+                  }
+                  Thread.sleep(forTimeInterval: 2)
+              }
+              let afterLabels = buttons(application).map { label($0) }
+              let report: [String: Any] = ["mode": mode, "needle": needle, "before_labels": beforeLabels, "after_labels": afterLabels]
+              print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]), encoding: .utf8)!)
           } else if action == "play-start" {
               key(115)
               key(49)
@@ -494,6 +578,9 @@ jobs:
               if os.environ['EXTENDED_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
                   actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
+              if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
+                  assert os.environ['CORE_GUI'] != 'true' and os.environ['EXTENDED_GUI'] != 'true', 'Choose one committed GUI scenario per run'
+                  actions = json.loads(pathlib.Path('docs/beta-tests/caption-navigation-gui.json').read_text())
               assert isinstance(actions, list) and len(actions) <= 100
               core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
               ui_environment = dict(os.environ)
@@ -574,6 +661,58 @@ jobs:
                                       ui(process, action, pathlib.Path(f'evidence/core-{index}.png').resolve())
                                   elif action == 'caption-pick':
                                       ui(process, action, pathlib.Path('docs/beta-samples/captions-2s.vtt').resolve())
+
+                                  elif action == 'caption-navigation-pick':
+                                      ui(process, 'caption-pick', pathlib.Path('docs/beta-samples/caption-navigation-55.srt').resolve())
+                                  elif action == 'caption-navigation-baseline':
+                                      baseline = json.loads(manifest.read_text())
+                                      titles = [c for c in baseline['clips'] if c['kind'] == 'text']
+                                      assert len(titles) == 55, 'The real UI import must create 55 navigation cues'
+                                      for ordinal in range(1, 56):
+                                          matches = [c for c in titles if c['text']['content'].startswith(f'NAV-{ordinal:03} ')]
+                                          assert len(matches) == 1 and abs(matches[0]['start'] - (2 * ordinal - 1)) < 0.04
+                                      core['caption_navigation_baseline'] = baseline
+                                  elif action in ('caption-navigation-page', 'caption-navigation-proof'):
+                                      import re
+                                      spec = json.loads(argument)
+                                      baseline = core['caption_navigation_baseline']
+                                      ui(process, 'caption-control', json.dumps(spec))
+                                      evidence = pathlib.Path(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-caption-control.txt')
+                                      report = json.loads(evidence.read_text())
+                                      if action == 'caption-navigation-page':
+                                          labels = report['after_labels']
+                                          ordinals = [int(match.group(1)) for label in labels if (match := re.search(r'NAV-([0-9]{3}) ', label))]
+                                          assert ordinals == list(range(51, 56)), 'Page two is not chronological'
+                                          assert any('NAV-051 ' in label for label in labels), 'Page two must expose chronological cue 51'
+                                          assert any('51–55 / 55' in label for label in labels), 'Last-page range/count mismatch'
+                                          assert not any('NAV-001 ' in label for label in labels), 'Previous-page cue nodes must disappear'
+                                          core['caption_navigation_paging_verified'] = True
+                                      else:
+                                          prefix = spec['contains']
+                                          target = next(c for c in baseline['clips'] if c.get('text', {}).get('content', '').startswith(prefix + ' '))
+                                          assert not any(prefix + ' ' in label for label in report['after_labels']), 'Navigation must close the caption sheet'
+                                          # Copy/delete proves the row selected exactly this clip.
+                                          # Pasting into its vacant lane at the current playhead
+                                          # proves the same action sought to its original start.
+                                          ui(process, 'copy')
+                                          ui(process, 'delete-selected')
+                                          ui(process, 'save')
+                                          deleted = json.loads(manifest.read_text())
+                                          originals = {c['id']: c for c in baseline['clips']}
+                                          remaining = {c['id']: c for c in deleted['clips']}
+                                          assert remaining == {key: value for key, value in originals.items() if key != target['id']}, 'Navigation selected the wrong clip/group'
+                                          ui(process, 'paste')
+                                          ui(process, 'save')
+                                          pasted = json.loads(manifest.read_text())
+                                          copies = [c for c in pasted['clips'] if c['id'] not in originals]
+                                          assert len(copies) == 1, 'Navigation clipboard must hold one selected caption'
+                                          comparable = lambda clip: {key: value for key, value in clip.items() if key != 'id'}
+                                          assert comparable(copies[0]) == comparable(target), 'Navigation seek/timing or caption styling mismatch'
+                                          ui(process, 'undo')
+                                          ui(process, 'undo')
+                                          ui(process, 'save')
+                                          assert json.loads(manifest.read_text()) == baseline, 'Navigation verification cleanup did not restore exact project'
+                                          core.setdefault('caption_navigation_verified', []).append({'cue': prefix, 'activation': spec['mode'], 'selected_one_clip': True, 'seek_to_start_proved_by_ui_paste': True})
                                   elif action in ('click', 'double-click', 'drag', 'paste-text', 'type-text'):
                                       ui(process, action, argument)
                                   elif action in ('select-all', 'copy', 'paste', 'duplicate', 'duplicate-selected', 'delete-selected', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
@@ -658,16 +797,42 @@ jobs:
                                       playback_positions = {}
                                       for mode in ('cancel', 'accept'):
                                           log_offset = ui_log.stat().st_size
+                                          playback_started_at = time.monotonic()
                                           ui(process, 'play-start')
                                           ui(process, 'snapshot', pathlib.Path(f'evidence/playback-meters-{mode}.png').resolve())
                                           ui(process, 'import-cancel' if mode == 'cancel' else 'import-held', accepted_sample)
                                           assert process.poll() is None, 'Native dialog terminated editor during playback'
                                           ui(process, 'play-toggle')
-                                          received = ui_log.read_bytes()[log_offset:].decode(errors='replace')
+                                          from collections import deque
+                                          important = deque(maxlen=2000)
+                                          unavailable = deque(maxlen=20)
+                                          with ui_log.open('r', errors='replace') as stream:
+                                              for line in stream:
+                                                  if 'audio output unavailable' in line:
+                                                      unavailable.append(line.strip()[:1024])
+                                          with ui_log.open('rb') as stream:
+                                              stream.seek(log_offset)
+                                              for line in stream:
+                                                  decoded = line.decode(errors='replace')
+                                                  if any(term in decoded for term in ('playback:', 'panicked at', 'BorrowMutError', 'already borrowed')):
+                                                      important.append(decoded[:2048])
+                                          received = ''.join(important)
                                           playing = re.findall(r'playback: playing from ([0-9.]+)s', received)
                                           paused = re.findall(r'playback: paused at ([0-9.]+)s', received)
-                                          assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head'
-                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback did not survive and advance across the native panel test'
+                                          playback_diagnostic = {
+                                              'source_revision': os.environ['PACKAGE_REVISION'],
+                                              'mode': mode,
+                                              'playing_positions_seconds': playing,
+                                              'paused_positions_seconds': paused,
+                                              'elapsed_wall_seconds': time.monotonic() - playback_started_at,
+                                              'timeline_seconds': max(c['start'] + c['duration'] for c in dialog_before['clips']),
+                                              'audio_unavailable_log': list(unavailable),
+                                              'passed_advancement_requirement': len(paused) == 1 and 4 <= float(paused[0]) < 32,
+                                          }
+                                          pathlib.Path(f'evidence/playback-dialog-{mode}-diagnostic.json').write_text(json.dumps(playback_diagnostic, indent=2) + '\n')
+                                          print('Native dialog playback diagnostic:', json.dumps(playback_diagnostic), flush=True)
+                                          assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head: ' + json.dumps(playback_diagnostic)
+                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback did not survive and advance across the native panel test: ' + json.dumps(playback_diagnostic)
                                           assert not any(term in received for term in ('panicked at', 'BorrowMutError', 'already borrowed')), 'Native dialog borrowed Studio across playback timers'
                                           playback_positions[mode] = float(paused[0])
                                           for _ in range(6):
@@ -791,6 +956,10 @@ jobs:
                                       raise AssertionError('Unknown bounded GUI action: ' + action)
                                   core['steps'].append(step)
                                   pathlib.Path(f'evidence/core-state-{index}.json').write_text(manifest.read_text())
+                              if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
+                                  verified = core.get('caption_navigation_verified', [])
+                                  assert [(item['cue'], item['activation']) for item in verified] == [('NAV-001', 'pointer'), ('NAV-002', 'return'), ('NAV-051', 'space')]
+                                  assert core.get('caption_navigation_paging_verified')
                               pathlib.Path('evidence/CORE-GUI-TEST.json').write_text(json.dumps(core, indent=2) + '\n')
                           expected_clip_count = len(json.loads(manifest.read_text())['clips']) if cycle == 2 and actions else 1
                           offset = ui_log.stat().st_size
@@ -807,6 +976,18 @@ jobs:
                               except subprocess.TimeoutExpired:
                                   process.kill()
                                   process.wait()
+                          # Preserve bounded diagnostic lines plus a 1 MiB tail, even on assertion failure.
+                          from collections import deque
+                          retained = deque(maxlen=2000)
+                          with ui_log.open('r', errors='replace') as stream:
+                              for line in stream:
+                                  if any(term in line for term in ('playback:', 'audio output unavailable', 'panicked at', 'BorrowMutError', 'already borrowed')):
+                                      retained.append(line[:2048])
+                          ui_log.with_suffix('.diagnostic.log').write_text(''.join(retained))
+                          with ui_log.open('rb') as stream:
+                              stream.seek(max(0, ui_log.stat().st_size - 1024 * 1024))
+                              log_tail = stream.read(1024 * 1024)
+                          ui_log.write_bytes(log_tail)
               result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'see_CORE-GUI-TEST.json' if actions else 'duplicate_undo_redo_only', 'native_split_verified': core['split_verified'], 'gui_export_verified': core['gui_export_verified'], 'editable_subtitle_verified': core['subtitle_verified'], 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
               pathlib.Path('evidence/PROJECT-UI-TEST.json').write_text(json.dumps(result, indent=2) + '\n')
           PYTHON

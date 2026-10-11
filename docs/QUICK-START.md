@@ -1,6 +1,6 @@
 # VeyCut quick start
 
-The public 0.2.0 preview has an Apple silicon macOS DMG. Version 0.3.0 source adds the export and media recovery improvements below; its built installer remains an unpublished candidate while the beta editing path is verified. Use the release linked from the repository README, rather than another project's download page.
+The public 0.2.0 preview has an Apple silicon macOS DMG. Development source is 0.3.1; its installer remains an unpublished candidate while the beta editing path is verified. Use the release linked from the repository README.
 
 1. Download the macos-arm64 DMG from the VeyCut release and copy VeyCut into Applications. This experimental app is ad-hoc signed and not Apple-notarized. macOS may require explicit approval to open it.
 2. Open VeyCut and create a project. Choose a portrait, landscape or square frame and name the project.
@@ -15,13 +15,28 @@ When a project opens with missing media, choose Relink All and select a folder c
 
 Only unique, exact filenames are linked automatically. If two copies have the same filename, select a narrower folder containing the intended copy. Symlink files and directories are not followed. Searches stop at 100,000 entries or 64 directory levels, or when a directory cannot be read. An incomplete search makes no edits; select a smaller, readable folder and try again. A blocked filesystem call cannot itself be interrupted.
 
+## Caption navigation and clip groups in development 0.3.1
+
+Open **Captions → Edit** to see text clips in chronological order. Each row shows
+its start/end time and a shortened preview. The list has 50 rows per page;
+use its page controls for longer timelines. Choose a row to select that text
+clip, seek to its start and close the caption sheet. A focused row also accepts
+Enter or Space. The selected/all-text scope also controls this list. This
+navigation is in development source; packaged interaction checks are pending.
+
+Select multiple clips before Copy/Paste or Duplicate. Their timing, track layout
+and properties are kept together. Duplicate selects the new copies so the next
+move or deletion can act on that group. Undo reverses the whole duplication.
+Locked tracks are excluded from duplication. Save before trying these new
+group operations in a development candidate.
+
 ## Reporting a problem
 
 Open an [issue](https://github.com/alirezap73/veycut/issues) with the VeyCut version, macOS version, steps and actual result. Attach a small sample you can share if the issue concerns one format. Do not attach private media or unreviewed logs.
 
 # شروع سریع وی‌کات
 
-نسخهٔ عمومی ۰٫۲ برای مک با تراشهٔ Apple silicon فایل DMG دارد. سورس ۰٫۳ بهبودهای خروجی و بازیابی رسانهٔ بالا را اضافه می‌کند؛ فایل نصبی آن ساخته و بررسی شده، اما تا تأیید مسیر اصلی بتا منتشر نمی‌شود. لینک معتبر دانلود در README همین مخزن قرار دارد.
+نسخهٔ عمومی ۰٫۲ برای مک با تراشهٔ Apple silicon فایل DMG دارد. سورس در حال توسعه ۰٫۳٫۱ است؛ بستهٔ آن تا تأیید مسیر اصلی بتا منتشر نمی‌شود. لینک معتبر دانلود در README همین مخزن قرار دارد.
 
 ۱. فایل macos-arm64 DMG را دانلود کنید و VeyCut را به Applications ببرید. نسخه آزمایشی است و تأیید Apple notarization ندارد؛ ممکن است macOS برای بازکردن آن تأیید شما را بخواهد.
 
@@ -32,5 +47,9 @@ Open an [issue](https://github.com/alirezap73/veycut/issues) with the VeyCut ver
 ۴. در خروجی نسخهٔ ۰٫۳، اندازهٔ خروجی را مستقل از اندازهٔ پروژه انتخاب کنید. نسبت تصویر حفظ می‌شود. نامی تازه برای خروجی بگذارید؛ فایل‌های موجود جایگزین نمی‌شوند.
 
 ۵. اگر رسانه‌ها جابه‌جا شده‌اند، Relink All را بزنید و پوشهٔ فایل‌های اصلی را انتخاب کنید. جست‌وجو در پس‌زمینه انجام می‌شود و Dismiss آن را لغو می‌کند. فایل‌های هم‌نام خودکار انتخاب نمی‌شوند؛ پوشه‌ای کوچک‌تر انتخاب کنید که فقط نسخهٔ موردنظر در آن باشد. جست‌وجوی ناقص هیچ مسیری را تغییر نمی‌دهد.
+
+در سورس ۰٫۳٫۱، **Captions → Edit** فهرست زیرنویس‌ها را به ترتیب زمان، با زمان شروع و پایان و پیش‌نمایش متن نشان می‌دهد. هر صفحه ۵۰ ردیف دارد. با انتخاب ردیف، کلیپ متنی انتخاب می‌شود و پخش به شروع آن می‌رود؛ ردیفِ دارای فوکوس با Enter یا Space هم فعال می‌شود. محدودهٔ انتخاب‌شده یا همهٔ متن‌ها روی همین فهرست هم اثر دارد. آزمون این تعامل در بستهٔ نصبی هنوز باقی مانده است.
+
+برای کپی یا تکثیر گروهی، چند کلیپ را انتخاب کنید. زمان‌بندی، چیدمان ترک و ویژگی‌ها همراهشان حفظ می‌شود. پس از تکثیر، نسخه‌های تازه انتخاب می‌مانند تا جابه‌جایی یا حذف بعدی روی همان گروه انجام شود؛ Undo کل تکثیر را برمی‌گرداند. ترک‌های قفل‌شده از تکثیر کنار گذاشته می‌شوند. پیش از آزمایش این قابلیت‌ها پروژه را ذخیره کنید.
 
 برای گزارش اشکال، نسخهٔ برنامه و macOS، مراحل و نتیجهٔ واقعی را در [Issues](https://github.com/alirezap73/veycut/issues) بنویسید. رسانهٔ خصوصی را ضمیمه نکنید.

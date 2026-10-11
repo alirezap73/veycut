@@ -50,7 +50,9 @@ Counts describe test executions, not a feature-completion percentage.
 The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38106368671)
 built successfully from source `57337d63761060124cdf0acd8b80be8d92eaeb41`.
 Commits after runtime `32acd2f` change validation infrastructure only; candidate
-policy checks confirmed runtime identity. [Core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108357089) and [extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) are running on the fixed inspection reference.
+policy checks confirmed runtime identity. [Core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108357089) passed all 55 steps: native import/placement, split undo/redo, editable bilingual subtitles, replacement, subtitle-file export, save/reopen and video export. The fully decoded output is H.264/AAC at 720×1280, 30 fps and 60 frames over two seconds. Extracted frames visually show Persian shaping and the unique English caption with a coloured emoji; this uses the available system font and does not establish COLR portability. The DMG checksum is `63cd403e001e3faa3aa34b99db82a311861d4ba63538b08c8fa73e70929b3533`.
+
+[Extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) failed the playback-position assertion after cancelling a held native import panel. It did not reach accepted-panel or 32-second export verification. A screenshot also shows the default meter pane clipping its right channel: layout correction is required. [A diagnostic repeat](https://github.com/alirezap73/veycut/actions/runs/38109391594) records exact playback positions and audio errors before the unchanged assertion; bounded logs avoid oversized diagnostic artifacts. No runtime defect is inferred from the assertion alone.
 The earlier fixed inspection reference uses a 97-entry scenario, including observed
 native import panels held for four seconds during playback, cancellation and
 acceptance; the scenario itself is not passing evidence until run against a
