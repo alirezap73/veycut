@@ -8,7 +8,24 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
-## Current source validation at 9a7b5e7
+## Current development source at 5711667
+
+Development source `5711667` adds COLR v0 solid colour layers, bounded to 128
+layers with palette alpha/title foreground and rejection of unusable layer
+outlines before font selection. The new native-dialog paths release editor
+borrows before opening media/LUT import and frame/audio/subtitle save panels;
+media/font picker answers are tied to their original project.
+
+[Native validation](https://github.com/alirezap73/veycut/actions/runs/38103959060)
+and [development checks](https://github.com/alirezap73/veycut/actions/runs/38103967208)
+are pending for this exact source. New tests have not yet established a pass.
+The committed extended GUI scenario now has 97 steps, including observed
+native import panels held for four seconds during playback, cancellation and
+acceptance; the scenario itself is not passing evidence until run against a
+matching package. No earlier package contains all these source changes.
+Development remains 0.3.1 and the public preview is unchanged.
+
+## Prior validated source at 9a7b5e7
 
 Development source `9a7b5e7` passed [native validation](https://github.com/alirezap73/veycut/actions/runs/38101849643): **789 successful Rust test invocations**, Linux workspace/transport lints, the quick performance check, macOS compilation and WebAssembly checks. The Mac job compiles all targets; it does not execute the native test suite. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38101847158) passed **231 invocations** (218 Rust and 13 Python). Counts are executions, not a feature-completion percentage.
 
