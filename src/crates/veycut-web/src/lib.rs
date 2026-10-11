@@ -829,43 +829,72 @@ mod tests {
 
     #[test]
     fn browser_staged_rejection_preserves_retired_ids_and_redo() {
-        let mut editor = WebEditor::new();
-        let media = imported(&mut editor);
-        let first = apply(
-            &mut editor,
-            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
-        );
-        let first_id = first["createdId"].clone();
-        apply(
-            &mut editor,
-            json!({"op":"removeClips","clipIds":[first_id]}),
-        );
-        let second = apply(
-            &mut editor,
-            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
-        );
-        let second_id = second["createdId"].clone();
-        response(editor.undo());
+        // Construct two independent sessions, not a cloned control. IdMint
+        // shares one counter across media/clip/track/timeline prefixes.
+        let prepare = || {
+            let mut editor = WebEditor::new();
+            let media = imported(&mut editor);
+            let first = apply(
+                &mut editor,
+                json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+            );
+            let first_id = first["createdId"].clone();
+            apply(
+                &mut editor,
+                json!({"op":"removeClips","clipIds":[first_id]}),
+            );
+            let second = apply(
+                &mut editor,
+                json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+            );
+            response(editor.undo());
+            (editor, media, first_id, second)
+        };
+        let (mut editor, media, first_id, second) = prepare();
+        let (mut control, control_media, control_first_id, control_second) = prepare();
         let before_failure = response(editor.snapshot());
-        // This batch mints a temporary ID before a real missing-reference error.
+        assert_eq!(response(control.snapshot()), before_failure);
+        // Only the subject receives an edit that mints a temporary ID before
+        // a real missing-reference error. The control sees no such request.
         let failure = response(editor.apply_command(&json!({"op":"batch","commands":[
             {"op":"addClip","mediaId":media,"trackId":"T1","start":0},
             {"op":"pasteClips","clips":[{"id":"held","kind":"video","mediaId":"missing","trackId":"T1","start":10,"duration":1}]}
         ]}).to_string()));
         assert_eq!(failure["error"]["code"], "commandRejected");
         assert_eq!(response(editor.snapshot()), before_failure);
-        assert_eq!(response(editor.redo())["document"], second["document"]);
-        apply(
+        assert_eq!(response(editor.redo()), response(control.redo()));
+        assert_eq!(response(editor.snapshot())["document"], second["document"]);
+        assert_eq!(second, control_second);
+        let removed = apply(
             &mut editor,
-            json!({"op":"removeClips","clipIds":[second_id]}),
+            json!({"op":"removeClips","clipIds":[second["createdId"]]}),
+        );
+        assert_eq!(
+            removed,
+            apply(
+                &mut control,
+                json!({"op":"removeClips","clipIds":[control_second["createdId"]]}),
+            )
         );
         let third = apply(
             &mut editor,
             json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
         );
-        assert_eq!(
-            third["createdId"], "c3",
-            "retired IDs stay retired; refused staged edit mints nothing live"
+        let control_third = apply(
+            &mut control,
+            json!({"op":"addClip","mediaId":control_media,"trackId":"T1","start":0}),
         );
+        assert_eq!(
+            third, control_third,
+            "refused staged edit must not consume an ID or change document/history"
+        );
+        assert_ne!(third["createdId"], first_id, "deleted IDs stay retired");
+        assert_ne!(
+            third["createdId"], second["createdId"],
+            "undone IDs stay retired"
+        );
+        assert_eq!(first_id, control_first_id);
+        assert_eq!(response(editor.undo()), response(control.undo()));
+        assert_eq!(response(editor.redo()), response(control.redo()));
     }
 }

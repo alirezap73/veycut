@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity]
-    paths: ['web/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js']
+    paths: ['web/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py']
   workflow_dispatch:
   workflow_call:
 
@@ -71,6 +71,7 @@ jobs:
           node --check web/preview.js
           node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
+          node --check scripts/veycut_web_parity_check.js
       - name: Run browser editing workflow
         shell: bash
         run: |
@@ -249,6 +250,10 @@ jobs:
               'precision': 'Real-time browser output; this synthetic short fixture does not prove frame-accurate timing or real user footage.'}
           (folder / 'webm-decoder-report.json').write_text(json.dumps(evidence, indent=2))
           PY
+          ffmpeg -v error -f lavfi -i color=c=red:s=256x256 -frames:v 1 -threads 1 -y output/playwright/layer.png
+          ffmpeg -v error -f lavfi -i sine=frequency=880:duration=2:sample_rate=48000 -c:a pcm_s16le -y output/playwright/tone.wav
+          playwright-cli run-code --filename=scripts/veycut_web_parity_check.js > output/playwright/parity-check.log
+          python3 scripts/verify_web_parity.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Retain browser evidence
