@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "concat"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-api",
  "concat-core",
@@ -1163,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "concat-android"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "android-build",
  "android_logger",
@@ -1176,9 +1176,10 @@ dependencies = [
 
 [[package]]
 name = "concat-api"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
+ "concat-core",
  "concat-effects",
  "concat-export",
  "concat-host",
@@ -1191,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "concat-cli"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "concat-api",
@@ -1206,11 +1207,11 @@ dependencies = [
 
 [[package]]
 name = "concat-core"
-version = "0.2.0"
+version = "0.3.1"
 
 [[package]]
 name = "concat-effects"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "concat-project",
@@ -1222,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "concat-export"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "concat-effects",
@@ -1232,11 +1233,12 @@ dependencies = [
  "concat-vision",
  "log",
  "serde",
+ "tempfile",
 ]
 
 [[package]]
 name = "concat-host"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "concat-effects",
@@ -1260,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "concat-media"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "ffmpeg-the-third",
@@ -1271,7 +1273,7 @@ dependencies = [
 
 [[package]]
 name = "concat-perf"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "concat-effects",
@@ -1284,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "concat-project"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "serde",
@@ -1294,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "concat-render"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "concat-effects",
@@ -1306,7 +1308,7 @@ dependencies = [
 
 [[package]]
 name = "concat-server"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-api",
  "getrandom 0.3.4",
@@ -1323,7 +1325,7 @@ dependencies = [
 
 [[package]]
 name = "concat-speech"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "bzip2 0.6.1",
  "concat-host",
@@ -1341,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "concat-text"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "fontdb 0.23.0",
  "memmap2",
@@ -1355,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "concat-vision"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "concat-core",
  "concat-project",
@@ -7150,6 +7152,17 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "veycut-web"
+version = "0.3.1"
+dependencies = [
+ "concat-core",
+ "concat-project",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "vtable"

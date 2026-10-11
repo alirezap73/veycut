@@ -80,7 +80,7 @@ mod wayland_drop {
 }
 
 use dock::{Dock, METERS_MIN_W, SEAT_MIN_GRAB, SEAT_MIN_H, SEAT_MIN_W};
-use host::{Host, Shell, on_ui};
+use host::{Host, Shell};
 use panes::Msg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
@@ -407,7 +407,10 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.on_titlebar_close(|| {
         log::info!("close: titlebar X pressed");
         Shell::with(|shell, app| {
-            shell.studio.borrow_mut().close_project();
+            if !shell.studio.borrow_mut().close_project() {
+                shell.studio.borrow().publish(&app, &shell.models);
+                return;
+            }
             log::info!("close: project closed, hiding window");
             app.window().hide().ok();
             slint::quit_event_loop().ok();
@@ -417,11 +420,19 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // System-driven close (Alt+F4, taskbar close): the same road out.
     app.window().on_close_requested(|| {
         log::info!("close: system close request (Alt+F4 / taskbar)");
-        Shell::with(|shell, _app| {
-            shell.studio.borrow_mut().close_project();
+        let mut closed = false;
+        Shell::with(|shell, app| {
+            closed = shell.studio.borrow_mut().close_project();
+            if !closed {
+                shell.studio.borrow().publish(&app, &shell.models);
+            }
         });
-        slint::quit_event_loop().ok();
-        slint::CloseRequestResponse::HideWindow
+        if closed {
+            slint::quit_event_loop().ok();
+            slint::CloseRequestResponse::HideWindow
+        } else {
+            slint::CloseRequestResponse::KeepWindowShown
+        }
     });
     // Maximised or not is read back on every resize rather than tracked:
     // the platform can maximise the window without us - a drag to the top
@@ -679,6 +690,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
             if shell.studio.borrow().session.is_none() {
                 return;
             }
+            let epoch = host::project_epoch();
             platform::pick_files_async(
                 &i18n::t("lib.importMedia"),
                 Some((
@@ -688,8 +700,10 @@ pub fn run() -> Result<(), slint::PlatformError> {
                         "flac", "ogg", "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff",
                     ],
                 )),
-                |paths| {
-                    on_ui(move |studio, _, _| studio.handle(Msg::Media(MediaMsg::Import(paths))))
+                move |paths| {
+                    host::on_ui_in_project(epoch, move |studio, _, _| {
+                        studio.handle(Msg::Media(MediaMsg::Import(paths)));
+                    });
                 },
             );
         });
@@ -704,10 +718,13 @@ pub fn run() -> Result<(), slint::PlatformError> {
             if shell.studio.borrow().session.is_none() {
                 return;
             }
+            let epoch = host::project_epoch();
             platform::pick_files_async(
                 &i18n::t("lib.importFont"),
                 Some((i18n::t("lib.fonts").as_str(), &["ttf", "otf", "ttc"])),
-                |paths| on_ui(move |studio, _, _| studio.import_fonts(paths)),
+                move |paths| {
+                    host::on_ui_in_project(epoch, move |studio, _, _| studio.import_fonts(paths));
+                },
             );
         });
     });
@@ -1593,6 +1610,24 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.on_captions_replace_text(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ReplaceText));
     }));
+    app.on_captions_navigate(on_window!(
+        |state, clip_id: SharedString, epoch: SharedString, timeline_id: SharedString| {
+            state.handle(Msg::Captions(CaptionsMsg::Navigate {
+                clip_id: clip_id.to_string(),
+                epoch: epoch.to_string(),
+                timeline_id: timeline_id.to_string(),
+            }));
+        }
+    ));
+    app.on_captions_navigation_page_changed(on_window!(
+        |state, page: i32, epoch: SharedString, timeline_id: SharedString| {
+            state.handle(Msg::Captions(CaptionsMsg::NavigationPage {
+                page,
+                epoch: epoch.to_string(),
+                timeline_id: timeline_id.to_string(),
+            }));
+        }
+    ));
     app.on_captions_export_srt(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ExportSrt));
     }));
@@ -1683,22 +1718,35 @@ pub fn run() -> Result<(), slint::PlatformError> {
                         // folder is.
                         "open" => state.handle(Msg::Start(StartMsg::Open)),
                         "import" => {
-                            platform::pick_files_async(
-                                &i18n::t("lib.importMedia"),
-                                None,
-                                |paths| {
-                                    on_ui(move |studio, _, _| {
-                                        studio.handle(Msg::Media(MediaMsg::Import(paths)))
-                                    })
-                                },
-                            );
+                            // Desktop pickers pump timers even though this API
+                            // is async on phones. Release the menu's Studio
+                            // borrow before opening one on the next loop turn.
+                            if state.session.is_some() {
+                                let epoch = host::project_epoch();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if host::project_epoch() != epoch {
+                                        return;
+                                    }
+                                    platform::pick_files_async(
+                                        &i18n::t("lib.importMedia"),
+                                        None,
+                                        move |paths| {
+                                            host::on_ui_in_project(epoch, move |studio, _, _| {
+                                                studio.handle(Msg::Media(MediaMsg::Import(paths)))
+                                            });
+                                        },
+                                    );
+                                });
+                            }
                         }
                         "export" => state.handle(Msg::Export(ExportMsg::Open)),
                         "template" => state.save_template(),
                         "speech" => state.handle(Msg::Speech(SpeechMsg::Open)),
                         "clear-cache" => state.clear_project_cache(),
                         "settings" => state.handle(Msg::Settings(SettingsMsg::Open)),
-                        "close-project" => state.close_project(),
+                        "close-project" => {
+                            state.close_project();
+                        }
                         "undo" => state.undo(),
                         "redo" => state.redo(),
                         "snap" => state.handle(Msg::Timeline(TimelineMsg::SnapToggled)),
@@ -1736,7 +1784,10 @@ pub fn run() -> Result<(), slint::PlatformError> {
                 }
                 if action == "close-window" {
                     log::info!("close: File > Close Window");
-                    shell.studio.borrow_mut().close_project();
+                    if !shell.studio.borrow_mut().close_project() {
+                        shell.studio.borrow().publish(&app, &shell.models);
+                        return;
+                    }
                     app.window().hide().ok();
                     slint::quit_event_loop().ok();
                     log::info!("close: quit_event_loop called (menu)");

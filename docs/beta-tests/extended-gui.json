@@ -1,0 +1,332 @@
+[
+  {
+    "action": "select-all"
+  },
+  {
+    "action": "click",
+    "arg": "0.2294921875,0.6989720999"
+  },
+  {
+    "action": "double-click",
+    "arg": "0.2578125000,0.2364170338"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "placement-check"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.3867187500,0.7004405286"
+  },
+  {
+    "action": "drag",
+    "arg": "0.2128906250,0.7870778267,0.2519531250,0.7870778267"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "move"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "placement-check"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "move"
+  },
+  {
+    "action": "drag",
+    "arg": "0.2695312500,0.7870778267,0.2597656250,0.7870778267"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "tail"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "move"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "tail"
+  },
+  {
+    "action": "drag",
+    "arg": "0.2343750000,0.7870778267,0.2441406250,0.7870778267"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "head"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "tail"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "gesture-check",
+    "arg": "head"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "placement-check"
+  },
+  {
+    "action": "duplicate"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "2"
+  },
+  {
+    "action": "duplicate-selection-check"
+  },
+  {
+    "action": "select-all"
+  },
+  {
+    "action": "copy"
+  },
+  {
+    "action": "paste"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "4"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "2"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "4"
+  },
+  {
+    "action": "duplicate"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "8"
+  },
+  {
+    "action": "duplicate"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "16"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "8"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "16"
+  },
+  {
+    "action": "reopen"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "16"
+  },
+  {
+    "action": "playback-dialog-check"
+  },
+  {
+    "action": "export-open"
+  },
+  {
+    "action": "click",
+    "arg": "0.8291015625,0.9544787078"
+  },
+  {
+    "action": "video-check",
+    "arg": "32"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.9726562500,0.0367107195"
+  },
+  {
+    "action": "track-baseline"
+  },
+  {
+    "action": "click",
+    "arg": "0.0283203125,0.7004405286"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.0830078125,0.7503671072"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "top"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "restored"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "top"
+  },
+  {
+    "action": "track-baseline"
+  },
+  {
+    "action": "click",
+    "arg": "0.0283203125,0.7004405286"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.0830078125,0.7885462555"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "bottom"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "restored"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "bottom"
+  }
+]

@@ -222,8 +222,10 @@ fn rational(value: ffmpeg::Rational) -> Option<Rational> {
 /// be and can be absurd. `avg_frame_rate` is 0/0 for such a stream with
 /// no average either, in which case the base rate is the best guess left.
 fn pick_rate(average: Option<Rational>, guess: Option<Rational>) -> Option<Rational> {
-    let usable =
-        |rate: &Option<Rational>| rate.filter(|rate| !rate.is_zero() && !rate.is_negative());
+    // Container rates must obey the same arithmetic limits as document rates.
+    let usable = |rate: &Option<Rational>| {
+        rate.filter(|rate| FrameRate::checked(rate.numerator(), rate.denominator()).is_some())
+    };
     match (usable(&average), usable(&guess)) {
         (Some(average), Some(base)) => {
             let (a, b) = (average.as_f64(), base.as_f64());
@@ -273,6 +275,24 @@ mod tests {
     fn no_usable_rate_is_none() {
         assert_eq!(pick_rate(Some(Rational::ZERO), Some(Rational::ZERO)), None);
         assert_eq!(pick_rate(None, None), None);
+    }
+
+    /// Malformed container rates cannot leak into frame indexing; a usable
+    /// alternate wins, otherwise the probe reports no rate.
+    #[test]
+    fn unusable_container_rates_do_not_reach_frame_indexing() {
+        let absurd = Some(Rational::new(1, i64::from(i32::MAX)));
+        let valid = Some(Rational::new(30000, 1001));
+        assert!(FrameRate::checked(1, i64::from(i32::MAX)).is_none());
+        for rejected in [absurd, Some(Rational::new(-25, 1)), Some(Rational::ZERO)] {
+            assert_eq!(pick_rate(rejected, valid), valid);
+            assert_eq!(pick_rate(valid, rejected), valid);
+            assert_eq!(pick_rate(rejected, rejected), None);
+        }
+        let selected = pick_rate(absurd, valid).unwrap();
+        let rate = FrameRate::checked(selected.numerator(), selected.denominator()).unwrap();
+        assert_eq!(rate.time_of_frame(30), Rational::new(1001, 1000));
+        assert_eq!(rate.frame_at(rate.time_of_frame(30)), 30);
     }
 
     #[test]

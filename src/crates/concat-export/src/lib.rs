@@ -22,6 +22,7 @@
 
 pub mod chains;
 pub mod flatten;
+mod output_file;
 mod resolve;
 
 use resolve::{BuiltTimeline, TransitionSpan, Treatment, animation_of, build_timeline, quantise};
@@ -893,7 +894,19 @@ pub fn render_on(
             request.rate_num, request.rate_den
         )
     })?;
+    if !(1..=concat_core::frame::MAX_SIDE).contains(&request.width)
+        || !(1..=concat_core::frame::MAX_SIDE).contains(&request.height)
+    {
+        return Err(format!(
+            "{}×{} is not a supported frame size; maximum side is {}",
+            request.width,
+            request.height,
+            concat_core::frame::MAX_SIDE
+        ));
+    }
     let output = PathBuf::from(&request.output);
+    let files = output_file::OutputFiles::new(&output)?;
+    reporter.cancelled()?;
 
     // Transitions become overlaps, ramps and fade filters before anything
     // else reads the clip list, so the picture and sound paths below never
@@ -945,24 +958,9 @@ pub fn render_on(
         return Err("the timeline is empty".to_owned());
     }
 
-    // Render into siblings of the output so the move at the end stays on one
-    // filesystem, then clean up whatever we made.
-    let stem = output
-        .file_stem()
-        .map_or_else(|| "concat".into(), |s| s.to_string_lossy());
-    let directory = output.parent().unwrap_or(Path::new("."));
-    // The folder the file goes in is made when it is not there. A phone's
-    // Movies folder under the app's own files does not exist until the
-    // first export, and every phone's first export stopped at "no such
-    // file or directory" before a frame was drawn (#280, #147).
-    if let Err(error) = std::fs::create_dir_all(directory) {
-        return Err(format!(
-            "could not create the folder {}: {error}",
-            directory.display()
-        ));
-    }
-    let silent = directory.join(format!(".{stem}.concat-video.mp4"));
-    let mixed = directory.join(format!(".{stem}.concat-audio.m4a"));
+    let silent = files.video();
+    let mixed = files.audio();
+    let complete = files.complete();
 
     let result = (|| -> Result<(), String> {
         render_picture(
@@ -977,8 +975,8 @@ pub fn render_on(
         )?;
 
         if sound.is_empty() {
-            std::fs::rename(&silent, &output)
-                .map_err(|error| format!("could not write {}: {error}", output.display()))?;
+            reporter.cancelled()?;
+            files.publish(&silent)?;
             return Ok(());
         }
 
@@ -989,11 +987,10 @@ pub fn render_on(
 
         reporter.cancelled()?;
         reporter.emit(total_frames, total_frames, "muxing");
-        audio::mux(&silent, &mixed, &output).map_err(|error| error.to_string())
+        audio::mux(&silent, &mixed, &complete).map_err(|error| error.to_string())?;
+        reporter.cancelled()?;
+        files.publish(&complete)
     })();
-
-    let _ = std::fs::remove_file(&silent);
-    let _ = std::fs::remove_file(&mixed);
 
     result.map(|()| output.to_string_lossy().into_owned())
 }
@@ -1330,32 +1327,39 @@ fn render_picture(
                     .get(&layer.clip)
                     .copied()
                     .unwrap_or((request.width, request.height));
-                if let Ok(frame) = sought.frame_at(
-                    &layer.media,
-                    layer.source_time,
-                    decode_width,
-                    decode_height,
-                    stills.contains(&layer.clip),
-                    None,
-                    None,
-                    ranges.get(&layer.clip).copied(),
-                    // Deep where the frame goes to the GPU as it is: a
-                    // cutout cuts eight bits.
-                    !cutouts.contains_key(&layer.clip),
-                ) {
-                    let frame = cutouts
-                        .get(&layer.clip)
-                        .and_then(|job| job.cut(&frame, layer.source_time))
-                        .map_or(frame, std::sync::Arc::new);
-                    layers.push(filled(
-                        layer,
-                        frame,
-                        tracks.get(&layer.clip).copied().unwrap_or(0),
-                        passes_at(&chains, &reveal_maps, &timeline, layer.clip, time),
-                        geometry.get(&layer.clip),
-                        shapes_at(&shapes, layer, time, rate),
-                    ));
-                }
+                // A frame that cannot be read ends the export with the
+                // reason, as it does on the paced path below. A time past
+                // the media's end is not that: the pool answers it with the
+                // last frame. This path used to drop a failed frame on the
+                // floor, so a reversed or retimed clip whose file had gone
+                // bad exported as a missing layer and nobody was told.
+                let frame = sought
+                    .frame_at(
+                        &layer.media,
+                        layer.source_time,
+                        decode_width,
+                        decode_height,
+                        stills.contains(&layer.clip),
+                        None,
+                        None,
+                        ranges.get(&layer.clip).copied(),
+                        // Deep where the frame goes to the GPU as it is: a
+                        // cutout cuts eight bits.
+                        !cutouts.contains_key(&layer.clip),
+                    )
+                    .map_err(|error| error.to_string())?;
+                let frame = cutouts
+                    .get(&layer.clip)
+                    .and_then(|job| job.cut(&frame, layer.source_time))
+                    .map_or(frame, std::sync::Arc::new);
+                layers.push(filled(
+                    layer,
+                    frame,
+                    tracks.get(&layer.clip).copied().unwrap_or(0),
+                    passes_at(&chains, &reveal_maps, &timeline, layer.clip, time),
+                    geometry.get(&layer.clip),
+                    shapes_at(&shapes, layer, time, rate),
+                ));
                 continue;
             }
             let decoder = match decoders.entry(layer.clip) {
@@ -2485,6 +2489,49 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&source);
+    }
+
+    #[test]
+    fn unsupported_export_dimensions_fail_before_output_or_gpu_work() {
+        let root =
+            std::env::temp_dir().join(format!("veycut-invalid-dimensions-{}", std::process::id()));
+        assert!(!root.exists());
+        for (width, height) in [(0, 64), (64, 0), (8193, 64), (64, u32::MAX)] {
+            let request = ExportRequest {
+                output: root.join("out.mp4").to_string_lossy().into_owned(),
+                width,
+                height,
+                rate_num: 30,
+                rate_den: 1,
+                crf: 30,
+                preset: "ultrafast".into(),
+                codec: VideoCodec::H264,
+                ten_bit: false,
+                rate_mode: RateMode::Vbr,
+                bitrate_kbps: 0,
+                color_range: concat_media::ColorRange::Limited,
+                color_space: ColorSpace::Sdr,
+                hdr: false,
+                clips: vec![clip("image", 0, 0.0, 1.0, 0.0)],
+            };
+            let cancel = AtomicBool::new(false);
+            let mut progress = |_: i64, _: i64, _: &'static str| {
+                panic!("invalid dimensions must not start rendering");
+            };
+            let result = render_on(
+                &request,
+                None,
+                Reporter {
+                    progress: &mut progress,
+                    cancel: &cancel,
+                },
+            );
+            assert!(result.unwrap_err().contains("supported frame size"));
+            assert!(
+                !root.exists(),
+                "invalid requests must create no output directory"
+            );
+        }
     }
 
     /// A device that dies under an export is replaced: first by a fresh

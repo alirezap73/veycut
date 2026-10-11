@@ -12,6 +12,14 @@ on:
         description: Run only Windows validation, reusing its build cache
         type: boolean
         default: false
+      windows_effect_only:
+        description: Diagnostic host GPU test only; use with windows_only, not full Windows validation
+        type: boolean
+        default: false
+      mac_beta:
+        description: Validate the Mac beta (Linux engine, wasm and Mac compilation; excludes Windows)
+        type: boolean
+        default: false
   # release.yml runs this before it builds anything: a tag on a red tree
   # is not a release. It names the tag, because a release started by hand
   # runs on main, and main is not what it builds.
@@ -22,6 +30,12 @@ on:
         type: string
         default: ""
       windows_only:
+        type: boolean
+        default: false
+      windows_effect_only:
+        type: boolean
+        default: false
+      mac_beta:
         type: boolean
         default: false
 
@@ -37,7 +51,12 @@ jobs:
     name: Engine tests and lints
     runs-on: ubuntu-latest
     env:
-      FFMPEG_LINUX: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-shared-8.1.tar.xz
+      # Match the native test profile for check/lint and the transport tests.
+      # Switching debug info between steps invalidates Cargo fingerprints.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      # A dated build avoids the daily replacement window of the latest assets.
+      FFMPEG_LINUX: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-10-13-04/ffmpeg-n8.1.3-17-gc389840894-linux64-gpl-shared-8.1.tar.xz
+      FFMPEG_LINUX_SHA256: 8281a68e82acc48d8bf6c1fc3276d8ad42a36a219f958d903774ebf5f95334a8
       # See build-app.yml: the version the ort crate is built against.
       ORT_VERSION: 1.28.0
     steps:
@@ -50,6 +69,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
 
       # Slint's Skia renderer links fontconfig and freetype; cpal links
       # ALSA; bindgen needs libclang; whisper.cpp is built by cmake; the
@@ -70,6 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL --retry 5 --retry-all-errors -o ffmpeg.tar.xz "$FFMPEG_LINUX"
+          echo "$FFMPEG_LINUX_SHA256  ffmpeg.tar.xz" | sha256sum --check --strict
           mkdir -p ffmpeg-dev
           tar -xf ffmpeg.tar.xz -C ffmpeg-dev --strip-components=1
           echo "FFMPEG_DIR=$PWD/ffmpeg-dev" >> "$GITHUB_ENV"
@@ -172,6 +194,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
           key: wasm32
       - run: >
           cargo clippy
@@ -188,14 +212,16 @@ jobs:
   # not tested, and is tested where it is developed. No GPU on either
   # runner: the GPU tests skip rather than fail.
   desktop:
-    name: ${{ matrix.verb }} on ${{ matrix.os }}
+    name: ${{ inputs.windows_effect_only && 'GPU diagnostic' || matrix.verb }} on ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]') }}
+        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2025","sherpa":"win-x64","verb":"Tests"}]' || inputs.mac_beta && '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2025","sherpa":"win-x64","verb":"Tests"}]') }}
     runs-on: ${{ matrix.os }}
     env:
-      FFMPEG_WINDOWS: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      FFMPEG_WINDOWS: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-10-13-04/ffmpeg-n8.1.3-17-gc389840894-win64-gpl-shared-8.1.zip
+      FFMPEG_WINDOWS_SHA256: fddee8b730220ab6973c1cd1de5a90c4f349bcba50f906798e25c2afc0a5d07e
     steps:
       - uses: actions/checkout@v7
         with:
@@ -216,6 +242,10 @@ jobs:
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
           curl.exe -fsSL --retry 5 --retry-all-errors -o ffmpeg-win.zip "$env:FFMPEG_WINDOWS"
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg download failed' }
+          if ((Get-FileHash ffmpeg-win.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:FFMPEG_WINDOWS_SHA256) {
+            throw 'FFmpeg archive checksum mismatch'
+          }
           Expand-Archive ffmpeg-win.zip -DestinationPath ffdl
           $dir = (Get-ChildItem ffdl -Directory | Select-Object -First 1).FullName
           "FFMPEG_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -250,8 +280,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
           key: check-${{ matrix.os }}
-          cache-on-failure: true
       - run: cargo check --workspace --all-targets
         if: runner.os != 'Windows'
         working-directory: src
@@ -264,22 +295,32 @@ jobs:
       - name: Compile Windows test binaries
         if: runner.os == 'Windows'
         timeout-minutes: 90
-        run: cargo test --workspace -j 1 --no-run
+        shell: pwsh
+        run: |
+          if ($env:VEYCUT_EFFECT_ONLY -eq "true") {
+            cargo test -p concat-host --features gpu -j 1 --no-run --message-format=json-render-diagnostics > "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
+          } else {
+            cargo test --workspace -j 1 --no-run --message-format=json-render-diagnostics > "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         working-directory: src
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"
+          VEYCUT_EFFECT_ONLY: ${{ inputs.windows_effect_only }}
       - name: Validate Windows effect thumbnails
         if: runner.os == 'Windows'
         timeout-minutes: 10
-        run: cargo test --workspace -j 1 cards::tests::every_card_draws_and_shows_its_package_at_work -- --exact --test-threads=1 --nocapture
-        working-directory: src
+        shell: pwsh
+        run: ./scripts/run-windows-effect-test.ps1 -Artifacts "$env:RUNNER_TEMP/veycut-test-artifacts.jsonl"
         env:
+          VEYCUT_GPU_TEST_LOG: "1"
+          CONCAT_LOG: error
           CARGO_PROFILE_DEV_DEBUG: "0"
           WGPU_DX12_COMPILER: dxc
           CONCAT_REQUIRE_GPU: "1"
       - run: cargo test --workspace -j 1 -- --test-threads=1 --nocapture
-        if: runner.os == 'Windows'
-        timeout-minutes: 30
+        if: runner.os == 'Windows' && !inputs.windows_effect_only
+        timeout-minutes: 45
         working-directory: src
         env:
           CARGO_PROFILE_DEV_DEBUG: "0"

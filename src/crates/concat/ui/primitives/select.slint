@@ -19,6 +19,8 @@ export component Select inherits Rectangle {
     /// the list to compare.
     in property <[string]> details;
     in-out property <int> current;
+    /// Keep a controller binding intact; the changed callback owns selection.
+    in property <bool> controlled: false;
     in property <string> placeholder: "Select";
     /// leading adornment on the trigger
     in property <Glyph> glyph: Glyph.none;
@@ -123,7 +125,7 @@ export component Select inherits Rectangle {
 
     function commit(index: int) {
         if (index >= 0 && index < root.options.length && !root.off(index)) {
-            root.current = index;
+            if (!root.controlled) { root.current = index; }
             root.changed(index);
         }
         list.close();

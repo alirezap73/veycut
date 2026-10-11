@@ -1,5 +1,7 @@
 # Fork release checklist
 
+Use [the version and commit policy](docs/VERSIONING.md) for release numbering.
+
 ## Source candidate
 
 - [x] Preserve upstream source, copyright, licenses and dependency lockfile.
@@ -50,3 +52,19 @@ Publish source updates for server validation. Publish a Mac preview only after i
 ## Published preview
 
 [VeyCut 0.2.0 preview.1](https://github.com/alirezap73/veycut/releases/tag/v0.2.0-preview.1) was published from `18dd62d3fff2edca5a61caae7c9b544eadd7108e`. [Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38024725413) and [package inspection](https://github.com/alirezap73/veycut/actions/runs/38027085464) passed. The app is ad-hoc signed and not Apple-notarized; no Windows, Linux or mobile installer is included. [Windows validation](https://github.com/alirezap73/veycut/actions/runs/38024989783) remains separate.
+
+## 0.3.0 source candidate
+
+- [x] Cancellable missing-media search with ambiguous filenames and bounded/partial trees covered by standalone tests.
+- [x] English/Persian quick-start guide covering export and recovery.
+- [x] Selectable output resolutions with aspect preservation and even encoder dimensions.
+- [x] Per-job work files and final publication that refuses an existing destination.
+- [x] Generation/project guards for cancelled export replies.
+- [x] Five filesystem regression checks and five export path/dimension checks pass without media services.
+- [x] Windows GPU-test timeout excludes compilation by executing its exact compiled binary.
+- [x] 763 Linux native test invocations, macOS compilation, wasm and 209 development checks passed; resized caption/audio output and actual export dropdown selection/reset reviewed.
+- [x] Exact source `231e726` built and Mac package inspected; checksum and native startup verified.
+- [ ] Publish a new preview after completing the beta milestone; the 0.3.0 draft remains unpublished.
+- [ ] Windows native validation passes. Compilation completed, then the effect test reported GPU device loss and reached its timeout; Windows is outside the Mac beta scope.
+
+The public preview remains 0.2.0-preview.1. The 0.3.0 package is an unpublished candidate; see [beta criteria](docs/BETA-READINESS.md). Keep the development version fixed until a tested milestone is ready.

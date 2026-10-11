@@ -46,6 +46,11 @@ where the sharp edges are. Read it before touching the engine.
 
 ## Checks
 
+Follow [VeyCut's version and commit policy](docs/VERSIONING.md): describe the
+change in routine commit titles, keep the development version fixed during
+validation, and use patch increments for small releases. Publishing a release
+requires the separate beta and package checks.
+
 Run these before opening a PR:
 
 ```sh

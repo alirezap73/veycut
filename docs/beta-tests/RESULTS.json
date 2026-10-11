@@ -1,0 +1,26 @@
+{
+  "source_revision": "e46372af035b073ddf3fa04673dcd82d6c66ded2",
+  "split_verified": true,
+  "subtitle_verified": true,
+  "gui_export_verified": true,
+  "imported_media_placement_verified": true,
+  "subtitle_import_undo_verified": true,
+  "subtitle_file_export_verified": true,
+  "edited_project_reopen_verified": true,
+  "run_url": "https://github.com/alirezap73/veycut/actions/runs/38085438701",
+  "workflow_revision": "4b302a0",
+  "scenario_steps": 55,
+  "installer_sha256": "bfa886a430bdd9b20352a683f9e706970bfb29a2cd3d35bac3db615d6dd88df5",
+  "visual_review": {
+    "persian_shaping": "observed in export-frame-0.4.png",
+    "edited_caption_rendering": "GUI subtitle pass observed in export-frame-1.4.png"
+  },
+  "fixture": "generated two-second portrait MP4 with baked captions and synthetic tone",
+  "unverified": [
+    "independent-machine installation",
+    "longer user footage and editing sessions",
+    "packaged trim/move gestures",
+    "drag/drop",
+    "transcription"
+  ]
+}

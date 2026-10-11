@@ -22,13 +22,17 @@
 //! Linux), and a machine with neither gets `None`, which the caller reports.
 //! Never panic over a missing GPU.
 //!
-//! Two outputs. [`Compositor::composite`] reads the frame back for the
-//! encoder. [`WgpuCompositor::composite_texture`] leaves it on the GPU as a
+//! Two outputs. [`Compositor::render`] reads the frame back for the
+//! encoder. [`WgpuCompositor::render_texture`] leaves it on the GPU as a
 //! texture the window can show directly - when the compositor was built on
 //! the window's own device with [`WgpuCompositor::with_device`], that is the
 //! monitor with no copy anywhere.
 
 use std::collections::HashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use concat_core::frame::Frame;
 use concat_core::shader::{Lut, RevealMap, ShaderPass, TransitionPass};
@@ -620,10 +624,11 @@ pub struct WgpuCompositor {
     stages: Option<(u32, u32, [wgpu::Texture; 2])>,
     /// A one-pixel opaque white picture: the mask of a layer without one.
     white: std::sync::Arc<Frame>,
-    /// Set when a readback fails - a lost or reset device. The compositor
-    /// then answers every composite from the CPU reference instead: slower,
-    /// always correct, and never a panic in the middle of an export.
+    /// Set when readback fails. Further frames are black with `lost` set,
+    /// so the export retries or reports failure instead of publishing those pixels.
     dead: bool,
+    /// Shared across siblings: an uncaptured error invalidates every frame on this device.
+    device_failed: Arc<AtomicBool>,
 }
 
 impl WgpuCompositor {
@@ -705,13 +710,6 @@ impl WgpuCompositor {
             let (device, queue) =
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                     .ok()?;
-            // The reason, when it dies, in the log: see the window's device.
-            let name = adapter.get_info().name;
-            device.set_device_lost_callback(move |reason, message| {
-                log::error!(
-                    "the compositor's GPU device on {name} was lost ({reason:?}): {message}"
-                );
-            });
             Some(Self::with_device(device, queue))
         })
     }
@@ -728,12 +726,37 @@ impl WgpuCompositor {
     /// shares the GPU's time with this one and nothing else, so it never
     /// waits on this one's lock or evicts what this one keeps.
     pub fn sibling(&self) -> Self {
-        Self::with_device(self.device.clone(), self.queue.clone())
+        Self::with_shared_device(
+            self.device.clone(),
+            self.queue.clone(),
+            self.device_failed.clone(),
+        )
     }
 
     /// Builds a compositor on a device the caller owns - the window's, so a
     /// texture this draws is one the window can show.
     pub fn with_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let failed = Arc::new(AtomicBool::new(false));
+        let uncaptured = failed.clone();
+        device.on_uncaptured_error(Arc::new(move |error| {
+            uncaptured.store(true, Ordering::Release);
+            log::error!("GPU uncaptured error: {error}");
+        }));
+        let lost = failed.clone();
+        let name = device.adapter_info().name;
+        device.set_device_lost_callback(move |reason, message| {
+            lost.store(true, Ordering::Release);
+            log::error!("GPU device on {name} was lost ({reason:?}): {message}");
+        });
+        Self::with_shared_device(device, queue, failed)
+    }
+
+    // A sibling shares the installed callbacks; reinstalling would detach earlier compositors.
+    fn with_shared_device(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        device_failed: Arc<AtomicBool>,
+    ) -> Self {
         // Read before the device moves into the compositor below.
         let budget = pool_budget_for(device.adapter_info().device_type);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1162,13 +1185,14 @@ impl WgpuCompositor {
                 std::sync::Arc::new(white)
             },
             dead: false,
+            device_failed,
         }
     }
 
-    /// Whether the device has been lost. A dead compositor answers
-    /// [`Compositor::composite`] from the CPU and refuses textures.
+    /// Whether this compositor or its shared device has failed. A dead
+    /// compositor refuses textures and reports `lost` for frame exports.
     pub fn is_dead(&self) -> bool {
-        self.dead
+        self.dead || self.device_failed.load(Ordering::Acquire)
     }
 
     /// Waits until the device has done everything asked of it so far: how
@@ -1176,12 +1200,16 @@ impl WgpuCompositor {
     /// handed back is drawn, without reading it back. False when the
     /// device did not answer.
     pub fn finish(&self) -> bool {
+        if self.is_dead() {
+            return false;
+        }
         self.device
             .poll(wgpu::PollType::Wait {
                 submission_index: None,
                 timeout: Some(std::time::Duration::from_secs(30)),
             })
             .is_ok()
+            && !self.is_dead()
     }
 
     /// The next presentable texture for this output size.
@@ -1506,10 +1534,9 @@ impl WgpuCompositor {
     /// back: `Rgba8Unorm`, bindable and renderable, exactly the plan's
     /// size. The texture is one of a small ring, so the caller may keep
     /// showing the previous one while this draws. `None` when the device
-    /// is dead; the caller then falls back to [`Compositor::render`] on a
-    /// CPU compositor.
+    /// has failed; callers must not present or export its textures.
     pub fn render_texture(&mut self, plan: &FramePlan) -> Option<wgpu::Texture> {
-        if self.dead {
+        if self.is_dead() {
             return None;
         }
         let (draws, vertices) = self.prepare(plan);
@@ -1521,7 +1548,7 @@ impl WgpuCompositor {
         self.resolve(&mut encoder, (plan.width, plan.height), canvas, &view);
         self.queue.submit([encoder.finish()]);
         self.retire();
-        Some(texture)
+        (!self.is_dead()).then_some(texture)
     }
 
     /// Runs `pass` once over a sixteen-pixel-square picture and waits at
@@ -1544,7 +1571,7 @@ impl WgpuCompositor {
         side: u32,
         timeout: std::time::Duration,
     ) -> Result<(), String> {
-        if self.dead {
+        if self.is_dead() {
             return Err("the GPU device is dead".to_owned());
         }
         let side = side.max(1);
@@ -1605,7 +1632,7 @@ impl WgpuCompositor {
         side: u32,
         seconds: f32,
     ) -> Option<[f32; 4]> {
-        if self.dead {
+        if self.is_dead() {
             return None;
         }
         let side = side.max(1);
@@ -1628,7 +1655,7 @@ impl WgpuCompositor {
         side: u32,
         seconds: f32,
     ) -> Option<[f32; 4]> {
-        if self.dead {
+        if self.is_dead() {
             return None;
         }
         let side = side.max(1);
@@ -1751,7 +1778,7 @@ impl WgpuCompositor {
         {
             *channel = half::f16::from_le_bytes([bytes[0], bytes[1]]).to_f32();
         }
-        Some(out)
+        (!self.is_dead()).then_some(out)
     }
 
     /// The render passes: every draw over `clear` into `view`, which is a
@@ -2673,7 +2700,7 @@ impl WgpuCompositor {
         to: &FramePlan,
         pass: &TransitionPass,
     ) -> Option<wgpu::Texture> {
-        if self.dead {
+        if self.is_dead() {
             return None;
         }
         let (width, height, time) = (from.width, from.height, from.seconds());
@@ -2702,7 +2729,7 @@ impl WgpuCompositor {
         self.resolve(&mut encoder, (width, height), canvas, &out_view);
         self.queue.submit([encoder.finish()]);
         self.retire();
-        Some(out)
+        (!self.is_dead()).then_some(out)
     }
 
     /// The two transition stages at this size, made on first use.
@@ -3168,14 +3195,16 @@ impl WgpuCompositor {
     /// Copies the rendered target back into a [`Frame`], forcing it opaque.
     ///
     /// `None` means the mapping failed - a lost or reset device, the one GPU
-    /// failure the constructor's never-panic policy cannot rule out up
-    /// front. The caller falls back to the CPU compositor rather than
-    /// panicking mid-export.
+    /// failure the constructor cannot rule out up front. The caller marks
+    /// this compositor failed so the export can retry or stop without publication.
     /// `None` when the device did not deliver the pixels - a lost device,
     /// a failed map - and the caller then marks this compositor dead. The
     /// map's own result is what decides, not the poll's: a poll can return
     /// without the map having been served.
     fn read_back(&mut self) -> Option<Frame> {
+        if self.is_dead() {
+            return None;
+        }
         let deep = self.delivering_hdr();
         let target = if deep {
             self.deep_target.as_ref()?
@@ -3210,6 +3239,11 @@ impl WgpuCompositor {
             }
         }
 
+        if self.is_dead() {
+            target.staging.unmap();
+            return None;
+        }
+
         if deep {
             // Sixteen-bit integers, opaque already: the rows as they are.
             let row_bytes = width as usize * 8;
@@ -3222,7 +3256,11 @@ impl WgpuCompositor {
                 }
             }
             target.staging.unmap();
-            return Frame::from_rgba64(width, height, pixels, self.output);
+            return if self.is_dead() {
+                None
+            } else {
+                Frame::from_rgba64(width, height, pixels, self.output)
+            };
         }
         let mut frame = Frame::transparent(width, height);
         {
@@ -3241,7 +3279,7 @@ impl WgpuCompositor {
             }
         }
         target.staging.unmap();
-        Some(frame)
+        (!self.is_dead()).then_some(frame)
     }
 }
 
@@ -3250,7 +3288,7 @@ impl Compositor for WgpuCompositor {
         // A dead device never comes back for this instance. What it hands
         // back is black, never a mid-export panic, and `lost` says so: the
         // export stops with an error rather than write a file of black.
-        if self.dead {
+        if self.is_dead() {
             return Frame::black(plan.width, plan.height);
         }
         let (draws, vertices) = self.prepare(plan);
@@ -3265,7 +3303,7 @@ impl Compositor for WgpuCompositor {
     }
 
     fn lost(&self) -> bool {
-        self.dead
+        self.is_dead()
     }
 
     fn deliver_hdr(&mut self, on: bool) {
@@ -3281,7 +3319,7 @@ impl Compositor for WgpuCompositor {
         to: &Frame,
         pass: &TransitionPass,
     ) -> Option<Frame> {
-        if self.dead {
+        if self.is_dead() {
             return None;
         }
         // The two pictures, uploaded into the working space as any frame
@@ -3347,6 +3385,9 @@ impl WgpuCompositor {
     /// Draws into the readback target and copies it out: one submit, one
     /// wait. `None` when the device did not deliver the pixels.
     fn render_and_read(&mut self, width: u32, height: u32, draws: &[Draw]) -> Option<Frame> {
+        if self.is_dead() {
+            return None;
+        }
         let (canvas, canvas_texture, canvas_view) = self.canvas(width, height);
         self.target(width, height);
         let target = self.current_target();

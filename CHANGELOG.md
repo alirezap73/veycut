@@ -1,5 +1,24 @@
 # VeyCut changelog
 
+## 0.3.1 — development patch (2026-10-11, unpublished)
+
+- Detached sound and picture move independently unless explicitly selected together; the reattachment link is retained.
+- The track-add menu exposes top and bottom placement as directly clickable rows.
+- Audio meter labels display their actual negative dB values. Initial and resized nested layouts enforce the stereo pane's 64-pixel width where space permits; very small windows shrink without overlapping panes.
+- The caption Edit tab adds a chronological cue list with time ranges, bounded text previews and 50-row pages; choosing a cue selects its title and seeks to its start. Stale project/timeline tokens are rejected.
+- Copy/paste preserves a selected group's timing, track layout and full clip properties across timelines; invalid destinations refuse the whole edit.
+- The duplicate shortcut accepts multiple selected clips and selects every new copy for subsequent group editing.
+- Titles and captions render supported PNG/BGRA strikes and COLR v0 solid colour layers, with bounded decoding/layers, palette alpha and title foreground, bitmap-first fallback and word-highlight/background preservation. COLR v1/SVG fonts, palette selection and identical Slint text-widget rendering are outside this change.
+- The audio meter adds a dB ruler, stereo labels and a held-peak reading, retaining the compact dock and clickable clip indicator.
+- Uncaptured GPU errors and device loss invalidate all compositors sharing the device. Failed textures/readbacks are refused and frame exports use the existing device-recovery path; scoped shader rejections remain recoverable.
+- A bundled Noto Sans CJK subset supplies UI fallback and title glyphs without system fonts. Common Chinese/Korean characters, kana and shipped CJK labels are covered; rare characters outside the subset and region-specific glyph forms remain limited.
+- Still-image reads preserve fitted dimensions, and unusable container frame rates fall back before reaching frame arithmetic.
+- Native media/LUT import, frame/audio/subtitle save and folder dialogs run without borrowing editor state across their nested event loop; replies from a previous project are discarded.
+- Invalid oversized project/export dimensions and extreme loaded clip times are bounded; unreadable sought video frames fail export instead of silently omitting a layer.
+- Packaged-editor scenarios exercise clip movement, both edge trims, grouped clipboard operations, track placement and a 32-second repeated-media export on a Mac runner. A failed run remains partial evidence until its corrected scenario passes.
+
+Native validation and a matching installer inspection are required for these source changes. The previously verified 0.3.0 package does not contain them. This patch increment does not create a public beta release.
+
 ## 0.2.0 — source upgrade (2026-10-10)
 
 - Caption Create/Files/Edit workspace, WebVTT import/export and selected/all-text scope.

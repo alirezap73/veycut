@@ -1750,3 +1750,39 @@ fn the_software_compositor_draws_on_a_software_adapter_or_not_at_all() {
         assert_eq!(gpu.adapter_info().device_type, wgpu::DeviceType::Cpu);
     }
 }
+
+// A captured shader rejection is recoverable. An uncaptured validation error
+// poisons the shared device and must never yield a publishable frame or texture.
+#[test]
+fn uncaptured_validation_error_invalidates_all_device_siblings() {
+    let Some(mut gpu) = gpu() else { return };
+    let mut sibling = gpu.sibling();
+    let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let _ = gpu
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("captured invalid test shader"),
+            source: wgpu::ShaderSource::Wgsl("this is not WGSL".into()),
+        });
+    assert!(pollster::block_on(scope.pop()).is_some());
+    assert!(!gpu.is_dead() && !sibling.is_dead());
+
+    let _ = sibling
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("uncaptured invalid test shader"),
+            source: wgpu::ShaderSource::Wgsl("this is not WGSL".into()),
+        });
+    let _ = gpu.device.poll(wgpu::PollType::Poll);
+    assert!(gpu.is_dead() && sibling.is_dead());
+    assert!(gpu.lost() && sibling.lost());
+    let plan = FramePlan::empty(4, 4);
+    assert!(gpu.render_texture(&plan).is_none());
+    assert!(sibling.render_texture(&plan).is_none());
+    let _ = sibling.render(&plan);
+    assert!(
+        sibling.lost(),
+        "a rejected device must not become publishable after rendering"
+    );
+    assert!(!gpu.finish());
+}

@@ -561,9 +561,19 @@ impl Studio {
     /// the reopened one must flatten to the same clips: what was exported
     /// is what will be exported tomorrow.
     fn export_at(&mut self, label: &str, rate: Option<(i64, i64)>) -> Exported {
+        self.export_sized(label, rate, None)
+    }
+
+    fn export_sized(
+        &mut self,
+        label: &str,
+        rate: Option<(i64, i64)>,
+        size: Option<(u32, u32)>,
+    ) -> Exported {
         self.count += 1;
         let label = format!("{:02} {label}", self.count).replace('/', "-");
         let settings = self.session.settings();
+        let (width, height) = size.unwrap_or((settings.width, settings.height));
         let spec = ExportSpec {
             output: self
                 .exports
@@ -581,11 +591,13 @@ impl Studio {
         };
         let titles = self
             .titles
-            .clips(self.session.project(), settings.width, settings.height)
+            .clips(self.session.project(), width, height)
             .into_iter()
             .map(|title| title.clip)
             .collect();
         let mut request = export::request(&self.session, &spec, titles);
+        request.width = width;
+        request.height = height;
         if let Some((num, den)) = rate {
             request.rate_num = num;
             request.rate_den = den;
@@ -1805,11 +1817,61 @@ fn an_export_decodes_on_the_hardware_when_preferred() {
     // stream the preference leaves on the CPU, which decodes it faster
     // (concat_media::hardware::hardware_wins).
     let sources = Sources::make_in(scratch.path(), VideoCodec::Hevc);
-    // A reader opened the way the engine opens them follows the preference
-    // onto the device, on a machine that has one.
+    // A platform default names the API to request, not a usable decoder.
+    // In particular, Windows CI's software GPU need not provide HEVC
+    // acceleration. Compare the preference with an explicit request for
+    // this same stream after decoding, when fallback has taken effect.
+    let requested = HwDevice::platform_default().map_or_else(
+        || DecodeOptions::default().in_software(),
+        |device| DecodeOptions::default().accelerated(device),
+    );
+    let mut explicit = Decoder::open(&sources.peek, &requested).expect("explicit request opens");
+    let explicit_frame = explicit.next_frame().expect("decodes").expect("a frame");
+    let explicit_at = explicit.position();
+    let actual_hardware = explicit.hardware();
+    if std::env::var("VEYCUT_REQUIRE_HW_DECODE").as_deref() == Ok("1") {
+        assert!(
+            actual_hardware.is_some(),
+            "hardware decoding is required on this machine"
+        );
+        assert_eq!(actual_hardware, HwDevice::platform_default());
+    }
+    eprintln!(
+        "HEVC decode requested {:?}; actual {actual_hardware:?}",
+        HwDevice::platform_default()
+    );
+
+    let mut software = Decoder::open(&sources.peek, &DecodeOptions::default().in_software())
+        .expect("software reference opens");
+    let software_frame = software.next_frame().expect("decodes").expect("a frame");
+    let software_at = software.position();
     let mut reader = Decoder::open(&sources.peek, &DecodeOptions::default()).expect("opens");
-    reader.next_frame().expect("decodes").expect("a frame");
-    assert_eq!(reader.hardware(), HwDevice::platform_default());
+    let preferred_frame = reader.next_frame().expect("decodes").expect("a frame");
+    let preferred_at = reader.position();
+    assert_eq!(
+        reader.hardware(),
+        actual_hardware,
+        "preference follows the explicit request"
+    );
+    assert_eq!(preferred_at, explicit_at);
+    assert_eq!(preferred_at, software_at);
+    for frame in [&explicit_frame, &preferred_frame] {
+        assert_eq!(frame.width(), software_frame.width());
+        assert_eq!(frame.height(), software_frame.height());
+        let difference = frame
+            .pixels()
+            .iter()
+            .zip(software_frame.pixels())
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            difference <= 8,
+            "decoded frame differs from software by {difference} levels"
+        );
+    }
+    drop(explicit);
+    drop(software);
     drop(reader);
     let mut studio = Studio::new(scratch.path(), "Hardware", video(WIDTH, HEIGHT, 30, 1));
     let peek = studio.import(&sources.peek);
@@ -2022,4 +2084,199 @@ fn vertical_bilingual_captions_export_with_audio_and_reopen() {
         )
         .unwrap();
     }
+}
+
+/// The same portrait edit renders at a smaller size without mutating the project
+/// or losing the title's relative size/placement, timing or stereo audio.
+#[test]
+fn portrait_export_can_resize_without_changing_the_project() {
+    let scratch = Scratch::new("veycut-resized-portrait");
+    let wav = scratch.path().join("sound.wav");
+    clock_wav(&wav, 2);
+    let mut studio = Studio::new(scratch.path(), "Resize portrait", video(1080, 1920, 30, 1));
+    let media = studio.import(&wav);
+    studio.apply(Command::AddClipAtFirstFree {
+        media_id: media,
+        start: 0.0,
+    });
+    studio.apply(Command::AddTextClip {
+        track_id: None,
+        above: true,
+        start: 0.0,
+        duration: Some(2.0),
+        offset_y: Some(0.25),
+        style: Some(concat_project::subtitles::caption_style(
+            "سلام VeyCut".into(),
+            0.06,
+            None,
+            concat_project::subtitles::CaptionAppearance::Outline,
+        )),
+    });
+    let size = concat_host::export_paths::video_frame((1080, 1920), 360).unwrap();
+    let output = studio.export_sized("portrait at smaller size", None, Some(size));
+    output.expect_length(2.0);
+    output.expect_sound(2.0);
+    assert_eq!(output.frames.len(), 60);
+    let frame = &output.frames[15];
+    assert_eq!((frame.width(), frame.height()), (360, 640));
+    let mut bright = Vec::new();
+    for y in 0..640usize {
+        for x in 0..360usize {
+            let pixel = &frame.pixels()[(y * 360 + x) * 4..][..3];
+            if pixel.iter().all(|value| *value > 200) {
+                bright.push((x, y));
+            }
+        }
+    }
+    assert!(
+        !bright.is_empty(),
+        "resized bilingual title must be visible"
+    );
+    let center_y = bright.iter().map(|(_, y)| *y as f64).sum::<f64>() / bright.len() as f64;
+    assert!(
+        (430.0..550.0).contains(&center_y),
+        "caption retains lower placement: {center_y}"
+    );
+    assert_eq!(
+        (
+            studio.session.settings().width,
+            studio.session.settings().height
+        ),
+        (1080, 1920)
+    );
+    if let Some(directory) = std::env::var_os("VEYCUT_ARTIFACT_DIR") {
+        std::fs::write(
+            PathBuf::from(directory).join("resized-portrait-caption.jpg"),
+            concat_media::jpeg(frame, 2).unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+/// A person can cancel a running export and retry it without leftover files.
+/// If another application creates the destination during the retry, its bytes
+/// survive publication, and choosing the name again after removing that file
+/// produces a fully decodable video and audio stream from the unchanged edit.
+#[test]
+fn cancelled_export_and_destination_race_allow_a_clean_retry() {
+    use std::sync::atomic::Ordering;
+
+    let scratch = Scratch::new("veycut-export-retry");
+    let wav = scratch.path().join("sound.wav");
+    clock_wav(&wav, 2);
+    let mut studio = Studio::new(scratch.path(), "Export retry", video(WIDTH, HEIGHT, 30, 1));
+    let sound = studio.import(&wav);
+    studio.apply(Command::AddClipAtFirstFree {
+        media_id: sound,
+        start: 0.0,
+    });
+    let original_edit = studio.session.flattened_clips();
+    let destination = studio.exports.join("finished.mp4");
+    let unrelated = studio.exports.join("keep.txt");
+    std::fs::write(&unrelated, b"another application's file").unwrap();
+    let spec = ExportSpec {
+        output: destination.to_string_lossy().into_owned(),
+        crf: 18,
+        preset: "ultrafast".into(),
+        codec: VideoCodec::H264,
+        ..ExportSpec::default()
+    };
+    let request = export::request(&studio.session, &spec, Vec::new());
+    let folder_entries = || {
+        let mut entries: Vec<_> = std::fs::read_dir(&studio.exports)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        entries.sort();
+        entries
+    };
+    let before = folder_entries();
+
+    // Stop from a progress report after encoding has started, rather than
+    // setting the flag before the exporter has opened any work files.
+    let cancel = AtomicBool::new(false);
+    let mut rendered_before_cancellation = false;
+    let cancelled = export::run(&request, &cancel, |progress| {
+        if progress.stage == "rendering" && progress.frame > 0 {
+            assert!(progress.frame < progress.total);
+            rendered_before_cancellation = true;
+            cancel.store(true, Ordering::Relaxed);
+        }
+    });
+    assert!(
+        rendered_before_cancellation,
+        "cancellation interrupts a real render"
+    );
+    assert!(cancelled.is_err(), "cancelled export cannot report success");
+    assert!(
+        !destination.exists(),
+        "cancelled export leaves no final output"
+    );
+    assert_eq!(
+        folder_entries(),
+        before,
+        "cancelled export removes only its work files"
+    );
+    assert_eq!(
+        std::fs::read(&unrelated).unwrap(),
+        b"another application's file"
+    );
+
+    // This happens after preflight has accepted the absent destination, so
+    // the whole exporter must refuse to replace it at publication time.
+    let cancel = AtomicBool::new(false);
+    let mut created_during_render = false;
+    let collision = export::run(&request, &cancel, |progress| {
+        if progress.stage == "rendering" && progress.frame > 0 && !created_during_render {
+            std::fs::write(&destination, b"created by another application").unwrap();
+            created_during_render = true;
+        }
+    });
+    assert!(
+        created_during_render,
+        "destination appeared after render started"
+    );
+    assert!(
+        collision.is_err(),
+        "destination collision cannot report success"
+    );
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"created by another application"
+    );
+    let mut expected = before;
+    expected.push(destination.file_name().unwrap().to_os_string());
+    expected.sort();
+    assert_eq!(
+        folder_entries(),
+        expected,
+        "failed publication leaves no work files"
+    );
+
+    std::fs::remove_file(&destination).unwrap();
+    let written = export::run(&request, &AtomicBool::new(false), |_| {})
+        .expect("a fresh export succeeds after cancellation and a destination collision");
+    let exported = Exported::read(
+        "retry after cancellation and collision",
+        Path::new(&written),
+        (30, 1),
+    );
+    exported.expect_length(2.0);
+    exported.expect_sound(2.0);
+    exported.expect_quiet(0.5);
+    exported.expect_tone(1.5);
+    assert_eq!(exported.frames.len(), 60);
+    assert_eq!(
+        folder_entries(),
+        expected,
+        "successful retry leaves only the final output"
+    );
+    assert_eq!(
+        std::fs::read(&unrelated).unwrap(),
+        b"another application's file"
+    );
+    assert!(
+        studio.session.flattened_clips() == original_edit,
+        "export attempts preserve the timeline"
+    );
 }

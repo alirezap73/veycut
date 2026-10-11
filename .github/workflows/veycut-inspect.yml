@@ -7,6 +7,47 @@ on:
         description: Successful Mac candidate run to inspect without rebuilding
         required: true
         type: string
+      session_seconds:
+        description: Seconds to observe each idle editor launch (30 to 180)
+        type: string
+        default: '30'
+      launch_cycles:
+        description: Launches on the same runner profile (1 to 3)
+        type: string
+        default: '1'
+      accessibility_probe:
+        description: Inspect native UI automation capability on the runner
+        type: boolean
+        default: false
+      project_smoke:
+        description: Exercise native project open/save and failed-close recovery
+        type: boolean
+        default: false
+      editor_probe:
+        description: Capture packaged editor and export sheet for GUI test targeting
+        type: boolean
+        default: false
+      gui_actions:
+        description: Bounded JSON GUI steps using screenshot-confirmed window coordinates
+        type: string
+        default: '[]'
+      core_gui:
+        description: Run the committed import, split, captions, reopen and video export scenario
+        type: boolean
+        default: false
+      extended_gui:
+        description: Exercise clip movement, edge trims and a 32-second repeated-media export
+        type: boolean
+        default: false
+      caption_navigation_gui:
+        description: Check packaged caption navigation via pointer, keyboard and 55-row pagination
+        type: boolean
+        default: false
+
+      real_media_probe:
+        description: Import and reopen an official full-length 640x359 movie through the native picker
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,7 +57,7 @@ jobs:
   inspect:
     if: github.repository == 'alirezap73/veycut'
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,7 +71,7 @@ jobs:
           [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > "$RUNNER_TEMP/candidate.json"
           python3 - <<'PYTHON'
-          import json, os, pathlib, subprocess
+          import json, os, pathlib, re, subprocess
           run = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'candidate.json').read_text())
           assert run['path'] == '.github/workflows/veycut-candidate.yml'
           assert run['status'] == 'completed' and run['conclusion'] == 'success'
@@ -40,6 +81,13 @@ jobs:
           assert all(p.endswith('.md') or p.startswith('docs/') or p == '.github/workflows/veycut-inspect.yml' for p in changed), changed
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write('PACKAGE_REVISION=' + revision + '\n')
+              manifest = subprocess.check_output(['git', 'show', revision + ':src/Cargo.toml'], text=True)
+              version = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"', manifest, re.M).group(1)
+              f.write('PACKAGE_VERSION=' + version + '\n')
+              panel = subprocess.check_output(['git', 'show', revision + ':src/crates/concat/ui/primitives/panel.slint'], text=True)
+              icon_button = panel.split('export component IconButton', 1)[1]
+              accessible_pause = 'accessible-role: button;' in icon_button and 'accessible-label: root.label;' in icon_button
+              f.write('EXPECT_ACCESSIBLE_PAUSE=' + ('true' if accessible_pause else 'false') + '\n')
           PYTHON
       - uses: actions/download-artifact@v8
         with:
@@ -47,11 +95,43 @@ jobs:
           run-id: ${{ inputs.candidate_run }}
           name: VeyCut-macos-arm64
           path: bundles
+      - name: Ensure independent video decoder for GUI export checks
+        if: inputs.core_gui || inputs.extended_gui || inputs.real_media_probe || contains(inputs.gui_actions, 'video-check')
+        run: |
+          if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
+          fi
+      - name: Prepare official real media on the runner
+        if: inputs.real_media_probe
+        timeout-minutes: 12
+        env:
+          CORE_GUI: ${{ inputs.core_gui }}
+          EXTENDED_GUI: ${{ inputs.extended_gui }}
+          CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
+          GUI_ACTIONS: ${{ inputs.gui_actions }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          assert all(os.environ[name] != 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI')), 'Choose one committed GUI scenario per run'
+          assert json.loads(os.environ['GUI_ACTIONS']) == [], 'Real-media probe uses its own bounded actions'
+          PYTHON
+          python3 docs/beta-tests/real-media-runner.py prepare
       - name: Inspect mounted package and launch editor
+        env:
+          SESSION_SECONDS: ${{ inputs.session_seconds }}
+          LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
+          ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui || inputs.real_media_probe }}
+          CORE_GUI: ${{ inputs.core_gui }}
+          EXTENDED_GUI: ${{ inputs.extended_gui }}
+          CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
+          REAL_MEDIA_PROBE: ${{ inputs.real_media_probe }}
+          EDITOR_PROBE: ${{ inputs.editor_probe }}
+          GUI_ACTIONS: ${{ inputs.gui_actions }}
         run: |
           set -euo pipefail
           mkdir -p evidence "$RUNNER_TEMP/veycut-mount"
-          dmg=bundles/VeyCut-0.2.0-macos-arm64.dmg
+          dmg="bundles/VeyCut-${PACKAGE_VERSION}-macos-arm64.dmg"
           test -s "$dmg"
           shasum -a 256 "$dmg" | tee evidence/package.sha256
           hdiutil verify "$dmg" | tee evidence/dmg-verification.txt
@@ -91,29 +171,991 @@ jobs:
           print(String(data: try JSONSerialization.data(withJSONObject: own, options: [.prettyPrinted]), encoding: .utf8)!)
           exit(own.isEmpty ? 1 : 0)
           SWIFT
+          cat > "$RUNNER_TEMP/accessibility.swift" <<'SWIFT'
+          import Foundation
+          import ApplicationServices
+          import AppKit
+          let pid = pid_t(CommandLine.arguments[1])!
+          func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+              var value: CFTypeRef?
+              let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+              return status == .success ? value : nil
+          }
+          var nodes = [[String: Any]]()
+          func walk(_ element: AXUIElement, _ depth: Int) {
+              guard depth < 24 && nodes.count < 2000 else { return }
+              var node: [String: Any] = ["depth": depth]
+              for name in ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXIdentifier"] {
+                  if let value = attribute(element, name) { node[name] = String(describing: value) }
+              }
+              nodes.append(node)
+              let children = attribute(element, "AXChildren") as? [AXUIElement] ?? []
+              for child in children { walk(child, depth + 1) }
+          }
+          let app = AXUIElementCreateApplication(pid)
+          AXUIElementSetMessagingTimeout(app, 3)
+          NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+          let trusted = AXIsProcessTrusted()
+          if trusted { walk(app, 0) }
+          let report: [String: Any] = ["trusted": trusted, "node_count": nodes.count, "nodes": nodes, "interaction_verified": false]
+          print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]), encoding: .utf8)!)
+          SWIFT
+          cat > "$RUNNER_TEMP/project-ui.swift" <<'SWIFT'
+          import Foundation
+          import AppKit
+          import ApplicationServices
+          let pid = pid_t(CommandLine.arguments[1])!
+          let action = CommandLine.arguments[2]
+          guard AXIsProcessTrusted(), CGPreflightPostEventAccess() else {
+              fputs("Native UI automation permission unavailable\n", stderr)
+              exit(2)
+          }
+          guard let app = NSRunningApplication(processIdentifier: pid) else { exit(3) }
+          app.activate(options: [.activateAllWindows])
+          Thread.sleep(forTimeInterval: 1)
+          let application = AXUIElementCreateApplication(pid)
+          AXUIElementSetAttributeValue(application, "AXFrontmost" as CFString, kCFBooleanTrue)
+          var windowList: CFTypeRef?
+          AXUIElementCopyAttributeValue(application, "AXWindows" as CFString, &windowList)
+          if action != "caption-pick" && action != "caption-save" {
+              for window in windowList as? [AXUIElement] ?? [] {
+                  AXUIElementPerformAction(window, "AXRaise" as CFString)
+              }
+          }
+          func key(_ code: CGKeyCode, _ flags: CGEventFlags = []) {
+              let modifiers: [CGKeyCode] = (flags.contains(.maskCommand) ? [55] : []) + (flags.contains(.maskShift) ? [56] : [])
+              for modifier in modifiers {
+                  let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier, keyDown: true)!
+                  event.flags = flags
+                  event.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.1)
+              }
+              for down in [true, false] {
+                  let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
+                  event.flags = flags
+                  if code == 115 || code == 124 {
+                      event.flags.formUnion([.maskSecondaryFn, .maskNumericPad])
+                      var character: UniChar = code == 115 ? 0xF729 : 0xF703
+                      event.keyboardSetUnicodeString(stringLength: 1, unicodeString: &character)
+                  }
+                  event.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.1)
+              }
+              for modifier in modifiers.reversed() {
+                  let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier, keyDown: false)!
+                  event.flags = []
+                  event.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.1)
+              }
+          }
+          func contains(_ element: AXUIElement, role: String, depth: Int = 0) -> Bool {
+              guard depth < 24 else { return false }
+              var value: CFTypeRef?
+              if AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &value) == .success,
+                 (value as? String) == role { return true }
+              var subrole: CFTypeRef?
+              if AXUIElementCopyAttributeValue(element, "AXSubrole" as CFString, &subrole) == .success,
+                 (subrole as? String) == role { return true }
+              var children: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
+              return (children as? [AXUIElement] ?? []).contains { contains($0, role: role, depth: depth + 1) }
+          }
+          func snapshot(_ element: AXUIElement, _ depth: Int = 0) -> [[String: String]] {
+              guard depth < 20 else { return [] }
+              var node = ["depth": String(depth)]
+              for name in ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXValue"] {
+                  var value: CFTypeRef?
+                  if AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success, let value = value {
+                      node[name] = String(describing: value)
+                  }
+              }
+              var children: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
+              return [node] + (children as? [AXUIElement] ?? []).flatMap { snapshot($0, depth + 1) }
+          }
+          func find(_ element: AXUIElement, role: String, title: String? = nil, depth: Int = 0) -> AXUIElement? {
+              guard depth < 24 else { return nil }
+              var value: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &value)
+              var text: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXTitle" as CFString, &text)
+              if (value as? String) == role && (title == nil || (text as? String) == title) { return element }
+              var children: CFTypeRef?
+              AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
+              for child in children as? [AXUIElement] ?? [] {
+                  if let found = find(child, role: role, title: title, depth: depth + 1) { return found }
+              }
+              return nil
+          }
+          if action == "open" || action == "import" || action == "caption-pick" || action == "import-held" || action == "import-cancel" {
+              if action != "caption-pick" { key(action == "open" ? 31 : 34, .maskCommand) }
+              Thread.sleep(forTimeInterval: 3)
+              let element = AXUIElementCreateApplication(pid)
+              AXUIElementSetMessagingTimeout(element, 3)
+              guard contains(element, role: "AXSheet") || contains(element, role: "AXDialog") else {
+                  fputs("Native project picker not observed\n", stderr)
+                  exit(4)
+              }
+              if action == "import-held" || action == "import-cancel" {
+                  print("native_dialog_before_hold")
+                  print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+                  Thread.sleep(forTimeInterval: 4)
+                  guard contains(element, role: "AXSheet") || contains(element, role: "AXDialog") else { exit(21) }
+                  print("native_dialog_after_four_second_hold")
+                  print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+                  if action == "import-cancel" {
+                      key(53)
+                      Thread.sleep(forTimeInterval: 1)
+                      guard !contains(element, role: "AXSheet") && !contains(element, role: "AXDialog") else { exit(22) }
+                      print("native_dialog_cancelled")
+                      exit(0)
+                  }
+              }
+              key(5, [.maskCommand, .maskShift])
+              Thread.sleep(forTimeInterval: 2)
+              print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+              fflush(stdout)
+              guard let sheet = find(element, role: "AXSheet"), let field = find(sheet, role: "AXTextField") else { exit(6) }
+              AXUIElementSetAttributeValue(field, "AXFocused" as CFString, kCFBooleanTrue)
+              guard AXUIElementSetAttributeValue(field, "AXValue" as CFString, CommandLine.arguments[3] as CFString) == .success else { exit(7) }
+              var typed: CFTypeRef?
+              AXUIElementCopyAttributeValue(field, "AXValue" as CFString, &typed)
+              guard (typed as? String) == CommandLine.arguments[3] else { exit(8) }
+              Thread.sleep(forTimeInterval: 1)
+              key(36)
+              Thread.sleep(forTimeInterval: 2)
+              guard let open = find(element, role: "AXButton", title: "Open"), AXUIElementPerformAction(open, "AXPress" as CFString) == .success else { exit(9) }
+              // The held-panel scenario polls persisted import below; pause
+              // promptly so slow AX reads cannot run the 32-second cut out.
+              Thread.sleep(forTimeInterval: action == "import-held" ? 1 : 8)
+              print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+              print("native_picker_observed")
+          } else if action == "drag" {
+              let points = CommandLine.arguments[3].split(separator: ",").compactMap { Double($0) }
+              guard points.count == 4, points.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { exit(19) }
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == 0 && (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) == 1024 }),
+                    let bounds = window[kCGWindowBounds as String] as? [String: Double],
+                    let x = bounds["X"], let y = bounds["Y"], bounds["Height"] == 681 else { exit(20) }
+              let start = CGPoint(x: x + 1024 * points[0], y: y + 681 * points[1])
+              let end = CGPoint(x: x + 1024 * points[2], y: y + 681 * points[3])
+              func mouse(_ type: CGEventType, _ position: CGPoint) {
+                  let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: .left)!
+                  event.flags = []
+                  event.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.08)
+              }
+              mouse(.mouseMoved, start)
+              mouse(.leftMouseDown, start)
+              for step in 1...12 {
+                  let fraction = Double(step) / 12
+                  mouse(.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction))
+              }
+              mouse(.leftMouseUp, end)
+              print("native_drag \(start) -> \(end)")
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "click" || action == "double-click" {
+              let point = CommandLine.arguments[3].split(separator: ",").compactMap { Double($0) }
+              guard point.count == 2, point.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { exit(13) }
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == 0 && (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) >= 900 }),
+                    let bounds = window[kCGWindowBounds as String] as? [String: Double],
+                    let x = bounds["X"], let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"], width >= 900 else { exit(14) }
+              let location = CGPoint(x: x + width * point[0], y: y + height * point[1])
+              for count in 1...(action == "double-click" ? 2 : 1) {
+                  for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                      let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: location, mouseButton: .left)!
+                      event.flags = []
+                      event.setIntegerValueField(.mouseEventClickState, value: Int64(count))
+                      event.post(tap: .cghidEventTap)
+                      Thread.sleep(forTimeInterval: 0.08)
+                  }
+              }
+              print("native_click \(location.x),\(location.y)")
+              Thread.sleep(forTimeInterval: 2)
+
+          } else if action == "caption-control" {
+              let spec = try JSONSerialization.jsonObject(with: Data(CommandLine.arguments[3].utf8)) as! [String: String]
+              let needle = spec["contains"] ?? ""
+              let mode = spec["mode"] ?? "inspect"
+              guard ["inspect", "pointer", "return", "space"].contains(mode), needle.count <= 200 else { exit(30) }
+              func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+                  var value: CFTypeRef?
+                  return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+              }
+              func label(_ element: AXUIElement) -> String {
+                  ["AXTitle", "AXDescription", "AXValue"].compactMap {
+                      attribute(element, $0) as? String
+                  }.joined(separator: " ")
+              }
+              func buttons(_ element: AXUIElement, _ depth: Int = 0) -> [AXUIElement] {
+                  guard depth < 24 else { return [] }
+                  let own = (attribute(element, "AXRole") as? String) == "AXButton" ? [element] : []
+                  let children = attribute(element, "AXChildren") as? [AXUIElement] ?? []
+                  return own + children.prefix(200).flatMap { buttons($0, depth + 1) }
+              }
+              func focusedMatches() -> Bool {
+                  guard let focused = attribute(application, "AXFocusedUIElement") else { return false }
+                  var node = focused as! AXUIElement
+                  for _ in 0..<8 {
+                      if label(node).contains(needle) { return true }
+                      guard let parent = attribute(node, "AXParent") else { return false }
+                      node = parent as! AXUIElement
+                  }
+                  return false
+              }
+              let beforeLabels = buttons(application).map { label($0) }
+              if mode != "inspect" {
+                  guard !needle.isEmpty else { exit(31) }
+                  if mode == "pointer" {
+                      let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                      guard let window = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == 0 && (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) >= 900 }),
+                            let bounds = window[kCGWindowBounds as String] as? [String: Double],
+                            let wx = bounds["X"], let wy = bounds["Y"], let ww = bounds["Width"], let wh = bounds["Height"] else { exit(32) }
+                      var location: CGPoint?
+                      for _ in 0..<7 {
+                          guard let target = buttons(application).first(where: { label($0).contains(needle) }),
+                                let rawPosition = attribute(target, "AXPosition"), let rawSize = attribute(target, "AXSize"),
+                                CFGetTypeID(rawPosition) == AXValueGetTypeID(), CFGetTypeID(rawSize) == AXValueGetTypeID() else { exit(33) }
+                          var position = CGPoint.zero
+                          var size = CGSize.zero
+                          guard AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position),
+                                AXValueGetValue(rawSize as! AXValue, .cgSize, &size) else { exit(34) }
+                          if size.width > 0 && size.height > 0 && position.x >= wx
+                              && position.x + size.width <= wx + ww
+                              && position.y >= wy + wh * 0.12 && position.y + size.height <= wy + wh * 0.90 {
+                              location = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+                              break
+                          }
+                          let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -160, wheel2: 0, wheel3: 0)!
+                          scroll.location = CGPoint(x: wx + ww * 0.5, y: wy + wh * 0.75)
+                          scroll.post(tap: .cghidEventTap)
+                          Thread.sleep(forTimeInterval: 1)
+                      }
+                      guard let point = location else { exit(35) }
+                      for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                          CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!.post(tap: .cghidEventTap)
+                          Thread.sleep(forTimeInterval: 0.1)
+                      }
+                  } else {
+                      // Exercise Tab/Enter/Space itself, not AXPress or an
+                      // internal application callback. Require focus evidence.
+                      for _ in 0..<80 {
+                          if focusedMatches() { break }
+                          key(48)
+                      }
+                      guard focusedMatches() else { exit(36) }
+                      key(mode == "return" ? 36 : 49)
+                  }
+                  Thread.sleep(forTimeInterval: 2)
+              }
+              let afterLabels = buttons(application).map { label($0) }
+              let report: [String: Any] = ["mode": mode, "needle": needle, "before_labels": beforeLabels, "after_labels": afterLabels]
+              print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]), encoding: .utf8)!)
+          } else if action == "play-start" {
+              key(115)
+              key(49)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "play-pause-button" {
+              // Native panels can leave Space routed away from the editor.
+              // Prefer the observed AX Pause control; older packages use a verified window coordinate.
+              AXUIElementSetMessagingTimeout(application, 0.5)
+              func pauseControl(_ element: AXUIElement, _ depth: Int = 0) -> AXUIElement? {
+                  guard depth < 24 else { return nil }
+                  var role: CFTypeRef?
+                  AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &role)
+                  if (role as? String) == "AXButton" {
+                      for name in ["AXTitle", "AXDescription"] {
+                          var value: CFTypeRef?
+                          AXUIElementCopyAttributeValue(element, name as CFString, &value)
+                          if (value as? String) == "Pause" { return element }
+                      }
+                  }
+                  var children: CFTypeRef?
+                  AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
+                  for child in (children as? [AXUIElement] ?? []).prefix(200) {
+                      if let target = pauseControl(child, depth + 1) { return target }
+                  }
+                  return nil
+              }
+              guard !contains(application, role: "AXSheet") && !contains(application, role: "AXDialog") else {
+                  fputs("Native panel still open; refusing playback click\n", stderr)
+                  exit(41)
+              }
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              let point: CGPoint
+              let route: String
+              if let target = pauseControl(application) {
+                  var rawPosition: CFTypeRef?
+                  var rawSize: CFTypeRef?
+                  AXUIElementCopyAttributeValue(target, "AXPosition" as CFString, &rawPosition)
+                  AXUIElementCopyAttributeValue(target, "AXSize" as CFString, &rawSize)
+                  guard let rawPosition = rawPosition, let rawSize = rawSize,
+                        CFGetTypeID(rawPosition) == AXValueGetTypeID(),
+                        CFGetTypeID(rawSize) == AXValueGetTypeID() else { exit(38) }
+                  var position = CGPoint.zero
+                  var size = CGSize.zero
+                  guard AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position),
+                        AXValueGetValue(rawSize as! AXValue, .cgSize, &size),
+                        size.width > 0, size.height > 0 else { exit(39) }
+                  guard windows.contains(where: {
+                      guard ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid),
+                            ($0[kCGWindowLayer as String] as? Int) == 0,
+                            let bounds = $0[kCGWindowBounds as String] as? [String: Double],
+                            let x = bounds["X"], let y = bounds["Y"],
+                            let width = bounds["Width"], let height = bounds["Height"] else { return false }
+                      return width >= 900 && position.x >= x && position.y >= y
+                          && position.x + size.width <= x + width && position.y + size.height <= y + height
+                  }) else { exit(40) }
+                  point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+                  route = "observed_AX_Pause"
+              } else {
+                  guard ProcessInfo.processInfo.environment["EXPECT_ACCESSIBLE_PAUSE"] != "true" else {
+                      fputs("Package source exposes accessible buttons, but AX Pause is missing\n", stderr)
+                      exit(43)
+                  }
+                  // Older packaged IconButton has no AX role/name. This point was
+                  // observed in playback-meters-cancel.png, the complete 1024x681
+                  // window capture: Pause at (612,392), including its titlebar.
+                  let matching = windows.filter {
+                      guard ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid),
+                            ($0[kCGWindowLayer as String] as? Int) == 0,
+                            let bounds = $0[kCGWindowBounds as String] as? [String: Double] else { return false }
+                      return bounds["Width"] == 1024 && bounds["Height"] == 681
+                  }
+                  guard matching.count == 1,
+                        let bounds = matching[0][kCGWindowBounds as String] as? [String: Double],
+                        let x = bounds["X"], let y = bounds["Y"] else {
+                      fputs("No unique screenshot-confirmed 1024x681 editor window; refusing coordinate fallback\n", stderr)
+                      exit(42)
+                  }
+                  point = CGPoint(x: x + 612, y: y + 392)
+                  route = "screenshot_confirmed_coordinate_without_AX"
+              }
+              let report: [String: Any] = ["pause_control_route": route, "native_pointer_x": point.x, "native_pointer_y": point.y, "AX_Pause_observed": route == "observed_AX_Pause"]
+              print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]), encoding: .utf8)!)
+              for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                  CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.08)
+              }
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "play-toggle" {
+              key(49)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "select-all" {
+              key(0, .maskCommand)
+          } else if action == "copy" || action == "paste" {
+              key(action == "copy" ? 8 : 9, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "type-text" {
+              let characters = Array(CommandLine.arguments[3].utf16)
+              guard !characters.isEmpty && characters.count <= 200 else { exit(18) }
+              for down in [true, false] {
+                  let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down)!
+                  event.flags = []
+                  characters.withUnsafeBufferPointer { buffer in
+                      event.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress!)
+                  }
+                  event.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.1)
+              }
+          } else if action == "split" {
+              key(0, .maskCommand)
+              key(11, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "paste-text" {
+              NSPasteboard.general.clearContents()
+              guard NSPasteboard.general.setString(CommandLine.arguments[3], forType: .string) else { exit(15) }
+              key(9, .maskCommand)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "caption-save" {
+              Thread.sleep(forTimeInterval: 2)
+              guard contains(application, role: "AXSheet") || contains(application, role: "AXDialog"),
+                    let save = find(application, role: "AXButton", title: "Save") else { exit(16) }
+              print(String(data: try JSONSerialization.data(withJSONObject: snapshot(application), options: [.prettyPrinted]), encoding: .utf8)!)
+              guard AXUIElementPerformAction(save, "AXPress" as CFString) == .success else { exit(17) }
+              Thread.sleep(forTimeInterval: 3)
+          } else if action == "snapshot" {
+              guard CGPreflightScreenCaptureAccess() else { exit(10) }
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              guard let window = windows.first(where: {
+                  ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) &&
+                  ($0[kCGWindowLayer as String] as? Int) == 0 &&
+                  (($0[kCGWindowBounds as String] as? [String: Any])?["Width"] as? Double ?? 0) >= 900
+              }), let id = window[kCGWindowNumber as String] as? Int else { exit(11) }
+              let capture = Process()
+              capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+              capture.arguments = ["-x", "-o", "-l", String(id), CommandLine.arguments[3]]
+              try capture.run()
+              capture.waitUntilExit()
+              guard capture.terminationStatus == 0 else { exit(12) }
+              print(String(data: try JSONSerialization.data(withJSONObject: window, options: [.prettyPrinted]), encoding: .utf8)!)
+              print(String(data: try JSONSerialization.data(withJSONObject: snapshot(application), options: [.prettyPrinted]), encoding: .utf8)!)
+          } else if action == "export-open" {
+              key(14, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "dismiss" {
+              key(53)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "save" {
+              key(1, .maskCommand)
+              Thread.sleep(forTimeInterval: 3)
+          } else if action == "duplicate-selected" {
+              key(2, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "delete-selected" {
+              key(51)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "duplicate" {
+              key(0, .maskCommand)
+              key(2, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "undo" {
+              key(6, .maskCommand)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "redo" {
+              key(6, [.maskCommand, .maskShift])
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "close" {
+              key(13, .maskCommand)
+              Thread.sleep(forTimeInterval: 3)
+          } else { exit(5) }
+          SWIFT
           python3 - <<'PYTHON'
-          import json, os, pathlib, subprocess, time
+          import json, os, pathlib, shutil, subprocess, time
           temp = pathlib.Path(os.environ['RUNNER_TEMP'])
-          with open('evidence/startup.log', 'w') as log:
-              process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
-              try:
-                  for _ in range(30):
-                      time.sleep(1)
-                      assert process.poll() is None, 'Packaged editor exited during startup'
-                  with open('evidence/editor-window.json', 'w') as window:
-                      subprocess.run(['swift', str(temp / 'window.swift'), str(process.pid)], stdout=window, check=True)
-                  assert process.poll() is None, 'Packaged editor exited before window inspection'
-                  report = {'source_revision': os.environ['PACKAGE_REVISION'], 'platform': 'macos-arm64', 'runner': 'macos-15', 'startup_seconds': 30, 'window_observed': True, 'clean_machine_installation_verified': False, 'native_picker_verified': False, 'long_session_verified': False}
-                  pathlib.Path('evidence/PACKAGE-INSPECTION.json').write_text(json.dumps(report, indent=2) + '\n')
-              finally:
-                  if process.poll() is None:
-                      process.terminate()
+          seconds = int(os.environ['SESSION_SECONDS'])
+          cycles = int(os.environ['LAUNCH_CYCLES'])
+          assert 30 <= seconds <= 180 and 1 <= cycles <= 3
+          launches = []
+          for cycle in range(1, cycles + 1):
+              log_path = pathlib.Path(f'evidence/startup-{cycle}.log')
+              with log_path.open('w') as log:
+                  process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
+                  try:
+                      samples = []
+                      for elapsed in range(1, seconds + 1):
+                          time.sleep(1)
+                          assert process.poll() is None, f'Launch {cycle} exited at {elapsed}s'
+                          if elapsed % 30 == 0:
+                              window_path = pathlib.Path(f'evidence/editor-window-{cycle}-{elapsed}.json')
+                              with window_path.open('w') as window:
+                                  subprocess.run(['swift', str(temp / 'window.swift'), str(process.pid)], stdout=window, check=True, timeout=30)
+                              windows = json.loads(window_path.read_text())
+                              assert any(w.get('kCGWindowName') == 'VeyCut' and w.get('kCGWindowIsOnscreen') for w in windows), 'Visible VeyCut editor window missing'
+                              usage = subprocess.check_output(['ps', '-p', str(process.pid), '-o', 'rss=', '-o', '%cpu='], text=True, timeout=10).split()
+                              samples.append({'elapsed_seconds': elapsed, 'rss_kib': int(usage[0]), 'cpu_percent': float(usage[1])})
+                              if cycle == 1 and elapsed == 30 and os.environ['ACCESSIBILITY_PROBE'] == 'true':
+                                  with open('evidence/accessibility-probe.json', 'w') as output:
+                                      subprocess.run(['swift', str(temp / 'accessibility.swift'), str(process.pid)], stdout=output, check=True, timeout=60)
+                      assert process.poll() is None, 'Packaged editor exited before session inspection'
+                      log.flush()
+                      startup = log_path.read_text().lower()
+                      assert 'panicked at' not in startup and 'panic at ' not in startup, 'Panic in startup output'
+                      launches.append({'cycle': cycle, 'observation_seconds': seconds, 'visible_window_samples': len(samples), 'resource_samples': samples})
+                  finally:
+                      if process.poll() is None:
+                          process.terminate()
+                          try:
+                              process.wait(timeout=10)
+                          except subprocess.TimeoutExpired:
+                              process.kill()
+                              process.wait()
+              time.sleep(2)
+          report = {'source_revision': os.environ['PACKAGE_REVISION'], 'platform': 'macos-arm64', 'runner': 'macos-15', 'startup_seconds': seconds, 'launch_cycles': cycles, 'window_observed': True, 'launches': launches, 'idle_observation_only': True, 'termination_method': 'SIGTERM between launches', 'clean_machine_installation_verified': False, 'native_picker_verified': False, 'long_session_verified': False}
+          pathlib.Path('evidence/PACKAGE-INSPECTION.json').write_text(json.dumps(report, indent=2) + '\n')
+          if os.environ['PROJECT_SMOKE'] == 'true':
+              subprocess.run(['swiftc', str(temp / 'project-ui.swift'), '-o', str(temp / 'project-ui')], check=True, timeout=120)
+              project = temp / 'veycut-ui-project'
+              project.mkdir()
+              sample = pathlib.Path('docs/beta-samples/portrait-2s.mp4').resolve()
+              imported_sample = temp / 'native-import-copy.mp4'
+              real_media_probe = os.environ['REAL_MEDIA_PROBE'] == 'true'
+              if real_media_probe:
+                  import hashlib
+                  real_source = temp / 'veycut-real-media' / 'BigBuckBunny-full.mp4'
+                  source_metadata = json.loads(pathlib.Path('evidence/REAL-MEDIA-SOURCE.json').read_text())
+                  assert source_metadata['full_source_decode_passed']
+                  assert 0 < real_source.stat().st_size <= 150000000
+                  shutil.copyfile(real_source, imported_sample)
+                  digest = hashlib.sha256()
+                  with imported_sample.open('rb') as stream:
+                      while chunk := stream.read(1024 * 1024):
+                          digest.update(chunk)
+                  assert digest.hexdigest() == source_metadata['source_sha256_observed_on_runner']
+              else:
+                  shutil.copyfile(sample, imported_sample)
+              video = {'width': 720, 'height': 1280, 'rateNum': 30, 'rateDen': 1}
+              clip = {'id': 'c1', 'trackId': 'T1', 'mediaId': 'm1', 'name': 'GUI fixture', 'kind': 'video', 'start': 0, 'duration': 2, 'sourceStart': 0, 'speed': 1, 'volume': 1, 'scale': 1, 'opacity': 1}
+              fixture = {'concat': os.environ['PACKAGE_VERSION'], 'version': 1, 'name': 'VeyCut GUI fixture', 'video': video, 'media': [{'id': 'm1', 'path': str(sample), 'name': sample.name, 'kind': 'video', 'duration': 2, 'width': 720, 'height': 1280, 'frameRate': 30, 'frameRateFraction': '30/1', 'hasAudio': True}], 'activeTimelineId': 'TL1', 'timelines': [{'id': 'TL1', 'name': 'Timeline 1', 'video': video, 'tracks': [{'id': 'T1', 'visible': True, 'muted': False}], 'clips': [clip]}]}
+              manifest = project / 'concat.json'
+              manifest.write_text(json.dumps(fixture))
+              ui_calls = []
+              def ui(process, action, path=project):
+                  ui_calls.append({'pid': process.pid, 'action': action, 'argument': str(path)})
+                  pathlib.Path('evidence/UI-CALLS.json').write_text(json.dumps(ui_calls, indent=2))
+                  with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
+                      subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
+              assert sum(os.environ[name] == 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI', 'REAL_MEDIA_PROBE')) <= 1, 'Choose one committed GUI scenario per run'
+              actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text()) if os.environ['CORE_GUI'] == 'true' else json.loads(os.environ['GUI_ACTIONS'])
+              if os.environ['EXTENDED_GUI'] == 'true':
+                  assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
+                  actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
+              if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
+                  assert os.environ['CORE_GUI'] != 'true' and os.environ['EXTENDED_GUI'] != 'true', 'Choose one committed GUI scenario per run'
+                  actions = json.loads(pathlib.Path('docs/beta-tests/caption-navigation-gui.json').read_text())
+              if real_media_probe:
+                  assert json.loads(os.environ['GUI_ACTIONS']) == []
+                  actions = [
+                      {'action': 'click', 'arg': '0.2294921875,0.6989720999'},
+                      {'action': 'snapshot'},
+                  ]
+              assert isinstance(actions, list) and len(actions) <= 100
+              core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
+              ui_environment = dict(os.environ)
+              if os.environ["EXTENDED_GUI"] == "true":
+                  ui_environment["CONCAT_LOG"] = "debug"
+              for cycle in range(1, 3):
+                  ui_log = pathlib.Path(f'evidence/project-ui-{cycle}.log')
+                  with ui_log.open('w') as log:
+                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT, env=ui_environment)
                       try:
-                          process.wait(timeout=10)
-                      except subprocess.TimeoutExpired:
-                          process.kill()
-                          process.wait()
+                          time.sleep(15)
+                          before = manifest.stat().st_mtime_ns
+                          ui(process, 'open')
+                          if cycle == 1:
+                              ui(process, 'import', imported_sample)
+                              # Import probes metadata asynchronously. Wait for a
+                              # persisted result before the next editing gesture.
+                              for attempt in range(6):
+                                  ui(process, 'save')
+                                  imported_state = json.loads(manifest.read_text())
+                                  if any(m['path'] == str(imported_sample) for m in imported_state['media']):
+                                      break
+                                  time.sleep(2)
+                              else:
+                                  raise AssertionError('Native import did not finish within its bounded wait')
+                              ui(process, 'duplicate')
+                          ui(process, 'save')
+                          assert manifest.stat().st_mtime_ns > before, 'Native open/save did not publish project'
+                          saved = json.loads(manifest.read_text())
+                          assert saved['video'] == video
+                          assert any(c['id'] == 'c1' for c in saved.get('clips', [])), 'Seeded timeline did not survive native save'
+                          imported = [m for m in saved['media'] if m['path'] == str(imported_sample)]
+                          assert len(imported) == 1 and imported[0]['id'] != 'm1', 'Native import did not persist a new media entry'
+                          if real_media_probe:
+                              movie = imported[0]
+                              duration = float(movie['duration'])
+                              independent_duration = float(source_metadata['probe']['format']['duration'])
+                              assert movie['width'] == 640 and movie['height'] == 359 and movie['hasAudio'], 'Real movie metadata mismatch'
+                              assert 570 <= duration <= 660 and abs(duration - independent_duration) <= 0.15, 'Full movie duration mismatch'
+                              assert movie['path'] == str(imported_sample)
+                              assert len(saved['media']) == 2 and next(m for m in saved['media'] if m['id'] == 'm1')['path'] == str(sample)
+                              assert all(c.get('mediaId') == 'm1' for c in saved['clips']), 'Original seed clip changed unexpectedly'
+                              real_result = {
+                                  'source_revision': os.environ['PACKAGE_REVISION'],
+                                  'native_gui_import_verified': True,
+                                  'registered_media': movie,
+                                  'full_source_path': str(real_source),
+                                  'native_picker_import_path': str(imported_sample),
+                                  'source_file_bytes': real_source.stat().st_size,
+                                  'source_sha256_observed_on_runner': source_metadata['source_sha256_observed_on_runner'],
+                                  'native_import_copy_sha256': digest.hexdigest(),
+                                  'independent_source_probe_and_full_decode_passed': True,
+                                  'saved_cycle': cycle,
+                                  'native_project_reopen_verified': cycle == 2,
+                                  'original_seed_clip_retained': True,
+                                  'movie_placed_on_timeline': False,
+                                  'movie_seek_trim_subtitle_export_verified': False,
+                                  'clean_consumer_mac_installation_verified': False,
+                              }
+                              pathlib.Path('evidence/REAL-MEDIA-UI.json').write_text(json.dumps(real_result, indent=2) + '\n')
+                          else:
+                              assert imported[0]['width'] == 720 and imported[0]['height'] == 1280 and imported[0]['hasAudio'], 'Imported metadata mismatch'
+                          if cycle == 1:
+                              assert len(saved['clips']) == 2, 'Native duplication did not create two clips'
+                              assert abs(sum(c['duration'] for c in saved['clips']) - 4) < 0.01
+                              ui(process, 'undo')
+                              ui(process, 'save')
+                              assert len(json.loads(manifest.read_text())['clips']) == 1, 'Native undo did not restore clip'
+                              ui(process, 'redo')
+                              ui(process, 'save')
+                              saved = json.loads(manifest.read_text())
+                              assert len(saved['clips']) == 2, 'Native redo did not restore duplicate'
+                          else:
+                              assert len(saved['clips']) == 1, 'Unsaved undo was lost across failed close and reopen'
+                          pathlib.Path(f'evidence/project-saved-{cycle}.json').write_text(json.dumps(saved, indent=2))
+                          if cycle == 1:
+                              backup = project / 'saved-manifest.backup'
+                              manifest.rename(backup)
+                              manifest.mkdir()
+                              ui(process, 'undo')
+                              offset = ui_log.stat().st_size
+                              ui(process, 'save')
+                              ui(process, 'close')
+                              received = ui_log.read_bytes()[offset:].decode(errors='replace')
+                              assert 'menu: save' in received and 'menu: close-window' in received and 'project: closing VeyCut GUI fixture' in received, 'Failure-path commands did not reach editor'
+                              assert process.poll() is None, 'Failed close discarded active editor'
+                              with open('evidence/failed-close-window.json', 'w') as window:
+                                  subprocess.run(['swift', str(temp / 'window.swift'), str(process.pid)], stdout=window, check=True, timeout=30)
+                              windows = json.loads(pathlib.Path('evidence/failed-close-window.json').read_text())
+                              assert any(w.get('kCGWindowName') == 'VeyCut' and w.get('kCGWindowIsOnscreen') for w in windows), 'Failed close hid editor window'
+                              assert json.loads(backup.read_text()) == saved
+                              manifest.rmdir()
+                              backup.rename(manifest)
+                          if cycle == 2 and os.environ['EDITOR_PROBE'] == 'true':
+                              ui(process, 'snapshot', pathlib.Path('evidence/editor.png').resolve())
+                              ui(process, 'export-open')
+                              ui(process, 'snapshot', pathlib.Path('evidence/export-sheet.png').resolve())
+                              ui(process, 'dismiss')
+                          if cycle == 2:
+                              if any(step['action'] == 'video-check' for step in actions):
+                                  assert not (pathlib.Path.home() / 'Movies' / 'VeyCut GUI fixture.mp4').exists(), 'GUI export destination was not fresh'
+                              for index, step in enumerate(actions):
+                                  action = step['action']
+                                  argument = step.get('arg', '')
+                                  if action == 'snapshot':
+                                      ui(process, action, pathlib.Path(f'evidence/core-{index}.png').resolve())
+                                  elif action == 'caption-pick':
+                                      ui(process, action, pathlib.Path('docs/beta-samples/captions-2s.vtt').resolve())
+
+                                  elif action == 'caption-navigation-pick':
+                                      ui(process, 'caption-pick', pathlib.Path('docs/beta-samples/caption-navigation-55.srt').resolve())
+                                  elif action == 'caption-navigation-baseline':
+                                      baseline = json.loads(manifest.read_text())
+                                      titles = [c for c in baseline['clips'] if c['kind'] == 'text']
+                                      assert len(titles) == 55, 'The real UI import must create 55 navigation cues'
+                                      for ordinal in range(1, 56):
+                                          matches = [c for c in titles if c['text']['content'].startswith(f'NAV-{ordinal:03} ')]
+                                          assert len(matches) == 1 and abs(matches[0]['start'] - (2 * ordinal - 1)) < 0.04
+                                      core['caption_navigation_baseline'] = baseline
+                                  elif action in ('caption-navigation-page', 'caption-navigation-proof'):
+                                      import re
+                                      spec = json.loads(argument)
+                                      baseline = core['caption_navigation_baseline']
+                                      ui(process, 'caption-control', json.dumps(spec))
+                                      evidence = pathlib.Path(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-caption-control.txt')
+                                      report = json.loads(evidence.read_text())
+                                      if action == 'caption-navigation-page':
+                                          labels = report['after_labels']
+                                          ordinals = [int(match.group(1)) for label in labels if (match := re.search(r'NAV-([0-9]{3}) ', label))]
+                                          assert ordinals == list(range(51, 56)), 'Page two is not chronological'
+                                          assert any('NAV-051 ' in label for label in labels), 'Page two must expose chronological cue 51'
+                                          assert any('51–55 / 55' in label for label in labels), 'Last-page range/count mismatch'
+                                          assert not any('NAV-001 ' in label for label in labels), 'Previous-page cue nodes must disappear'
+                                          core['caption_navigation_paging_verified'] = True
+                                      else:
+                                          prefix = spec['contains']
+                                          target = next(c for c in baseline['clips'] if c.get('text', {}).get('content', '').startswith(prefix + ' '))
+                                          assert not any(prefix + ' ' in label for label in report['after_labels']), 'Navigation must close the caption sheet'
+                                          # Copy/delete proves the row selected exactly this clip.
+                                          # Pasting into its vacant lane at the current playhead
+                                          # proves the same action sought to its original start.
+                                          ui(process, 'copy')
+                                          ui(process, 'delete-selected')
+                                          ui(process, 'save')
+                                          deleted = json.loads(manifest.read_text())
+                                          originals = {c['id']: c for c in baseline['clips']}
+                                          remaining = {c['id']: c for c in deleted['clips']}
+                                          assert remaining == {key: value for key, value in originals.items() if key != target['id']}, 'Navigation selected the wrong clip/group'
+                                          ui(process, 'paste')
+                                          ui(process, 'save')
+                                          pasted = json.loads(manifest.read_text())
+                                          copies = [c for c in pasted['clips'] if c['id'] not in originals]
+                                          assert len(copies) == 1, 'Navigation clipboard must hold one selected caption'
+                                          comparable = lambda clip: {key: value for key, value in clip.items() if key != 'id'}
+                                          assert comparable(copies[0]) == comparable(target), 'Navigation seek/timing or caption styling mismatch'
+                                          ui(process, 'undo')
+                                          ui(process, 'undo')
+                                          ui(process, 'save')
+                                          assert json.loads(manifest.read_text()) == baseline, 'Navigation verification cleanup did not restore exact project'
+                                          core.setdefault('caption_navigation_verified', []).append({'cue': prefix, 'activation': spec['mode'], 'selected_one_clip': True, 'seek_to_start_proved_by_ui_paste': True})
+                                  elif action in ('click', 'double-click', 'drag', 'paste-text', 'type-text'):
+                                      ui(process, action, argument)
+                                  elif action in ('select-all', 'copy', 'paste', 'duplicate', 'duplicate-selected', 'delete-selected', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
+                                      ui(process, action)
+                                  elif action == 'duplicate-selection-check':
+                                      baseline = json.loads(manifest.read_text())
+                                      assert len(baseline['clips']) == 2, 'Duplicate selection needs two baseline clips'
+                                      original_ids = {clip['id'] for clip in baseline['clips']}
+                                      assert len(original_ids) == 2
+                                      ui(process, 'select-all')
+                                      ui(process, 'duplicate-selected')
+                                      ui(process, 'save')
+                                      duplicated = json.loads(manifest.read_text())
+                                      assert len(duplicated['clips']) == 4
+                                      assert len({clip['id'] for clip in duplicated['clips']}) == 4
+                                      assert [clip for clip in duplicated['clips'] if clip['id'] in original_ids] == baseline['clips'], 'Duplicate changed original IDs or properties'
+                                      copies = [clip for clip in duplicated['clips'] if clip['id'] not in original_ids]
+                                      assert len(copies) == 2
+                                      for clip in copies:
+                                          properties = {key: value for key, value in clip.items() if key not in ('id', 'start')}
+                                          assert any(properties == {key: value for key, value in original.items() if key not in ('id', 'start')} for original in baseline['clips']), 'Duplicate changed copied source or styling'
+                                      assert all(clip['start'] >= max(original['start'] + original['duration'] for original in baseline['clips']) for clip in copies), 'Expected copied tail clips before deletion'
+                                      assert duplicated['tracks'] == baseline['tracks'] and duplicated['media'] == baseline['media']
+                                      ui(process, 'snapshot', pathlib.Path(f'evidence/core-{index}.png').resolve())
+                                      # No Select All after duplication: deleting exactly the two
+                                      # copies proves the product retained the full new selection.
+                                      for gesture, expected in [('delete-selected', baseline), ('undo', duplicated), ('redo', baseline), ('undo', duplicated)]:
+                                          ui(process, gesture)
+                                          ui(process, 'save')
+                                          state = json.loads(manifest.read_text())
+                                          assert state['clips'] == expected['clips'], f'{gesture} changed duplicate selection IDs, count or properties'
+                                          assert state['tracks'] == baseline['tracks'] and state['media'] == baseline['media'], f'{gesture} changed unrelated project data'
+                                      # Undo the duplication itself so the existing clipboard and
+                                      # repeated-export checks still begin with their original two.
+                                      ui(process, 'undo')
+                                      ui(process, 'save')
+                                      restored = json.loads(manifest.read_text())
+                                      assert restored['clips'] == baseline['clips'] and restored['tracks'] == baseline['tracks'] and restored['media'] == baseline['media'], 'Duplicate-selection cleanup changed baseline'
+                                      core['duplicate_selection_verified'] = {'copied_clips': 2, 'delete_selected_preserved_originals': True, 'single_undo_redo_preserved_copy_ids_and_properties': True, 'cleanup_restored_baseline': True}
+                                  elif action == 'placement-check':
+                                      state = json.loads(manifest.read_text())
+                                      imported_id = next(m['id'] for m in state['media'] if m['path'] == str(imported_sample))
+                                      assert len(state['clips']) == 1 and state['clips'][0]['mediaId'] == imported_id and abs(state['clips'][0]['duration'] - 2) < 0.01 and abs(state['clips'][0]['start']) < 0.04
+                                      core['imported_media_placement_verified'] = True
+                                      if 'original_imported_clip' not in locals():
+                                          original_imported_clip = state['clips'][0]
+                                  elif action == 'gesture-check':
+                                      state = json.loads(manifest.read_text())
+                                      assert len(state['clips']) == 1
+                                      current = state['clips'][0]
+                                      wanted = {'move': (2, 2, 0), 'tail': (2, 1.5, 0), 'head': (2.5, 1, 0.5)}[argument]
+                                      assert current['mediaId'] == imported_id and current['kind'] == 'video'
+                                      timing = ('start', 'duration', 'sourceStart')
+                                      assert {k: v for k, v in current.items() if k not in timing} == {k: v for k, v in original_imported_clip.items() if k not in timing}, 'Gesture changed unrelated clip properties'
+                                      assert all(abs(current[key] - value) <= 1 / 30 + 0.001 for key, value in zip(('start', 'duration', 'sourceStart'), wanted)), current
+                                      assert current['duration'] > 0 and current['sourceStart'] + current['duration'] <= 2.04
+                                      core[argument + '_gesture_verified'] = True
+                                  elif action == 'repeated-check':
+                                      count = int(argument)
+                                      assert count in (2, 4, 8, 16)
+                                      state = json.loads(manifest.read_text())
+                                      pieces = sorted(state['clips'], key=lambda c: c['start'])
+                                      assert len(pieces) == count and len({c['id'] for c in pieces}) == count
+                                      for number, piece in enumerate(pieces):
+                                          assert piece['kind'] == 'video' and piece['mediaId'] == imported_id
+                                          assert {k: v for k, v in piece.items() if k not in ('id', 'start')} == {k: v for k, v in original_imported_clip.items() if k not in ('id', 'start')}, 'Duplicate changed clip source or styling'
+                                          assert abs(piece['start'] - 2 * number) < 0.001 and abs(piece['duration'] - 2) < 0.001 and abs(piece['sourceStart']) < 0.001 and piece['speed'] == 1
+                                      if count == 4 and any(step['action'] == 'paste' for step in core['steps']):
+                                          core['group_clipboard_verified'] = True
+                                      if count == 16:
+                                          if 'repeated_snapshot' in locals():
+                                              assert state['clips'] == repeated_snapshot['clips'] and state['media'] == repeated_snapshot['media'], 'Redo/reopen changed repeated clips'
+                                          repeated_snapshot = state
+                                          core['repeated_timeline_seconds'] = 32
+                                  elif action == 'playback-dialog-check':
+                                      import re
+                                      dialog_before = json.loads(manifest.read_text())
+                                      assert len(dialog_before['clips']) == 16 and max(c['start'] + c['duration'] for c in dialog_before['clips']) == 32
+                                      accepted_sample = temp / 'native-playback-import.mp4'
+                                      shutil.copyfile(sample, accepted_sample)
+                                      assert all(m['path'] != str(accepted_sample) for m in dialog_before['media'])
+                                      playback_positions = {}
+                                      for mode in ('cancel', 'accept'):
+                                          log_offset = ui_log.stat().st_size
+                                          playback_started_at = time.monotonic()
+                                          ui(process, 'play-start')
+                                          ui(process, 'snapshot', pathlib.Path(f'evidence/playback-meters-{mode}.png').resolve())
+                                          ui(process, 'import-cancel' if mode == 'cancel' else 'import-held', accepted_sample)
+                                          assert process.poll() is None, 'Native dialog terminated editor during playback'
+                                          ui(process, 'play-pause-button')
+                                          from collections import deque
+                                          important = deque(maxlen=2000)
+                                          unavailable = deque(maxlen=20)
+                                          with ui_log.open('r', errors='replace') as stream:
+                                              for line in stream:
+                                                  if 'audio output unavailable' in line:
+                                                      unavailable.append(line.strip()[:1024])
+                                          with ui_log.open('rb') as stream:
+                                              stream.seek(log_offset)
+                                              for line in stream:
+                                                  decoded = line.decode(errors='replace')
+                                                  if any(term in decoded for term in ('playback:', 'panicked at', 'BorrowMutError', 'already borrowed')):
+                                                      important.append(decoded[:2048])
+                                          received = ''.join(important)
+                                          playing = re.findall(r'playback: playing from ([0-9.]+)s', received)
+                                          paused = re.findall(r'playback: paused at ([0-9.]+)s', received)
+                                          playback_diagnostic = {
+                                              'source_revision': os.environ['PACKAGE_REVISION'],
+                                              'mode': mode,
+                                              'playing_positions_seconds': playing,
+                                              'paused_positions_seconds': paused,
+                                              'elapsed_wall_seconds': time.monotonic() - playback_started_at,
+                                              'timeline_seconds': max(c['start'] + c['duration'] for c in dialog_before['clips']),
+                                              'audio_unavailable_log': list(unavailable),
+                                              'passed_advancement_requirement': len(paused) == 1 and 4 <= float(paused[0]) < 32,
+                                          }
+                                          pathlib.Path(f'evidence/playback-dialog-{mode}-diagnostic.json').write_text(json.dumps(playback_diagnostic, indent=2) + '\n')
+                                          print('Native dialog playback diagnostic:', json.dumps(playback_diagnostic), flush=True)
+                                          assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head: ' + json.dumps(playback_diagnostic)
+                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback did not survive and advance across the native panel test: ' + json.dumps(playback_diagnostic)
+                                          assert not any(term in received for term in ('panicked at', 'BorrowMutError', 'already borrowed')), 'Native dialog borrowed Studio across playback timers'
+                                          playback_positions[mode] = float(paused[0])
+                                          for _ in range(6):
+                                              ui(process, 'save')
+                                              dialog_after = json.loads(manifest.read_text())
+                                              if mode == 'cancel' or any(m['path'] == str(accepted_sample) for m in dialog_after['media']):
+                                                  break
+                                              time.sleep(2)
+                                          else:
+                                              raise AssertionError('Accepted native import was not saved')
+                                          assert dialog_after['clips'] == dialog_before['clips'], 'Native import changed the repeated timeline'
+                                          if mode == 'cancel':
+                                              assert dialog_after['media'] == dialog_before['media'], 'Cancelled picker changed media'
+                                          else:
+                                              additions = [m for m in dialog_after['media'] if m['id'] not in {old['id'] for old in dialog_before['media']}]
+                                              assert len(additions) == 1 and additions[0]['path'] == str(accepted_sample)
+                                              assert [m for m in dialog_after['media'] if m['id'] in {old['id'] for old in dialog_before['media']}] == dialog_before['media'], 'Accepted import changed existing media'
+                                              assert additions[0]['width'] == 720 and additions[0]['height'] == 1280 and additions[0]['hasAudio']
+                                      core['native_dialog_playback_verified'] = {'hold_seconds': 4, 'paused_positions_seconds': playback_positions, 'playback_survived_and_advanced_across_native_panel': True, 'ui_timer_updates_during_panel_hold_independently_verified': False, 'evidence_caveat': 'Paused positions show playback advancement across the panel test; UI timer updates during the held panel were not independently observed.', 'cancel_preserved_media_and_clips': True, 'accepted_new_media_without_timeline_changes': True}
+                                  elif action == 'track-baseline':
+                                      track_baseline = json.loads(manifest.read_text())
+                                      track_added_snapshot = None
+                                  elif action == 'track-check':
+                                      state = json.loads(manifest.read_text())
+                                      assert state['clips'] == track_baseline['clips'], 'Track placement changed existing clips'
+                                      if argument == 'restored':
+                                          assert state['tracks'] == track_baseline['tracks'], 'Track undo changed the original stack'
+                                      else:
+                                          assert argument in ('top', 'bottom')
+                                          assert len(state['tracks']) == len(track_baseline['tracks']) + 1
+                                          original = state['tracks'][:-1] if argument == 'top' else state['tracks'][1:]
+                                          assert original == track_baseline['tracks'], 'Track placement changed existing order'
+                                          new_id = state['tracks'][-1 if argument == 'top' else 0]['id']
+                                          assert new_id not in {track['id'] for track in track_baseline['tracks']}
+                                          if track_added_snapshot is not None:
+                                              assert state['tracks'] == track_added_snapshot, 'Track redo changed its identity'
+                                          track_added_snapshot = state['tracks']
+                                          core[argument + '_track_menu_verified'] = True
+                                  elif action in ('split-check', 'split-undo-check'):
+                                      state = json.loads(manifest.read_text())
+                                      pieces = sorted([c for c in state['clips'] if c['kind'] == 'video'], key=lambda c: c['start'])
+                                      if action == 'split-undo-check':
+                                          assert len(pieces) == 1 and abs(pieces[0]['duration'] - 2) < 0.01
+                                      else:
+                                          assert len(pieces) == 2 and abs(sum(c['duration'] for c in pieces) - 2) < 0.01
+                                          assert 0.8 <= pieces[0]['duration'] <= 1.2
+                                          assert abs(pieces[1]['start'] - pieces[0]['duration']) < 0.04
+                                          assert abs(pieces[1]['sourceStart'] - pieces[0]['duration']) < 0.04
+                                          if core.get('imported_media_placement_verified'):
+                                              assert all(c['mediaId'] == imported_id for c in pieces)
+                                          core['split_verified'] = True
+                                  elif action == 'caption-check':
+                                      state = json.loads(manifest.read_text())
+                                      titles = [c for c in state['clips'] if c['kind'] == 'text']
+                                      wanted = [('سلام جهان', 0, 1), (argument or 'VeyCut 2026', 0.8, 1.2)]
+                                      assert len(titles) == 2
+                                      for content, start, duration in wanted:
+                                          assert any(c['text']['content'] == content and abs(c['start'] - start) < 0.04 and abs(c['duration'] - duration) < 0.04 for c in titles), wanted
+                                      core['subtitle_verified'] = True
+                                      if argument and '😀' in argument:
+                                          core['emoji_caption_saved'] = True
+                                  elif action == 'caption-undo-check':
+                                      state = json.loads(manifest.read_text())
+                                      assert not any(c['kind'] == 'text' for c in state['clips'])
+                                      assert len(state['clips']) == 2
+                                      core['subtitle_import_undo_verified'] = True
+                                  elif action == 'subtitle-file-check':
+                                      text = (project / 'captions.vtt').read_text(encoding='utf-8')
+                                      assert text.startswith('WEBVTT') and 'سلام جهان' in text and (argument or 'VeyCut 2026') in text
+                                      assert '00:00:00.000 --> 00:00:01.000' in text and '00:00:00.800 --> 00:00:02.000' in text
+                                      pathlib.Path('evidence/exported-captions.vtt').write_text(text, encoding='utf-8')
+                                      core['subtitle_file_export_verified'] = True
+                                  elif action == 'reopen':
+                                      before_reopen = json.loads(manifest.read_text())
+                                      ui(process, 'close')
+                                      assert process.wait(timeout=30) == 0
+                                      saved_before_reopen = manifest.stat().st_mtime_ns
+                                      log_offset = ui_log.stat().st_size
+                                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT, env=ui_environment)
+                                      time.sleep(15)
+                                      ui(process, 'open')
+                                      ui(process, 'save')
+                                      assert manifest.stat().st_mtime_ns > saved_before_reopen, 'Reopened editor did not publish a fresh save'
+                                      fresh_log = ui_log.read_bytes()[log_offset:].decode('utf-8')
+                                      assert 'project: opening' in fresh_log and 'menu: save' in fresh_log, 'Reopened editor did not receive native open/save actions'
+                                      after_reopen = json.loads(manifest.read_text())
+                                      assert after_reopen['clips'] == before_reopen['clips'] and after_reopen['media'] == before_reopen['media'], 'GUI reopen changed the saved edit'
+                                      core['edited_project_reopen_verified'] = True
+                                  elif action == 'video-check':
+                                      import array, math
+                                      expected_seconds = float(argument or '2')
+                                      assert expected_seconds in (2, 32)
+                                      target = pathlib.Path.home() / 'Movies' / 'VeyCut GUI fixture.mp4'
+                                      for _ in range(180 if expected_seconds > 2 else 60):
+                                          if target.is_file():
+                                              break
+                                          assert process.poll() is None, 'Editor exited during GUI export'
+                                          time.sleep(2)
+                                      else:
+                                          raise AssertionError('GUI export did not publish the output')
+                                      probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(target)], text=True, timeout=30))
+                                      picture = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+                                      assert picture['width'] == 720 and picture['height'] == 1280 and picture['codec_name'] == 'h264'
+                                      assert picture['r_frame_rate'] == '30/1' and int(picture['nb_frames']) == int(expected_seconds * 30)
+                                      assert expected_seconds - 0.05 <= float(probe['format']['duration']) <= expected_seconds + 0.1
+                                      assert any(s['codec_type'] == 'audio' for s in probe['streams'])
+                                      subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(target), '-map', '0', '-f', 'null', '-'], check=True, timeout=180)
+                                      for at in ('0.4', str(expected_seconds - 0.6)):
+                                          subprocess.run(['ffmpeg', '-v', 'error', '-ss', at, '-i', str(target), '-frames:v', '1', f'evidence/export-frame-{at}.png'], check=True, timeout=30)
+                                      sound = array.array('f', subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(target), '-vn', '-ac', '1', '-ar', '8000', '-f', 'f32le', '-'], timeout=60))
+                                      rms = lambda values: math.sqrt(sum(v * v for v in values) / len(values))
+                                      assert len(sound) >= int((expected_seconds - 0.1) * 8000)
+                                      for period in range(int(expected_seconds / 2)):
+                                          offset = period * 16000
+                                          assert rms(sound[offset + 2000:offset + 6000]) < 0.005 and rms(sound[offset + 10000:offset + 14000]) > 0.02, 'Output silence/tone did not survive an edit'
+                                      pathlib.Path('evidence/GUI-EXPORT-PROBE.json').write_text(json.dumps(probe, indent=2))
+                                      shutil.copyfile(target, 'evidence/gui-export.mp4')
+                                      core['gui_export_verified'] = True
+                                      core['decoded_export_seconds'] = expected_seconds
+                                  else:
+                                      raise AssertionError('Unknown bounded GUI action: ' + action)
+                                  core['steps'].append(step)
+                                  pathlib.Path(f'evidence/core-state-{index}.json').write_text(manifest.read_text())
+                              if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
+                                  verified = core.get('caption_navigation_verified', [])
+                                  assert [(item['cue'], item['activation']) for item in verified] == [('NAV-001', 'pointer'), ('NAV-002', 'return'), ('NAV-051', 'space')]
+                                  assert core.get('caption_navigation_paging_verified')
+                              pathlib.Path('evidence/CORE-GUI-TEST.json').write_text(json.dumps(core, indent=2) + '\n')
+                          expected_clip_count = len(json.loads(manifest.read_text())['clips']) if cycle == 2 and actions else 1
+                          offset = ui_log.stat().st_size
+                          ui(process, 'close')
+                          assert process.wait(timeout=30) == 0, 'Normal window close failed'
+                          received = ui_log.read_bytes()[offset:].decode(errors='replace')
+                          assert 'menu: close-window' in received and 'project: closing VeyCut GUI fixture' in received, 'Normal close handler not observed'
+                          assert len(json.loads(manifest.read_text())['clips']) == expected_clip_count, 'Close did not persist the current edit'
+                      finally:
+                          if process.poll() is None:
+                              process.terminate()
+                              try:
+                                  process.wait(timeout=10)
+                              except subprocess.TimeoutExpired:
+                                  process.kill()
+                                  process.wait()
+                          # Preserve bounded diagnostic lines plus a 1 MiB tail, even on assertion failure.
+                          from collections import deque
+                          retained = deque(maxlen=2000)
+                          with ui_log.open('r', errors='replace') as stream:
+                              for line in stream:
+                                  if any(term in line for term in ('playback:', 'audio output unavailable', 'panicked at', 'BorrowMutError', 'already borrowed')):
+                                      retained.append(line[:2048])
+                          ui_log.with_suffix('.diagnostic.log').write_text(''.join(retained))
+                          with ui_log.open('rb') as stream:
+                              stream.seek(max(0, ui_log.stat().st_size - 1024 * 1024))
+                              log_tail = stream.read(1024 * 1024)
+                          ui_log.write_bytes(log_tail)
+              result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'see_CORE-GUI-TEST.json' if actions else 'duplicate_undo_redo_only', 'native_split_verified': core['split_verified'], 'gui_export_verified': core['gui_export_verified'], 'editable_subtitle_verified': core['subtitle_verified'], 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
+              if real_media_probe:
+                  result['media_import_verified'] = 'official_full_movie_native_picker_and_reopen'
+                  result['editing_verified'] = 'original_seed_clip_only; imported_movie_editing_not_tested'
+                  result['real_media_probe_verified'] = True
+              pathlib.Path('evidence/PROJECT-UI-TEST.json').write_text(json.dumps(result, indent=2) + '\n')
           PYTHON
+      - name: Remove runner-temporary full movie
+        if: always() && inputs.real_media_probe
+        run: |
+          rm -f "$RUNNER_TEMP/veycut-real-media/official-movie.zip" "$RUNNER_TEMP/veycut-real-media/BigBuckBunny-full.mp4" "$RUNNER_TEMP/native-import-copy.mp4"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -363,6 +363,111 @@ pub struct MoveOrigin {
     pub row: i32,
 }
 
+/// A drag carries only the selected clips. A detached-source link is for
+/// reattaching sound, not an implicit movement selection.
+fn drag_origins(timeline: &Timeline, selection: &[String], primary: &str) -> Vec<MoveOrigin> {
+    let moving = if selection.iter().any(|held| held == primary) {
+        selection.to_vec()
+    } else {
+        vec![primary.to_owned()]
+    };
+    moving
+        .iter()
+        .filter_map(|id| {
+            let clip = timeline.clip(id)?;
+            // Lane rows display the stored track stack in reverse order,
+            // matching Studio::row_of.
+            let row = timeline
+                .tracks
+                .iter()
+                .position(|track| track.id == clip.track_id)
+                .map(|index| timeline.tracks.len() as i32 - 1 - index as i32)
+                .unwrap_or(0);
+            Some(MoveOrigin {
+                clip: clip.id.clone(),
+                start: clip.start as f32,
+                row,
+            })
+        })
+        .collect()
+}
+
+/// Full snapshots and display rows survive changes to the active timeline.
+#[derive(Clone)]
+pub struct HeldClip {
+    clip: Clip,
+    row: i32,
+}
+
+fn copy_clips(timeline: &Timeline, ids: &[String]) -> Vec<HeldClip> {
+    ids.iter()
+        .filter_map(|id| {
+            let clip = timeline.clip(id)?;
+            let index = timeline
+                .tracks
+                .iter()
+                .position(|track| track.id == clip.track_id)?;
+            Some(HeldClip {
+                clip: clip.clone(),
+                row: timeline.tracks.len() as i32 - 1 - index as i32,
+            })
+        })
+        .collect()
+}
+
+/// Shift the complete group once; the engine either accepts its layout or
+/// refuses it, rather than independently finding a gap for every clip.
+fn prepare_paste(
+    held: &[HeldClip],
+    timeline: &Timeline,
+    start: f64,
+    target_row: Option<i32>,
+    locked: impl Fn(&str) -> bool,
+) -> Result<Vec<Clip>, String> {
+    if held.is_empty() || !start.is_finite() || start < 0.0 {
+        return Err("Cannot paste an empty group or invalid time".to_owned());
+    }
+    let first = held
+        .iter()
+        .map(|entry| entry.clip.start)
+        .fold(f64::INFINITY, f64::min);
+    let top = held.iter().map(|entry| entry.row).min().unwrap();
+    let shift = match target_row {
+        Some(row) => row
+            .checked_sub(top)
+            .ok_or("Cannot paste this track layout")?,
+        None => 0,
+    };
+    held.iter()
+        .map(|entry| {
+            if !entry.clip.start.is_finite()
+                || !entry.clip.duration.is_finite()
+                || entry.clip.duration <= 0.0
+            {
+                return Err("Cannot paste invalid clip timing".to_owned());
+            }
+            let row = entry
+                .row
+                .checked_add(shift)
+                .ok_or("Cannot paste this track layout")?;
+            if row < 0 || row as usize >= timeline.tracks.len() {
+                return Err("Add enough tracks before pasting this group".to_owned());
+            }
+            let track = &timeline.tracks[timeline.tracks.len() - 1 - row as usize];
+            if locked(&track.id) {
+                return Err("Unlock the destination tracks before pasting".to_owned());
+            }
+            let mut clip = entry.clip.clone();
+            clip.track_id = track.id.clone();
+            clip.start = start + entry.clip.start - first;
+            if !clip.start.is_finite() || clip.start < 0.0 {
+                return Err("Cannot paste invalid clip timing".to_owned());
+            }
+            Ok(clip)
+        })
+        .collect()
+}
+
 /// A pointer gesture in flight, previewed on the echo.
 pub enum Gesture {
     None,
@@ -724,6 +829,7 @@ pub struct Studio {
     /// Unsaved changes, and the timer that writes them.
     dirty: bool,
     autosave: slint::Timer,
+    saves: projects::SaveQueue,
 
     // ── the bin ──
     pub media: crate::panes::media_bin::MediaBin,
@@ -767,8 +873,8 @@ pub struct Studio {
     pub hover: Option<f32>,
     /// Stops the burst of sound a hover with audio plays.
     hover_hush: slint::Timer,
-    /// One clip, held for Paste.
-    pub clipboard: Option<Clip>,
+    /// Complete selected clips and their source display rows, held for Paste.
+    pub clipboard: Option<Vec<HeldClip>>,
     /// The monitor: its frame, and the requests for the next.
     pub monitor: crate::panes::monitor::MonitorPane,
 
@@ -1085,11 +1191,17 @@ fn shelves(
                     .folder
                     .as_deref()
                     .and_then(|folder| {
-                        slint::Image::load_from_path(&folder.join("preview.png")).ok()
+                        let preview = folder.join("preview.png");
+                        preview
+                            .is_file()
+                            .then(|| slint::Image::load_from_path(&preview).ok())
+                            .flatten()
                     })
                     .or_else(|| {
                         let card = card_paths.get(&meta.id)?;
-                        slint::Image::load_from_path(card).ok()
+                        card.is_file()
+                            .then(|| slint::Image::load_from_path(card).ok())
+                            .flatten()
                     })
                     .unwrap_or_default()
             })
@@ -1944,6 +2056,7 @@ impl Studio {
             empty: Project::new(),
             dirty: false,
             autosave: slint::Timer::default(),
+            saves: projects::SaveQueue::default(),
             media: crate::panes::media_bin::MediaBin::default(),
             peaks: HashMap::new(),
             strips: HashMap::new(),
@@ -2442,15 +2555,30 @@ impl Studio {
         };
         self.autosave.stop();
         let (path, document) = session.prepare_save(None);
-        self.dirty = false;
-        spawn(
-            move || projects::save(&path, &document),
-            move |studio, _, _, result| match result {
-                Ok(()) if announce => studio.notify(&t("studio.projectSaved"), false),
-                Ok(()) => {}
-                Err(error) => {
-                    studio.dirty = true;
-                    studio.notify(&tf("studio.couldNotSave", &[&error]), true);
+        let pending = self.saves.prepare(path, document);
+        let save_revision = pending.revision();
+        let edit_revision = self.revision;
+        let queue = self.saves.clone();
+        crate::host::spawn_in_project(
+            move || pending.write(),
+            move |studio, _, _, result| {
+                if !queue.is_current(save_revision) {
+                    return;
+                }
+                match result {
+                    Ok(true) => {
+                        if studio.revision == edit_revision {
+                            studio.dirty = false;
+                        }
+                        if announce && studio.revision == edit_revision {
+                            studio.notify(&t("studio.projectSaved"), false);
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        studio.dirty = true;
+                        studio.notify(&tf("studio.couldNotSave", &[&error]), true);
+                    }
                 }
             },
         );
@@ -4130,42 +4258,7 @@ impl Studio {
             };
             return;
         }
-        let mut moving = if self.selection.iter().any(|held| held == id) {
-            self.selection.clone()
-        } else {
-            vec![id.to_owned()]
-        };
-        // A detached sound travels with its picture and the picture with
-        // its sound: the pair stays in step unless one of them is moved
-        // on its own lane by a lock (#105).
-        let partners: Vec<String> = moving
-            .iter()
-            .filter_map(|clip_id| self.clip(clip_id))
-            .flat_map(|clip| {
-                let mut found: Vec<String> = clip.detached_from.iter().cloned().collect();
-                found.extend(
-                    self.timeline()
-                        .clips
-                        .iter()
-                        .filter(|other| other.detached_from.as_deref() == Some(clip.id.as_str()))
-                        .map(|other| other.id.clone()),
-                );
-                found
-            })
-            .filter(|partner| !moving.contains(partner))
-            .collect();
-        moving.extend(partners);
-        let origins = moving
-            .iter()
-            .filter_map(|clip_id| {
-                let clip = self.clip(clip_id)?;
-                Some(MoveOrigin {
-                    clip: clip.id.clone(),
-                    start: clip.start as f32,
-                    row: self.row_of(&clip.track_id),
-                })
-            })
-            .collect();
+        let origins = drag_origins(self.timeline(), &self.selection, id);
         self.gesture = Gesture::Move {
             primary: id.to_owned(),
             origins,
@@ -5785,29 +5878,34 @@ impl Studio {
         let name = clip.name.clone();
         let title = t("lib.exportAudio");
         let family = t("lib.wavAudio");
-        crate::host::on_ui(move |studio, _, _| {
-            let file = if cfg!(any(target_os = "android", target_os = "ios")) {
-                out_dir.join(&suggested)
-            } else {
-                let Some(chosen) = crate::platform::save_file(
-                    &title,
-                    &out_dir,
-                    &suggested,
-                    (family.as_str(), &["wav"]),
-                ) else {
-                    return;
-                };
-                if chosen
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
-                {
-                    chosen
+        let dialog_dir = out_dir.clone();
+        // The native panel pumps timers; do not borrow Studio until it answers.
+        crate::host::after_dialog(
+            move || {
+                let file = if cfg!(any(target_os = "android", target_os = "ios")) {
+                    dialog_dir.join(&suggested)
                 } else {
-                    chosen.with_extension("wav")
-                }
-            };
-            studio.write_clip_audio(&name, pieces, duration, file, out_dir);
-        });
+                    let chosen = crate::platform::save_file(
+                        &title,
+                        &dialog_dir,
+                        &suggested,
+                        (family.as_str(), &["wav"]),
+                    )?;
+                    if chosen
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+                    {
+                        chosen
+                    } else {
+                        chosen.with_extension("wav")
+                    }
+                };
+                Some(file)
+            },
+            move |studio, _, _, file| {
+                studio.write_clip_audio(&name, pieces, duration, file, out_dir);
+            },
+        );
     }
 
     /// Mixes `pieces` - one clip's sound, `duration` seconds of it - into
@@ -6381,69 +6479,73 @@ impl Studio {
         );
         let title = t("lib.saveFrame");
         let family = t("lib.pngImage");
-        crate::host::on_ui(move |studio, _, _| {
-            let file = if cfg!(any(target_os = "android", target_os = "ios")) {
-                out_dir.join(&suggested)
-            } else {
-                let Some(chosen) = crate::platform::save_file(
-                    &title,
-                    &out_dir,
-                    &suggested,
-                    (family.as_str(), &["png"]),
-                ) else {
-                    return;
-                };
-                if chosen
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
-                {
-                    chosen
+        // The native panel pumps timers; do not borrow Studio until it answers.
+        crate::host::after_dialog(
+            move || {
+                let file = if cfg!(any(target_os = "android", target_os = "ios")) {
+                    out_dir.join(&suggested)
                 } else {
-                    chosen.with_extension("png")
-                }
-            };
-            let written = file.to_string_lossy().into_owned();
-            studio.notify(&t("studio.savingFrame"), false);
-            spawn_in_project(
-                move || -> Result<concat_host::media::MediaSummary, String> {
-                    let pixels = monitor.frame(clips, &settings, spec)?;
-                    let image = image::RgbaImage::from_raw(width, height, pixels)
-                        .ok_or_else(|| "the frame came back the wrong size".to_owned())?;
-                    if let Some(parent) = file.parent() {
-                        std::fs::create_dir_all(parent).map_err(|error| {
-                            format!("could not create {}: {error}", parent.display())
-                        })?;
+                    let chosen = crate::platform::save_file(
+                        &title,
+                        &out_dir,
+                        &suggested,
+                        (family.as_str(), &["png"]),
+                    )?;
+                    if chosen
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+                    {
+                        chosen
+                    } else {
+                        chosen.with_extension("png")
                     }
-                    image.save(&file).map_err(|error| error.to_string())?;
-                    concat_host::media::probe(&file.to_string_lossy())
-                },
-                move |studio, _, _, result| match result {
-                    Ok(summary) => {
-                        let item = summary.to_new_media();
-                        let path = item.path.clone();
-                        let minted = studio.apply(Command::AddMedia { item }).or_else(|| {
-                            studio
-                                .project()
-                                .media
-                                .iter()
-                                .find(|item| item.path == path)
-                                .map(|item| item.id.clone())
-                        });
-                        studio.media.filter = MediaFilter::All;
-                        studio.media.selected.clear();
-                        if let Some(id) = minted {
-                            studio.media.selected.insert(id);
+                };
+                Some(file)
+            },
+            move |studio, _, _, file| {
+                let written = file.to_string_lossy().into_owned();
+                studio.notify(&t("studio.savingFrame"), false);
+                spawn_in_project(
+                    move || -> Result<concat_host::media::MediaSummary, String> {
+                        let pixels = monitor.frame(clips, &settings, spec)?;
+                        let image = image::RgbaImage::from_raw(width, height, pixels)
+                            .ok_or_else(|| "the frame came back the wrong size".to_owned())?;
+                        if let Some(parent) = file.parent() {
+                            std::fs::create_dir_all(parent).map_err(|error| {
+                                format!("could not create {}: {error}", parent.display())
+                            })?;
                         }
-                        studio.media_jump += 1;
-                        studio.notify(&tf("studio.frameSaved", &[&written]), false);
-                    }
-                    Err(error) => {
-                        log::warn!("save frame: {error}");
-                        studio.notify(&tf("studio.couldNotSaveFrame", &[&error]), true);
-                    }
-                },
-            );
-        });
+                        image.save(&file).map_err(|error| error.to_string())?;
+                        concat_host::media::probe(&file.to_string_lossy())
+                    },
+                    move |studio, _, _, result| match result {
+                        Ok(summary) => {
+                            let item = summary.to_new_media();
+                            let path = item.path.clone();
+                            let minted = studio.apply(Command::AddMedia { item }).or_else(|| {
+                                studio
+                                    .project()
+                                    .media
+                                    .iter()
+                                    .find(|item| item.path == path)
+                                    .map(|item| item.id.clone())
+                            });
+                            studio.media.filter = MediaFilter::All;
+                            studio.media.selected.clear();
+                            if let Some(id) = minted {
+                                studio.media.selected.insert(id);
+                            }
+                            studio.media_jump += 1;
+                            studio.notify(&tf("studio.frameSaved", &[&written]), false);
+                        }
+                        Err(error) => {
+                            log::warn!("save frame: {error}");
+                            studio.notify(&tf("studio.couldNotSaveFrame", &[&error]), true);
+                        }
+                    },
+                );
+            },
+        );
     }
 
     /// The volume line on clip `id` dragged to `gain`: written the way the
@@ -6649,8 +6751,6 @@ impl Studio {
         }
     }
 
-    /// A copy of `source` laid after it. Three commands, because a clip's
-    /// in-point and length are set by trims, not by placement.
     /// Duplicate every unlocked selected clip (right-to-left by start so
     /// neighbours do not stack). Falls back to the menu target when the
     /// selection is empty.
@@ -6675,92 +6775,111 @@ impl Studio {
             return;
         }
         sources.sort_by(|left, right| right.start.total_cmp(&left.start));
-        let mut last = None;
-        for source in &sources {
-            self.duplicate(source);
-            last = self.selection.first().cloned();
-        }
-        if let Some(id) = last {
-            self.selection = vec![id];
+        let mut commands: Vec<Command> = sources
+            .into_iter()
+            .map(|source| Command::DuplicateClip { clip_id: source.id })
+            .collect();
+        // One user gesture is one undo step, including a multi-clip selection.
+        let command = if commands.len() == 1 {
+            commands.pop().expect("one selected clip")
+        } else {
+            Command::Batch { commands }
+        };
+        let previous_selection = self.selection.clone();
+        let before: HashSet<String> = self
+            .timeline()
+            .clips
+            .iter()
+            .map(|clip| clip.id.clone())
+            .collect();
+        match self.apply_checked(command) {
+            Ok(_) => {
+                self.selection = self
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|clip| !before.contains(&clip.id))
+                    .map(|clip| clip.id.clone())
+                    .collect();
+            }
+            Err(error) => {
+                self.selection = previous_selection;
+                self.notify(&error, true);
+            }
         }
     }
 
-    pub fn duplicate(&mut self, source: &Clip) {
-        let end = source.start + source.duration;
-        if source.kind == model::ClipKind::Text {
-            let created = self.apply(Command::AddTextClip {
-                above: false,
-                track_id: Some(source.track_id.clone()),
-                start: end,
-                style: source.text.clone(),
-                duration: Some(source.duration),
-                offset_y: Some(source.offset_y),
-            });
-            if let Some(id) = created {
-                self.selection = vec![id];
-            }
-            return;
+    fn copy_selection(&mut self, anchor: Option<&str>) {
+        self.flush_commit();
+        let ids = match anchor {
+            Some(id) if !self.selection.iter().any(|held| held == id) => vec![id.to_owned()],
+            _ => self.selection.clone(),
+        };
+        let held = copy_clips(self.timeline(), &ids);
+        if !held.is_empty() {
+            self.clipboard = Some(held);
         }
-        if source.kind == model::ClipKind::Shape {
-            let created = self.apply(Command::AddShapeClip {
-                above: false,
-                track_id: Some(source.track_id.clone()),
-                start: end,
-                style: source.shape.clone(),
-                duration: Some(source.duration),
-                name: source.name.clone(),
-            });
-            if let Some(id) = created {
-                self.selection = vec![id];
-            }
-            return;
-        }
-        let Some(created) = self.apply(Command::AddClip {
-            media_id: source.media_id.clone(),
-            track_id: source.track_id.clone(),
-            start: (end - source.source_start / source.speed).max(0.0),
-            ripple: false,
-        }) else {
+    }
+
+    fn paste_selection(&mut self, anchor: Option<&str>) {
+        self.flush_commit();
+        let Some(held) = self.clipboard.clone() else {
             return;
         };
-        let placed = self.clip(&created).cloned();
-        let Some(placed) = placed else { return };
-        let mut commands = Vec::new();
-        let head = end - placed.start;
-        if head.abs() > 1e-6 {
-            commands.push(Command::TrimClip {
-                clip_id: created.clone(),
-                edge: TrimEdge::Start,
-                delta: head,
-                ripple: false,
-            });
+        let (start, row) = if let Some(clip) = anchor.and_then(|id| self.clip(id)) {
+            (
+                clip.start + clip.duration,
+                Some(self.row_of(&clip.track_id)),
+            )
+        } else {
+            let selected: Vec<&Clip> = self
+                .selection
+                .iter()
+                .filter_map(|id| self.clip(id))
+                .collect();
+            if selected.is_empty() {
+                (f64::from(self.playhead).max(0.0), None)
+            } else {
+                let end = selected
+                    .iter()
+                    .map(|clip| clip.start + clip.duration)
+                    .fold(0.0, f64::max);
+                let row = selected
+                    .iter()
+                    .map(|clip| self.row_of(&clip.track_id))
+                    .min();
+                (end, row)
+            }
+        };
+        let clips = match prepare_paste(&held, self.timeline(), start, row, |id| self.locked(id)) {
+            Ok(clips) => clips,
+            Err(error) => {
+                self.notify(&error, true);
+                return;
+            }
+        };
+        let previous_selection = self.selection.clone();
+        let before: HashSet<String> = self
+            .timeline()
+            .clips
+            .iter()
+            .map(|clip| clip.id.clone())
+            .collect();
+        match self.apply_checked(Command::PasteClips { clips }) {
+            Ok(_) => {
+                self.selection = self
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|clip| !before.contains(&clip.id))
+                    .map(|clip| clip.id.clone())
+                    .collect();
+            }
+            Err(error) => {
+                self.selection = previous_selection;
+                self.notify(&error, true);
+            }
         }
-        let after_head = placed.duration - head.max(0.0);
-        let tail = source.duration - after_head;
-        if tail.abs() > 1e-6 {
-            commands.push(Command::TrimClip {
-                clip_id: created.clone(),
-                edge: TrimEdge::End,
-                delta: tail,
-                ripple: false,
-            });
-        }
-        commands.push(Command::UpdateClip {
-            clip_id: created.clone(),
-            patch: ClipPatch {
-                name: Some(format!("{} copy", source.name)),
-                volume: Some(source.volume),
-                fade_in: Some(source.fade_in),
-                fade_out: Some(source.fade_out),
-                opacity: Some(source.opacity),
-                preserve_pitch: Some(source.preserve_pitch),
-                filters: Some(source.filters.clone()),
-                video_effects: Some(source.video_effects.clone()),
-                ..ClipPatch::default()
-            },
-        });
-        self.apply(Command::Batch { commands });
-        self.selection = vec![created];
     }
 
     /// What the tray's sound and word tools may do to the selection: one
@@ -6850,6 +6969,17 @@ impl Studio {
     /// says why it could not.
     pub fn open_project(&mut self, info: ProjectInfo) -> Result<(), String> {
         log::info!("project: opening {}", info.path);
+        // Reopening the current folder must keep its live, possibly unsaved
+        // edit rather than reload an older disk snapshot under an alias.
+        if self.session.as_ref().is_some_and(|session| {
+            session.path() == info.path
+                || std::fs::canonicalize(session.path())
+                    .ok()
+                    .zip(std::fs::canonicalize(&info.path).ok())
+                    .is_some_and(|(current, target)| current == target)
+        }) {
+            return Ok(());
+        }
         if self
             .host
             .open_projects
@@ -6860,6 +6990,20 @@ impl Studio {
         }
         match Session::open_info(&info) {
             Ok(session) => {
+                // Load the target first: a failed open never closes the current
+                // edit. Then commit typed text and publish its newest snapshot
+                // before replacing any current state or releasing its claim.
+                self.flush_commit();
+                if let Some(current) = self.session.as_mut() {
+                    let (path, document) = current.prepare_save(None);
+                    if let Err(error) = self.saves.prepare(path, document).write() {
+                        self.dirty = true;
+                        self.host.open_projects.release(&info.path);
+                        return Err(error);
+                    }
+                    self.host.open_projects.release(current.path());
+                }
+                self.autosave.stop();
                 if let Err(error) = projects::remember(&self.host.dirs.config, &info) {
                     log::warn!("{error}");
                 }
@@ -6885,6 +7029,12 @@ impl Studio {
                 if swept > 0 {
                     log::info!("{swept} stale proxies swept from {}", project_dir.display());
                 }
+                self.export.reset_for_project(&self.host.exporter);
+                self.relink.reset();
+                self.handle(crate::panes::Msg::Captions(
+                    crate::panes::captions::CaptionsMsg::Cancel,
+                ));
+                self.clipboard = None;
                 self.session = Some(session);
                 crate::host::next_project_epoch();
                 self.forget_art();
@@ -7008,10 +7158,19 @@ impl Studio {
     }
 
     /// Saves, then closes the session and returns to the launch screen.
-    pub fn close_project(&mut self) {
+    /// False keeps the session and window open after a failed save.
+    pub fn close_project(&mut self) -> bool {
         log::info!("project: closing {}", self.project_name);
         // Words still being typed land in the save, not on the floor.
         self.flush_commit();
+        if let Some(session) = self.session.as_mut() {
+            let (path, document) = session.prepare_save(None);
+            if let Err(error) = self.saves.prepare(path, document).write() {
+                self.dirty = true;
+                self.notify(&tf("studio.couldNotSave", &[&error]), true);
+                return false;
+            }
+        }
         self.pause();
         self.host.cutouts.cancel();
         self.host.enhancers.cancel();
@@ -7020,17 +7179,16 @@ impl Studio {
         self.reverse_jobs.clear();
         self.cutout_jobs.clear();
         self.region_job = None;
-        if let Some(session) = self.session.as_mut() {
-            let (path, document) = session.prepare_save(None);
-            if let Err(error) = projects::save(&path, &document) {
-                self.notify(&tf("studio.couldNotSave", &[&error]), true);
-                return;
-            }
-        }
+        self.handle(crate::panes::Msg::Captions(
+            crate::panes::captions::CaptionsMsg::Cancel,
+        ));
         self.autosave.stop();
         if let Some(session) = self.session.as_ref() {
             self.host.open_projects.release(session.path());
         }
+        self.export.reset_for_project(&self.host.exporter);
+        self.relink.reset();
+        self.clipboard = None;
         self.session = None;
         // Whatever a worker still brings back for this project is dropped
         // at delivery; the sheets that were waiting on one stop waiting.
@@ -7065,6 +7223,7 @@ impl Studio {
             .set_clips(std::path::PathBuf::new(), Vec::new());
         self.on_start = true;
         self.recents = projects::list(&self.host.dirs.config);
+        true
     }
 
     /// Posters for the recents that have none yet, decoded on a worker.
@@ -7352,12 +7511,18 @@ impl Studio {
     /// catalogue is rebuilt so the Filters page shows them, their cards
     /// drawn by their own shaders.
     pub fn import_lut(&mut self) {
-        let Some(paths) = crate::platform::pick_files(
-            &t("studio.importLut"),
-            Some((t("studio.lut").as_str(), &["cube"])),
-        ) else {
-            return;
-        };
+        let title = t("studio.importLut");
+        let family = t("studio.lut");
+        crate::host::after_dialog(
+            move || crate::platform::pick_files(&title, Some((family.as_str(), &["cube"]))),
+            move |studio, _, _, paths| {
+                studio.import_lut_paths(paths);
+            },
+        );
+    }
+
+    /// Apply a picker answer after the native panel has released the event loop.
+    fn import_lut_paths(&mut self, paths: Vec<std::path::PathBuf>) {
         let dir = Self::looks_dir(&self.host.dirs);
         let mut imported = 0;
         for path in paths {
@@ -9996,7 +10161,9 @@ impl Studio {
             }
             // ⇧⌫, from the key table; plain ⌫ comes in as its own callback.
             "ripple-delete" => self.ripple_delete_selected(),
-            "copy" | "duplicate" | "mute" => {
+            "copy" => self.copy_selection(None),
+            "duplicate" => self.duplicate_selected(),
+            "mute" => {
                 if let Some(id) = self.sole_selection() {
                     self.clip_action(&id, action);
                 }
@@ -10015,23 +10182,7 @@ impl Studio {
                 self.menu_target = None;
                 self.freeze_at_playhead();
             }
-            "paste" => {
-                let Some(held) = self.clipboard.clone() else {
-                    return;
-                };
-                match self.sole_selection() {
-                    // After the selected clip, on its lane, as the menu does.
-                    Some(id) => self.clip_action(&id, "paste"),
-                    // Nothing selected: at the playhead, on the lane it was
-                    // copied from. `duplicate` lays a copy after its source,
-                    // so the source is placed one length before the playhead.
-                    None => {
-                        let mut source = held;
-                        source.start = f64::from(self.playhead) - source.duration;
-                        self.duplicate(&source);
-                    }
-                }
-            }
+            "paste" => self.paste_selection(None),
             _ => {}
         }
     }
@@ -10045,17 +10196,9 @@ impl Studio {
             return;
         };
         match action {
-            "copy" => self.clipboard = Some(clip),
+            "copy" => self.copy_selection(Some(id)),
             "duplicate" => self.duplicate_selected(),
-            "paste" => {
-                if let Some(held) = self.clipboard.clone() {
-                    let mut source = held;
-                    // Pasted after the clip that was right-clicked, on its lane.
-                    source.track_id = clip.track_id.clone();
-                    source.start = clip.start + clip.duration - source.duration;
-                    self.duplicate(&source);
-                }
-            }
+            "paste" => self.paste_selection(Some(id)),
             "split" => {
                 let at = self.playhead;
                 self.flush_commit();
@@ -10193,6 +10336,161 @@ mod tests {
         custom_rate, fps_of, grading_rows, home_folder, key_commands, packed, place_in, shown,
         wheel_partners, write_keyable,
     };
+
+    /// A copied group keeps its complete snapshots and relative layout even
+    /// when the destination timeline has entirely different track IDs.
+    #[test]
+    fn clipboard_group_maps_display_rows_without_distorting_snapshots() {
+        use concat_project::model::{Clip, ClipKind, Project};
+        use std::sync::Arc;
+        let mut source = Project::new();
+        let mut picture = Clip::blank("video", "T4", ClipKind::Video, "video", 10.0, 2.0);
+        picture.media_id = "m1".to_owned();
+        picture.source_start = 1.0;
+        picture.speed = 0.5;
+        picture.stretch_x = 1.25;
+        picture
+            .extra
+            .insert("futureStyle".to_owned(), serde_json::json!({"amount": 7}));
+        let mut sound = Clip::blank("audio", "T2", ClipKind::Audio, "audio", 12.0, 1.0);
+        sound.media_id = "m1".to_owned();
+        sound.volume = 0.25;
+        sound.detached_from = Some(picture.id.clone());
+        source.active_mut().clips = vec![Arc::new(picture.clone()), Arc::new(sound.clone())];
+        let held = super::copy_clips(source.active(), &["audio".to_owned(), "video".to_owned()]);
+        assert_eq!(held.len(), 2);
+        // Copy order cannot change the group origin or its lane offsets.
+        assert_eq!((held[0].row, held[1].row), (2, 0));
+        source.active_mut().clips.clear();
+        let mut target = Project::new();
+        for (index, track) in target.active_mut().tracks.iter_mut().enumerate() {
+            track.id = format!("destination-{index}");
+        }
+        let pasted =
+            super::prepare_paste(&held, target.active(), 30.0, Some(1), |_| false).unwrap();
+        let mut expected_sound = sound.clone();
+        expected_sound.start = 32.0;
+        expected_sound.track_id = "destination-0".to_owned();
+        let mut expected_picture = picture.clone();
+        expected_picture.start = 30.0;
+        expected_picture.track_id = "destination-2".to_owned();
+        assert_eq!(
+            serde_json::to_value(&pasted).unwrap(),
+            serde_json::to_value([expected_sound, expected_picture]).unwrap()
+        );
+        let at_playhead =
+            super::prepare_paste(&held, target.active(), 5.0, None, |_| false).unwrap();
+        assert_eq!((at_playhead[0].start, at_playhead[1].start), (7.0, 5.0));
+        assert_eq!(at_playhead[0].track_id, "destination-1");
+        assert_eq!(at_playhead[1].track_id, "destination-3");
+        assert!(
+            super::prepare_paste(&held, target.active(), 30.0, Some(2), |_| false).is_err(),
+            "all source rows must fit"
+        );
+        assert!(
+            super::prepare_paste(&held, target.active(), 30.0, Some(1), |id| id
+                == "destination-0")
+            .is_err(),
+            "one locked lane refuses the whole group"
+        );
+        assert!(super::prepare_paste(&held, target.active(), f64::NAN, None, |_| false).is_err());
+        assert!(super::prepare_paste(&held, target.active(), 0.0, Some(-1), |_| false).is_err());
+        let mut invalid = held.clone();
+        invalid[1].clip.start = f64::INFINITY;
+        assert!(super::prepare_paste(&invalid, target.active(), 0.0, None, |_| false).is_err());
+        assert_eq!(
+            serde_json::to_value(&held[0].clip).unwrap(),
+            serde_json::to_value(sound).unwrap(),
+            "preparation and rejection never mutate clipboard"
+        );
+    }
+
+    /// Dragging either half of detached media leaves the other half in
+    /// place; explicitly selecting both still moves them as one undo step.
+    #[test]
+    fn detached_media_moves_only_when_selected() {
+        use concat_project::commands::ClipMove;
+        use concat_project::doc::{DocumentSettings, to_document};
+        use concat_project::model::{Clip, ClipKind, MediaItem, MediaKind, Project};
+        use std::sync::Arc;
+
+        let mut project = Project::new();
+        project.media.push(MediaItem {
+            id: "m1".to_owned(),
+            path: "/synthetic-detached.mp4".to_owned(),
+            name: "Synthetic detached media".to_owned(),
+            kind: MediaKind::Video,
+            duration: Some(2.0),
+            has_audio: true,
+            ..MediaItem::default()
+        });
+        let mut picture = Clip::blank("picture", "T1", ClipKind::Video, "picture", 0.0, 2.0);
+        picture.media_id = "m1".to_owned();
+        picture.muted = Some(true);
+        let mut sound = Clip::blank("sound", "T2", ClipKind::Audio, "sound", 0.0, 2.0);
+        sound.media_id = picture.media_id.clone();
+        sound.detached_from = Some(picture.id.clone());
+        project.active_mut().clips = vec![Arc::new(picture), Arc::new(sound)];
+        let settings = DocumentSettings {
+            name: "Detached movement".to_owned(),
+            width: 320,
+            height: 180,
+            rate_num: 30,
+            rate_den: 1,
+        };
+        assert!(project.active().tracks.iter().any(|track| track.id == "T2"));
+        let before = to_document(&settings, &project);
+        for (primary, selection) in [
+            ("sound", vec!["sound".to_owned()]),
+            ("picture", vec!["picture".to_owned()]),
+            ("sound", vec!["picture".to_owned(), "sound".to_owned()]),
+        ] {
+            let mut editor = concat_project::Editor::from_document(&before).expect("fixture");
+            let moves = super::drag_origins(editor.project().active(), &selection, primary)
+                .iter()
+                .map(|origin| ClipMove {
+                    clip_id: origin.clip.clone(),
+                    track_id: editor.project().active().tracks
+                        [editor.project().active().tracks.len() - 1 - origin.row as usize]
+                        .id
+                        .clone(),
+                    start: f64::from(origin.start) + 3.0,
+                })
+                .collect();
+            editor.apply(Command::MoveClips { moves }).expect("moves");
+            for id in ["picture", "sound"] {
+                let clip = editor.project().active().clip(id).expect("clip retained");
+                assert_eq!(clip.track_id, if id == "picture" { "T1" } else { "T2" });
+                assert_eq!(
+                    clip.start,
+                    if selection.iter().any(|held| held == id) {
+                        3.0
+                    } else {
+                        0.0
+                    }
+                );
+            }
+            assert_eq!(
+                editor
+                    .project()
+                    .active()
+                    .clip("sound")
+                    .unwrap()
+                    .detached_from
+                    .as_deref(),
+                Some("picture")
+            );
+            assert_eq!(
+                editor.project().active().clip("picture").unwrap().muted,
+                Some(true)
+            );
+            let moved = to_document(&settings, editor.project());
+            assert!(editor.undo(), "undo gesture");
+            assert_eq!(to_document(&settings, editor.project()), before);
+            assert!(editor.redo(), "redo gesture");
+            assert_eq!(to_document(&settings, editor.project()), moved);
+        }
+    }
 
     /// A wheel is keyed as one knob: named by itself or by any of its own
     /// keys, it keys its puck and master; its master's key takes the puck's

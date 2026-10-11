@@ -20,6 +20,8 @@ export component LevelMeter inherits Rectangle {
     in property <bool> vertical;
     /// track thickness; defaults to 6px horizontal, 8px vertical
     in property <length> thickness: root.vertical ? 8px : 6px;
+    /// Keep thicker meters readable at the ends without making thin bars square.
+    in property <length> corner: 4px;
 
     /// True while the pointer is over the meter. The caller uses this to run
     /// the feed only while someone is looking at it — see the note on the
@@ -41,7 +43,7 @@ export component LevelMeter inherits Rectangle {
         width: root.vertical ? root.thickness : root.width;
         height: root.vertical ? root.height : root.thickness;
         background: Theme.well;
-        border-radius: (root.vertical ? self.width : self.height) / 2;
+        border-radius: Math.min(root.corner, (root.vertical ? self.width : self.height) / 2);
         clip: true;
 
         // reveal window
@@ -78,8 +80,11 @@ export component LevelMeter inherits Rectangle {
         }
 
         if root.peak >= 0: Rectangle {
-            x: root.vertical ? 0px : track.width * root.hold - 1px;
-            y: root.vertical ? track.height * (1 - root.hold) - 1px : 0px;
+            // Keep the whole marker inside the track at full scale and silence.
+            x: root.vertical ? 0px : Fmt.clamp((track.width * root.hold - 1px) / 1px,
+                0, Math.max(0, (track.width - 2px) / 1px)) * 1px;
+            y: root.vertical ? Fmt.clamp((track.height * (1 - root.hold) - 1px) / 1px,
+                0, Math.max(0, (track.height - 2px) / 1px)) * 1px : 0px;
             width: root.vertical ? track.width : 2px;
             height: root.vertical ? 2px : track.height;
             background: Theme.fg;

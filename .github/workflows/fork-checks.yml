@@ -1,7 +1,7 @@
 name: Fork development checks
 
 # Manual checks for the fork before a full desktop build. These jobs do
-# not render media, build the GUI, or publish a release.
+# not launch the GUI, export video, or publish a release.
 on:
   workflow_dispatch:
   workflow_call:
@@ -27,13 +27,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src
+          key: fork-workspace-v2
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
       - name: Project source formatting
         run: cargo fmt -p concat-project -p concat-host --check
         working-directory: src
       - name: Translation inventory
         run: python3 scripts/locales.py --check
+      - name: Optional model trial input and credential policy
+        run: python3 scripts/test_model_trial.py
       - name: Core and project tests
         run: cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
+        working-directory: src
+      - name: Title shaping and colour glyph tests
+        run: cargo test --locked -j 1 -p concat-text -- --test-threads=1
         working-directory: src
       - name: Subtitle file tests without media services
         run: |
@@ -45,6 +53,15 @@ jobs:
           rustc --edition 2024 -D warnings --test crates/concat-host/src/export_paths.rs -o "$RUNNER_TEMP/export-path-tests"
           "$RUNNER_TEMP/export-path-tests" --test-threads=1
         working-directory: src
+      - name: Bounded missing media search tests
+        run: |
+          rustc --edition 2024 -D warnings --test crates/concat-host/src/relink_files.rs -o "$RUNNER_TEMP/relink-file-tests"
+          "$RUNNER_TEMP/relink-file-tests" --test-threads=1
+        working-directory: src
+      - name: Isolated export files and no-replace publication
+        run: python3 scripts/test_export_files.py
+      - name: Ordered project saves and publication failure recovery
+        run: python3 scripts/test_project_files.py
       - name: VeyCut release metadata tests
         run: python3 scripts/test_veycut_release.py
       - name: Mac preview validation policy tests

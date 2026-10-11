@@ -35,8 +35,8 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect,
-    Stroke, Transform,
+    Color, FillRule, FilterQuality, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap,
+    PixmapPaint, Rect, Stroke, Transform,
 };
 use unicode_bidi::ParagraphBidiInfo;
 use unicode_linebreak::BreakOpportunity;
@@ -214,10 +214,27 @@ struct Cache {
     /// Each face a title has been set in, opened once, with its index in
     /// its collection.
     data: HashMap<fontdb::ID, (FaceData, u32)>,
-    /// Per character, every face that can draw it, in the database's
-    /// order. Learnt a title's missing characters at a time, since each
+    /// Per character, bitmap and outline faces that can draw it, in
+    /// the database's order. Learnt a title's missing characters at a time, since each
     /// lesson reads every face; emptied when a font is added.
-    covers: HashMap<char, Vec<fontdb::ID>>,
+    covers: HashMap<char, Coverage>,
+}
+
+/// Borrow bitmap colours first, then supported solid layers, before a
+/// monochrome substitute. Outline fallback keeps its original order.
+#[derive(Default)]
+struct Coverage {
+    bitmap: Vec<fontdb::ID>,
+    layered: Vec<fontdb::ID>,
+    outline: Vec<fontdb::ID>,
+}
+
+impl Coverage {
+    fn has(&self, id: fontdb::ID) -> bool {
+        self.bitmap.contains(&id)
+            || (self.bitmap.is_empty() && self.layered.contains(&id))
+            || (self.bitmap.is_empty() && self.layered.is_empty() && self.outline.contains(&id))
+    }
 }
 
 impl Default for Fonts {
@@ -293,6 +310,21 @@ pub const BASE_FONTS: [&[u8]; 42] = [
     include_bytes!("../fonts/ZenTokyoZoo-Regular.ttf"),
 ];
 
+/// Portable CJK fallback shared by the UI and title painter. This is a
+/// subset of Noto Sans CJK SC Regular; the complete OFL 1.1 licence and
+/// copyright are in fonts/LICENSE-NotoSansCJK.txt. Regional glyph forms
+/// follow Simplified Chinese when no system or project face covers them.
+pub const CJK_FALLBACK: &[u8] = include_bytes!("../fonts/NotoSansCJKsc-UI.otf");
+
+/// Loads portable faces without consulting the platform. Keep tests on
+/// this same path so a system font cannot hide missing bundled coverage.
+fn load_bundled_fonts(db: &mut fontdb::Database) {
+    for face in BUNDLED.iter().chain(BASE_FONTS.iter()) {
+        db.load_font_data(face.to_vec());
+    }
+    db.load_font_data(CJK_FALLBACK.to_vec());
+}
+
 /// Faces that used to be bundled and no longer are: a document that names
 /// one is painted in the bundled face, not in whatever the system offers
 /// for a name it does not know.
@@ -303,9 +335,7 @@ impl Fonts {
     pub fn new() -> Fonts {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
-        for face in BUNDLED.iter().chain(BASE_FONTS.iter()) {
-            db.load_font_data(face.to_vec());
-        }
+        load_bundled_fonts(&mut db);
         Fonts {
             db,
             cache: Mutex::default(),
@@ -449,7 +479,7 @@ impl Fonts {
             return;
         }
         for &ch in chars {
-            cache.covers.insert(ch, Vec::new());
+            cache.covers.insert(ch, Coverage::default());
         }
         for info in self.db.faces() {
             // Apple's last resort draws every character as a labelled box:
@@ -466,10 +496,14 @@ impl Fonts {
                     return;
                 };
                 for &ch in chars {
-                    if draws(&face, ch)
-                        && let Some(faces) = cache.covers.get_mut(&ch)
-                    {
-                        faces.push(info.id);
+                    if let Some(covers) = cache.covers.get_mut(&ch) {
+                        if bitmap_for(&face, ch).is_some() {
+                            covers.bitmap.push(info.id);
+                        } else if solid_for(&face, ch).is_some() {
+                            covers.layered.push(info.id);
+                        } else if draws(&face, ch) {
+                            covers.outline.push(info.id);
+                        }
                     }
                 }
             });
@@ -489,9 +523,10 @@ impl Fonts {
         let mut out = vec![0; text.len()];
         let mut last = 0;
         for (at, ch) in text.char_indices() {
-            let covers = cache.covers.get(&ch).map_or(&[][..], Vec::as_slice);
-            let lends =
-                |ids: &[fontdb::ID], index: usize| index != 0 && covers.contains(&ids[index]);
+            let covers = cache.covers.get(&ch);
+            let lends = |ids: &[fontdb::ID], index: usize| {
+                index != 0 && covers.is_some_and(|covers| covers.has(ids[index]))
+            };
             let index = if joins(ch) && at > 0 {
                 // A mark, a joiner, a skin tone: with what it modifies.
                 last
@@ -513,17 +548,22 @@ impl Fonts {
         out
     }
 
-    /// Of the faces in `covers`, the one closest to the style's slant and
-    /// weight; the database's order breaks a tie.
-    fn nearest(&self, covers: &[fontdb::ID], want: Want) -> Option<fontdb::ID> {
-        covers
-            .iter()
-            .filter_map(|&id| self.db.face(id))
-            .min_by_key(|info| {
-                let italic = info.style != fontdb::Style::Normal;
-                (italic != want.italic, info.weight.0.abs_diff(want.weight))
-            })
-            .map(|info| info.id)
+    /// Prefer supported bitmap colours, then match weight and slant;
+    /// the database's order breaks a tie.
+    fn nearest(&self, covers: Option<&Coverage>, want: Want) -> Option<fontdb::ID> {
+        let covers = covers?;
+        let closest = |ids: &[fontdb::ID]| {
+            ids.iter()
+                .filter_map(|&id| self.db.face(id))
+                .min_by_key(|info| {
+                    let italic = info.style != fontdb::Style::Normal;
+                    (italic != want.italic, info.weight.0.abs_diff(want.weight))
+                })
+                .map(|info| info.id)
+        };
+        closest(&covers.bitmap)
+            .or_else(|| closest(&covers.layered))
+            .or_else(|| closest(&covers.outline))
     }
 
     /// A face's bytes, opened once and kept.
@@ -564,22 +604,302 @@ struct Casting {
     paragraphs: Vec<Vec<usize>>,
 }
 
-/// Whether `face` can draw `ch`: it has a glyph, and the glyph is an outline.
-/// A colour emoji face maps its characters to pictures with no outline,
-/// which would paint nothing here, so it does not count.
+/// Whether a face can draw a character as an outline or a supported,
+/// bounded bitmap/solid layers. Other colour formats use outline fallback.
 fn draws(face: &ttf_parser::Face<'_>, ch: char) -> bool {
-    struct Nowhere;
-    impl ttf_parser::OutlineBuilder for Nowhere {
-        fn move_to(&mut self, _: f32, _: f32) {}
-        fn line_to(&mut self, _: f32, _: f32) {}
-        fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {}
-        fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {}
-        fn close(&mut self) {}
-    }
     let Some(glyph) = face.glyph_index(ch) else {
         return false;
     };
-    ch.is_whitespace() || face.outline_glyph(glyph, &mut Nowhere).is_some()
+    ch.is_whitespace()
+        || has_outline(face, glyph)
+        || bitmap_for(face, ch).is_some()
+        || solid_for(face, ch).is_some()
+}
+
+/// Probe geometry without allocating a glyph path. A mapping alone (or
+/// an empty/degenerate outline) must not make a broken colour font eligible.
+fn has_outline(face: &ttf_parser::Face<'_>, glyph: ttf_parser::GlyphId) -> bool {
+    #[derive(Default)]
+    struct Probe {
+        segment: bool,
+    }
+    impl ttf_parser::OutlineBuilder for Probe {
+        fn move_to(&mut self, _: f32, _: f32) {}
+        fn line_to(&mut self, _: f32, _: f32) {
+            self.segment = true;
+        }
+        fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {
+            self.segment = true;
+        }
+        fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {
+            self.segment = true;
+        }
+        fn close(&mut self) {}
+    }
+    let mut probe = Probe::default();
+    face.outline_glyph(glyph, &mut probe).is_some_and(|bounds| {
+        probe.segment && bounds.x_max > bounds.x_min && bounds.y_max > bounds.y_min
+    })
+}
+
+/// Decode one supported strike only after checking dimensions and storage.
+/// Fonts are project input too; never allocate an unbounded PNG canvas or
+/// accept truncated/trailing raw pixels. Keep PNG/BGRA pixels premultiplied.
+fn bitmap(image: &ttf_parser::RasterGlyphImage<'_>) -> Option<Pixmap> {
+    const MAX_SIDE: u32 = 2048;
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+    let width = u32::from(image.width);
+    let height = u32::from(image.height);
+    if width == 0
+        || height == 0
+        || width > MAX_SIDE
+        || height > MAX_SIDE
+        || image.data.len() > MAX_BYTES
+    {
+        return None;
+    }
+    match image.format {
+        ttf_parser::RasterImageFormat::PNG => {
+            // PNG's first chunk is IHDR. Check its real allocation size,
+            // independently of the dimensions the strike claims.
+            if image.data.get(..8)? != b"\x89PNG\r\n\x1a\n"
+                || image.data.get(8..12)? != 13u32.to_be_bytes()
+                || image.data.get(12..16)? != b"IHDR"
+            {
+                return None;
+            }
+            let png_width = u32::from_be_bytes(image.data.get(16..20)?.try_into().ok()?);
+            let png_height = u32::from_be_bytes(image.data.get(20..24)?.try_into().ok()?);
+            if png_width != width || png_height != height {
+                return None;
+            }
+            let pixmap = Pixmap::decode_png(image.data).ok()?;
+            (pixmap.width() == width && pixmap.height() == height).then_some(pixmap)
+        }
+        ttf_parser::RasterImageFormat::BitmapPremulBgra32 => {
+            let bytes = (width as usize)
+                .checked_mul(height as usize)?
+                .checked_mul(4)?;
+            if image.data.len() != bytes {
+                return None;
+            }
+            let mut rgba = Vec::with_capacity(bytes);
+            for pixel in image.data.chunks_exact(4) {
+                // Premultiplied channels cannot exceed alpha.
+                if pixel[..3].iter().any(|&channel| channel > pixel[3]) {
+                    return None;
+                }
+                rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+            }
+            Pixmap::from_vec(rgba, tiny_skia::IntSize::from_wh(width, height)?)
+        }
+        _ => None,
+    }
+}
+
+fn bitmap_for(face: &ttf_parser::Face<'_>, ch: char) -> Option<Pixmap> {
+    bitmap(&face.glyph_raster_image(face.glyph_index(ch)?, u16::MAX)?)
+}
+
+/// A bitmap glyph in its line's pen space, independent of the text fill.
+/// It has no text outline/shadow: those would colour the bitmap's box.
+struct BitmapMark {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    pixmap: Pixmap,
+}
+
+impl BitmapMark {
+    fn draw(&self, canvas: &mut Pixmap, dx: f32, dy: f32) {
+        canvas.draw_pixmap(
+            0,
+            0,
+            self.pixmap.as_ref(),
+            &PixmapPaint {
+                quality: FilterQuality::Bilinear,
+                ..PixmapPaint::default()
+            },
+            Transform::from_row(
+                self.width / self.pixmap.width() as f32,
+                0.0,
+                0.0,
+                self.height / self.pixmap.height() as f32,
+                dx + self.x,
+                dy + self.y,
+            ),
+            None,
+        );
+    }
+}
+
+/// Only COLR version 0 is followed: an ordered list of solid outline
+/// layers, using palette zero (or the title fill for palette 0xffff).
+/// Validate the selected record before asking the parser to visit layers.
+const MAX_COLOUR_LAYERS: usize = 128;
+
+fn solid_layers(
+    face: &ttf_parser::Face<'_>,
+    glyph: ttf_parser::GlyphId,
+    foreground: ttf_parser::RgbaColor,
+) -> Option<Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>> {
+    let table = face
+        .raw_face()
+        .table(ttf_parser::Tag::from_bytes(b"COLR"))?;
+    let read16 = |at| Some(u16::from_be_bytes(table.get(at..at + 2)?.try_into().ok()?));
+    let read32 = |at| Some(u32::from_be_bytes(table.get(at..at + 4)?.try_into().ok()?));
+    if read16(0)? != 0 {
+        return None;
+    }
+    let count = usize::from(read16(2)?);
+    let offset = usize::try_from(read32(4)?).ok()?;
+    let records = table.get(offset..offset.checked_add(count.checked_mul(6)?)?)?;
+    let record = records
+        .chunks_exact(6)
+        .find(|record| u16::from_be_bytes([record[0], record[1]]) == glyph.0)?;
+    let first = usize::from(u16::from_be_bytes([record[2], record[3]]));
+    let layers = usize::from(u16::from_be_bytes([record[4], record[5]]));
+    if layers == 0
+        || layers > MAX_COLOUR_LAYERS
+        || first.checked_add(layers)? > usize::from(read16(12)?)
+    {
+        return None;
+    }
+    let mut painter = SolidCollector {
+        layers: Vec::with_capacity(layers),
+        pending: None,
+        invalid: false,
+    };
+    face.paint_color_glyph(glyph, 0, foreground, &mut painter)?;
+    (!painter.invalid
+        && painter.pending.is_none()
+        && painter.layers.len() == layers
+        && painter
+            .layers
+            .iter()
+            .all(|(glyph, _)| has_outline(face, *glyph)))
+    .then_some(painter.layers)
+}
+
+fn solid_for(
+    face: &ttf_parser::Face<'_>,
+    ch: char,
+) -> Option<Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>> {
+    solid_layers(
+        face,
+        face.glyph_index(ch)?,
+        ttf_parser::RgbaColor::new(0, 0, 0, 255),
+    )
+}
+
+/// Defensively reject operations beyond an ordered solid layer list.
+/// Unsupported COLR v1 operations are never silently approximated.
+struct SolidCollector {
+    layers: Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>,
+    pending: Option<ttf_parser::GlyphId>,
+    invalid: bool,
+}
+
+impl<'a> ttf_parser::colr::Painter<'a> for SolidCollector {
+    fn outline_glyph(&mut self, glyph: ttf_parser::GlyphId) {
+        if self.pending.replace(glyph).is_some() {
+            self.invalid = true;
+        }
+    }
+    fn paint(&mut self, paint: ttf_parser::colr::Paint<'a>) {
+        match (paint, self.pending.take()) {
+            (ttf_parser::colr::Paint::Solid(colour), Some(glyph))
+                if self.layers.len() < MAX_COLOUR_LAYERS =>
+            {
+                self.layers.push((glyph, colour))
+            }
+            _ => self.invalid = true,
+        }
+    }
+    fn push_clip(&mut self) {
+        self.invalid = true;
+    }
+    fn push_clip_box(&mut self, _: ttf_parser::colr::ClipBox) {
+        self.invalid = true;
+    }
+    fn pop_clip(&mut self) {
+        self.invalid = true;
+    }
+    fn push_layer(&mut self, _: ttf_parser::colr::CompositeMode) {
+        self.invalid = true;
+    }
+    fn pop_layer(&mut self) {
+        self.invalid = true;
+    }
+    fn push_transform(&mut self, _: ttf_parser::Transform) {
+        self.invalid = true;
+    }
+    fn pop_transform(&mut self) {
+        self.invalid = true;
+    }
+}
+
+/// Colours are kept separate from the title fill/outline/shadow.
+enum ColourMark {
+    Bitmap(BitmapMark),
+    Layers(Vec<(Path, Color)>),
+}
+
+impl ColourMark {
+    fn draw(&self, canvas: &mut Pixmap, dx: f32, dy: f32) {
+        match self {
+            Self::Bitmap(bitmap) => bitmap.draw(canvas, dx, dy),
+            Self::Layers(layers) => {
+                let mut paint = Paint {
+                    anti_alias: true,
+                    ..Paint::default()
+                };
+                for (path, colour) in layers {
+                    paint.set_color(*colour);
+                    canvas.fill_path(
+                        path,
+                        &paint,
+                        FillRule::Winding,
+                        Transform::from_translate(dx, dy),
+                        None,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn place_solid_layers(
+    face: &ttf_parser::Face<'_>,
+    glyph: ttf_parser::GlyphId,
+    foreground: ttf_parser::RgbaColor,
+    scale: f32,
+    x: f32,
+    y: f32,
+) -> Option<ColourMark> {
+    let layers = solid_layers(face, glyph, foreground)?;
+    let mut placed = Vec::with_capacity(layers.len());
+    for (glyph, colour) in layers {
+        let mut builder = PathBuilder::new();
+        face.outline_glyph(
+            glyph,
+            &mut Outliner {
+                builder: &mut builder,
+                scale,
+                x,
+                y,
+            },
+        )?;
+        // A valid empty outline (e.g. a space) paints nothing.
+        if let Some(path) = builder.finish() {
+            placed.push((
+                path,
+                Color::from_rgba8(colour.red, colour.green, colour.blue, colour.alpha),
+            ));
+        }
+    }
+    (!placed.is_empty()).then_some(ColourMark::Layers(placed))
 }
 
 /// A character that belongs with the one before it and is set in its face:
@@ -596,6 +916,7 @@ fn joins(ch: char) -> bool {
 /// pen space, left to right.
 struct Line {
     path: Option<Path>,
+    marks: Vec<ColourMark>,
     width: f32,
     words: Vec<(f32, f32)>,
 }
@@ -658,6 +979,7 @@ struct Setter<'a> {
     faces: &'a [rustybuzz::Face<'a>],
     em: f32,
     tracking: f32,
+    foreground: ttf_parser::RgbaColor,
 }
 
 /// One line of the content, ready to be set: its text, its directions,
@@ -724,12 +1046,14 @@ impl Setter<'_> {
         if range.is_empty() {
             return Line {
                 path: None,
+                marks: Vec::new(),
                 width: 0.0,
                 words: Vec::new(),
             };
         }
         let (levels, runs) = para.bidi.visual_runs(range.clone());
         let mut builder = PathBuilder::new();
+        let mut marks = Vec::new();
         let mut pen = 0.0_f32;
         // Each glyph's cluster, as a byte into the paragraph, and the span
         // it advances over.
@@ -766,16 +1090,38 @@ impl Setter<'_> {
                     .zip(shaped.glyph_positions().iter())
                 {
                     if outline {
-                        let mut outliner = Outliner {
-                            builder: &mut builder,
-                            scale,
-                            x: pen + position.x_offset as f32 * scale,
-                            y: -(position.y_offset as f32 * scale),
-                        };
-                        face.outline_glyph(
-                            ttf_parser::GlyphId(info.glyph_id as u16),
-                            &mut outliner,
-                        );
+                        let glyph = ttf_parser::GlyphId(info.glyph_id as u16);
+                        let x = pen + position.x_offset as f32 * scale;
+                        let y = -(position.y_offset as f32 * scale);
+                        let mark = face.glyph_raster_image(glyph, u16::MAX).and_then(|image| {
+                            let pixmap = bitmap(&image)?;
+                            let k = self.em / f32::from(image.pixels_per_em.max(1));
+                            let height = f32::from(image.height) * k;
+                            Some(BitmapMark {
+                                x: x + f32::from(image.x) * k,
+                                y: y - f32::from(image.y) * k - height,
+                                width: f32::from(image.width) * k,
+                                height,
+                                pixmap,
+                            })
+                        });
+                        if let Some(mark) = mark {
+                            marks.push(ColourMark::Bitmap(mark));
+                        } else if let Some(mark) =
+                            place_solid_layers(face, glyph, self.foreground, scale, x, y)
+                        {
+                            marks.push(mark);
+                        } else {
+                            face.outline_glyph(
+                                glyph,
+                                &mut Outliner {
+                                    builder: &mut builder,
+                                    scale,
+                                    x,
+                                    y,
+                                },
+                            );
+                        }
                     }
                     let advance = position.x_advance as f32 * scale;
                     spans.push((piece.start + info.cluster as usize, pen, pen + advance));
@@ -806,6 +1152,7 @@ impl Setter<'_> {
         };
         Line {
             path: builder.finish(),
+            marks,
             width,
             words,
         }
@@ -1014,6 +1361,15 @@ fn paint(
         faces: &faces,
         em,
         tracking,
+        foreground: {
+            let fill = colour(&style.color).unwrap_or(Color::WHITE);
+            ttf_parser::RgbaColor::new(
+                (fill.red() * 255.0).round() as u8,
+                (fill.green() * 255.0).round() as u8,
+                (fill.blue() * 255.0).round() as u8,
+                (fill.alpha() * 255.0).round() as u8,
+            )
+        },
     };
     let lines: Vec<Line> = style
         .content
@@ -1072,18 +1428,19 @@ fn paint(
     let mut words = PathBuilder::new();
     let mut word_rects = Vec::new();
     for (row, line) in lines.iter().enumerate() {
-        let Some(path) = &line.path else { continue };
         let indent = match style.align {
             Align::Left => 0.0,
             Align::Center => (box_w - line.width) / 2.0,
             Align::Right => box_w - line.width,
         };
         let baseline = top + ascent + row as f32 * pitch;
-        let placed = path
-            .clone()
-            .transform(Transform::from_translate(left + indent, baseline))
-            .expect("a translated glyph path stays finite");
-        words.push_path(&placed);
+        if let Some(path) = &line.path {
+            let placed = path
+                .clone()
+                .transform(Transform::from_translate(left + indent, baseline))
+                .expect("a translated glyph path stays finite");
+            words.push_path(&placed);
+        }
         let line_top = baseline - ascent;
         for &(start_x, end_x) in &line.words {
             word_rects.push(WordRect {
@@ -1094,13 +1451,7 @@ fn paint(
             });
         }
     }
-    let Some(words) = words.finish() else {
-        return Ok((
-            canvas,
-            (outer_w.round() as u32, outer_h.round() as u32, block_dx, 0),
-            word_rects,
-        ));
-    };
+    let words = words.finish();
 
     let mut paint = Paint {
         anti_alias: true,
@@ -1129,6 +1480,7 @@ fn paint(
     // The shadow: the words again, offset down and right, black, blurred on
     // a layer of their own and laid under the real words.
     if style.shadow
+        && let Some(words) = &words
         && let Some(mut layer) = Pixmap::new(width, height)
     {
         let mut shade = Paint {
@@ -1137,7 +1489,7 @@ fn paint(
         };
         shade.set_color(Color::from_rgba8(0, 0, 0, 150));
         let offset = Transform::from_translate(em * 0.05, em * 0.07);
-        layer.fill_path(&words, &shade, FillRule::Winding, offset, None);
+        layer.fill_path(words, &shade, FillRule::Winding, offset, None);
         blur(&mut layer, (em * 0.04).round().max(1.0) as usize);
         canvas.draw_pixmap(
             0,
@@ -1154,6 +1506,7 @@ fn paint(
     let stroke_w = style.stroke_width.max(0.0) as f32 * frame_h;
     if stroke_w > 0.0
         && let Some(edge) = colour(&style.stroke_color)
+        && let Some(words) = &words
     {
         paint.set_color(edge);
         let stroke = Stroke {
@@ -1162,18 +1515,33 @@ fn paint(
             line_cap: LineCap::Round,
             ..Stroke::default()
         };
-        canvas.stroke_path(&words, &paint, &stroke, Transform::identity(), None);
+        canvas.stroke_path(words, &paint, &stroke, Transform::identity(), None);
     }
 
     // The words.
     paint.set_color(colour(&style.color).unwrap_or(Color::WHITE));
-    canvas.fill_path(
-        &words,
-        &paint,
-        FillRule::Winding,
-        Transform::identity(),
-        None,
-    );
+    if let Some(words) = &words {
+        canvas.fill_path(
+            words,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+    // Bitmap-only lines still carry word highlights and a plate. Place
+    // their colours on the same baselines/alignment as outline glyphs.
+    for (row, line) in lines.iter().enumerate() {
+        let indent = match style.align {
+            Align::Left => 0.0,
+            Align::Center => (box_w - line.width) / 2.0,
+            Align::Right => box_w - line.width,
+        };
+        let baseline = top + ascent + row as f32 * pitch;
+        for mark in &line.marks {
+            mark.draw(&mut canvas, left + indent, baseline);
+        }
+    }
 
     Ok((
         canvas,
@@ -1468,6 +1836,530 @@ fn paint_shape(style: &ShapeStyle, width: u32, height: u32) -> Result<(Pixmap, B
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn raster<'a>(
+        data: &'a [u8],
+        width: u16,
+        height: u16,
+        format: ttf_parser::RasterImageFormat,
+    ) -> ttf_parser::RasterGlyphImage<'a> {
+        ttf_parser::RasterGlyphImage {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            pixels_per_em: 64,
+            format,
+            data,
+        }
+    }
+
+    #[test]
+    fn bitmap_strikes_preserve_premultiplied_colour_and_reject_invalid_storage() {
+        use ttf_parser::RasterImageFormat::*;
+        let data = [0, 0, 128, 128, 255, 0, 0, 255];
+        let decoded = bitmap(&raster(&data, 2, 1, BitmapPremulBgra32)).unwrap();
+        assert_eq!(decoded.data(), &[128, 0, 0, 128, 0, 0, 255, 255]);
+        for data in [&data[..7], &data[..5], &[0, 0, 255, 128][..]] {
+            assert!(bitmap(&raster(data, 1, 1, BitmapPremulBgra32)).is_none());
+        }
+        assert!(bitmap(&raster(&[], 0, 1, BitmapPremulBgra32)).is_none());
+        assert!(bitmap(&raster(&[], 2049, 1, BitmapPremulBgra32)).is_none());
+        assert!(bitmap(&raster(&data, 2, 1, BitmapMono)).is_none());
+
+        let png = decoded.encode_png().unwrap();
+        assert_eq!(
+            bitmap(&raster(&png, 2, 1, PNG)).unwrap().data(),
+            decoded.data()
+        );
+        assert!(bitmap(&raster(&png, 1, 1, PNG)).is_none());
+        assert!(bitmap(&raster(&png[..24], 2, 1, PNG)).is_none());
+        let mut huge = png.clone();
+        huge[16..20].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(bitmap(&raster(&huge, 2, 1, PNG)).is_none());
+        let mut invalid = png;
+        invalid[12..16].copy_from_slice(b"IDAT");
+        assert!(bitmap(&raster(&invalid, 2, 1, PNG)).is_none());
+    }
+
+    #[test]
+    fn bitmap_mark_composites_alpha_and_respects_its_placement() {
+        use ttf_parser::RasterImageFormat::BitmapPremulBgra32;
+        let mut canvas = Pixmap::new(8, 8).unwrap();
+        canvas.fill(Color::from_rgba8(0, 0, 255, 255));
+        let mark = BitmapMark {
+            x: 1.0,
+            y: 1.0,
+            width: 2.0,
+            height: 2.0,
+            pixmap: bitmap(&raster(&[0, 0, 128, 128], 1, 1, BitmapPremulBgra32)).unwrap(),
+        };
+        mark.draw(&mut canvas, 2.0, 2.0);
+        assert_eq!(canvas.pixel(0, 0).unwrap().blue(), 255);
+        let painted = canvas.pixel(4, 4).unwrap();
+        assert_eq!(painted.alpha(), 255);
+        assert!(painted.red() > 100 && painted.blue() > 100);
+        assert_eq!(canvas.pixel(7, 7).unwrap().red(), 0);
+    }
+
+    /// Add one in-memory sbix strike to the existing licensed test face;
+    /// no system font, downloaded font or binary fixture is required.
+    fn bitmap_test_face() -> Vec<u8> {
+        let base = BUNDLED[0];
+        let face = ttf_parser::Face::parse(base, 0).unwrap();
+        let glyph = face.glyph_index('A').unwrap().0;
+        let count = face.number_of_glyphs();
+        let mut picture = Pixmap::new(32, 32).unwrap();
+        picture.fill(Color::from_rgba8(255, 0, 0, 255));
+        let png = picture.encode_png().unwrap();
+        let first = 4 + (usize::from(count) + 1) * 4;
+        let end = first + 8 + png.len();
+        let mut sbix = Vec::new();
+        sbix.extend_from_slice(&1u16.to_be_bytes()); // version
+        sbix.extend_from_slice(&1u16.to_be_bytes()); // flags
+        sbix.extend_from_slice(&1u32.to_be_bytes()); // strikes
+        sbix.extend_from_slice(&12u32.to_be_bytes());
+        sbix.extend_from_slice(&64u16.to_be_bytes()); // pixels per em
+        sbix.extend_from_slice(&72u16.to_be_bytes());
+        for index in 0..=count {
+            let offset = if index <= glyph { first } else { end };
+            sbix.extend_from_slice(&(offset as u32).to_be_bytes());
+        }
+        sbix.extend_from_slice(&0i16.to_be_bytes());
+        sbix.extend_from_slice(&0i16.to_be_bytes());
+        sbix.extend_from_slice(b"png ");
+        sbix.extend_from_slice(&png);
+        test_face_with_tables(vec![(*b"sbix", sbix)])
+    }
+
+    fn test_face_with_tables(additions: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
+        let base = BUNDLED[0];
+        let old_count = u16::from_be_bytes(base[4..6].try_into().unwrap());
+        let mut tables: Vec<([u8; 4], Vec<u8>)> = (0..old_count)
+            .map(|index| {
+                let record = 12 + usize::from(index) * 16;
+                let offset =
+                    u32::from_be_bytes(base[record + 8..record + 12].try_into().unwrap()) as usize;
+                let length =
+                    u32::from_be_bytes(base[record + 12..record + 16].try_into().unwrap()) as usize;
+                (
+                    base[record..record + 4].try_into().unwrap(),
+                    base[offset..offset + length].to_vec(),
+                )
+            })
+            .collect();
+        tables.retain(|(tag, _)| !additions.iter().any(|(replacement, _)| replacement == tag));
+        tables.extend(additions);
+        tables.sort_by_key(|(tag, _)| *tag);
+        let mut result = vec![0; 12 + tables.len() * 16];
+        result[..12].copy_from_slice(&base[..12]);
+        result[4..6].copy_from_slice(&(tables.len() as u16).to_be_bytes());
+        for (index, (tag, bytes)) in tables.into_iter().enumerate() {
+            let record = 12 + index * 16;
+            let offset = result.len() as u32;
+            result[record..record + 4].copy_from_slice(&tag);
+            result[record + 8..record + 12].copy_from_slice(&offset.to_be_bytes());
+            result[record + 12..record + 16].copy_from_slice(&(bytes.len() as u32).to_be_bytes());
+            result.extend_from_slice(&bytes);
+            while !result.len().is_multiple_of(4) {
+                result.push(0);
+            }
+        }
+        result
+    }
+
+    /// One glyph A made from ordered, overlapping A layers. Palette zero
+    /// has opaque red and half-transparent blue; 0xffff uses the title fill.
+    fn colr_test_face(entries: &[u16], version: u16) -> Vec<u8> {
+        colr_test_face_with_layer(entries, version, None)
+    }
+
+    fn colr_test_face_with_layer(entries: &[u16], version: u16, layer: Option<u16>) -> Vec<u8> {
+        let face = ttf_parser::Face::parse(BUNDLED[0], 0).unwrap();
+        let glyph = face.glyph_index('A').unwrap().0;
+        let header = if version == 0 { 14u32 } else { 34u32 };
+        let mut colr = Vec::new();
+        colr.extend_from_slice(&version.to_be_bytes());
+        colr.extend_from_slice(&1u16.to_be_bytes());
+        colr.extend_from_slice(&header.to_be_bytes());
+        colr.extend_from_slice(&(header + 6).to_be_bytes());
+        colr.extend_from_slice(&(entries.len() as u16).to_be_bytes());
+        if version == 1 {
+            colr.extend_from_slice(&[0; 20]);
+        }
+        colr.extend_from_slice(&glyph.to_be_bytes());
+        colr.extend_from_slice(&0u16.to_be_bytes());
+        colr.extend_from_slice(&(entries.len() as u16).to_be_bytes());
+        for palette in entries {
+            colr.extend_from_slice(&layer.unwrap_or(glyph).to_be_bytes());
+            colr.extend_from_slice(&palette.to_be_bytes());
+        }
+        let mut cpal = Vec::new();
+        cpal.extend_from_slice(&0u16.to_be_bytes());
+        cpal.extend_from_slice(&2u16.to_be_bytes()); // entries per palette
+        cpal.extend_from_slice(&1u16.to_be_bytes()); // palettes
+        cpal.extend_from_slice(&2u16.to_be_bytes()); // colour records
+        cpal.extend_from_slice(&14u32.to_be_bytes());
+        cpal.extend_from_slice(&0u16.to_be_bytes());
+        cpal.extend_from_slice(&[0, 0, 255, 255]); // red BGRA
+        cpal.extend_from_slice(&[255, 0, 0, 128]); // half-transparent blue
+        test_face_with_tables(vec![(*b"COLR", colr), (*b"CPAL", cpal)])
+    }
+
+    fn fonts_from_test_face(bytes: Vec<u8>) -> Fonts {
+        let mut db = fontdb::Database::new();
+        db.load_font_data(bytes);
+        Fonts {
+            db,
+            cache: Mutex::default(),
+        }
+    }
+
+    #[test]
+    fn colr_layers_preserve_palette_order_alpha_and_foreground() {
+        let bytes = colr_test_face(&[0, 1], 0);
+        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+        let glyph = face.glyph_index('A').unwrap();
+        let foreground = ttf_parser::RgbaColor::new(0, 255, 0, 128);
+        let layers = solid_layers(&face, glyph, foreground).unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].1, ttf_parser::RgbaColor::new(255, 0, 0, 255));
+        assert_eq!(layers[1].1, ttf_parser::RgbaColor::new(0, 0, 255, 128));
+        let mut title = style("A");
+        title.font_family = BUNDLED_FAMILY.into();
+        title.font_weight = 400.0;
+        title.font_size = 0.2;
+        title.color = "#00ff0080".into();
+        title.shadow = false;
+        title.stroke_width = 0.0;
+        let fonts = fonts_from_test_face(bytes);
+        let forward = render(&fonts, &title, 640, 360).unwrap();
+        let forward = Pixmap::decode_png(&forward.png).unwrap();
+        let purple = forward
+            .pixels()
+            .iter()
+            .filter(|p| {
+                p.alpha() == 255
+                    && p.red() > 120
+                    && p.red() < 135
+                    && p.blue() > 120
+                    && p.blue() < 135
+                    && p.green() == 0
+            })
+            .count();
+        assert!(
+            purple > 50,
+            "red underneath half-transparent blue gives purple"
+        );
+        let reverse = fonts_from_test_face(colr_test_face(&[1, 0], 0));
+        let reverse = render(&reverse, &title, 640, 360).unwrap();
+        let reverse = Pixmap::decode_png(&reverse.png).unwrap();
+        assert!(
+            reverse
+                .pixels()
+                .iter()
+                .filter(|p| { p.red() == 255 && p.blue() == 0 && p.green() == 0 })
+                .count()
+                > 50,
+            "the last opaque red layer replaces blue"
+        );
+
+        let bytes = colr_test_face(&[0xffff], 0);
+        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+        assert_eq!(
+            solid_layers(&face, glyph, foreground).unwrap()[0].1,
+            foreground
+        );
+        let foreground_fonts = fonts_from_test_face(bytes);
+        let out = render(&foreground_fonts, &title, 640, 360).unwrap();
+        let out = Pixmap::decode_png(&out.png).unwrap();
+        assert!(
+            out.pixels()
+                .iter()
+                .filter(|p| {
+                    p.green() > 120
+                        && p.green() < 135
+                        && p.alpha() > 120
+                        && p.alpha() < 135
+                        && p.red() == 0
+                        && p.blue() == 0
+                })
+                .count()
+                > 50,
+            "foreground palette entries keep title fill and alpha"
+        );
+    }
+
+    #[test]
+    fn colr_only_lines_preserve_placement_background_and_highlights() {
+        let fonts = fonts_from_test_face(colr_test_face(&[0, 1], 0));
+        let mut title = style(
+            "A A
+A",
+        );
+        title.font_family = BUNDLED_FAMILY.into();
+        title.font_weight = 400.0;
+        title.font_size = 0.12;
+        title.color = "#00ff00".into();
+        title.background = "#000000".into();
+        title.shadow = false;
+        title.stroke_width = 0.0;
+        for align in [Align::Left, Align::Center, Align::Right] {
+            title.align = align;
+            let out = render(&fonts, &title, 640, 360).unwrap();
+            let pixmap = Pixmap::decode_png(&out.png).unwrap();
+            assert_eq!(out.words.len(), 3);
+            assert!(
+                out.words[2].y > out.words[0].y,
+                "second line has a separate baseline"
+            );
+            let mut coloured = 0;
+            let mut plate = 0;
+            for (index, pixel) in pixmap.pixels().iter().enumerate() {
+                if pixel.red() > 100 && pixel.blue() > 100 && pixel.green() < 10 {
+                    coloured += 1;
+                    let x = (index % 640) as i32;
+                    let y = (index / 640) as i32;
+                    assert!(
+                        out.words.iter().any(|word| {
+                            x >= word.x
+                                && x < word.x + word.width as i32
+                                && y >= word.y
+                                && y < word.y + word.height as i32
+                        }),
+                        "layer at ({x}, {y}) is inside a reveal/highlight box"
+                    );
+                }
+                if pixel.alpha() == 255
+                    && pixel.red() == 0
+                    && pixel.green() == 0
+                    && pixel.blue() == 0
+                {
+                    plate += 1;
+                }
+            }
+            assert!(coloured > 100 && plate > 100);
+            assert!(out.block_width > 0 && out.block_height > 0);
+        }
+    }
+
+    #[test]
+    fn unsupported_or_excessive_colr_layers_fall_back_to_existing_outlines() {
+        let foreground = ttf_parser::RgbaColor::new(255, 255, 255, 255);
+        let boundary = colr_test_face(&vec![0; MAX_COLOUR_LAYERS], 0);
+        let face = ttf_parser::Face::parse(&boundary, 0).unwrap();
+        assert_eq!(
+            solid_layers(&face, face.glyph_index('A').unwrap(), foreground)
+                .unwrap()
+                .len(),
+            MAX_COLOUR_LAYERS,
+            "the inclusive layer cap is supported",
+        );
+        for bytes in [
+            colr_test_face(&[0, 1], 1),
+            colr_test_face(&vec![0; MAX_COLOUR_LAYERS + 1], 0),
+            colr_test_face(&[9], 0), // palette index does not exist
+        ] {
+            let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+            let glyph = face.glyph_index('A').unwrap();
+            assert!(solid_layers(&face, glyph, foreground).is_none());
+            assert!(draws(&face, 'A'), "the original outline is still usable");
+            let fonts = fonts_from_test_face(bytes);
+            let mut title = style("A");
+            title.font_family = BUNDLED_FAMILY.into();
+            title.font_weight = 400.0;
+            title.shadow = false;
+            title.stroke_width = 0.0;
+            let out = render(&fonts, &title, 640, 360).unwrap();
+            let pixmap = Pixmap::decode_png(&out.png).unwrap();
+            assert!(
+                pixmap
+                    .pixels()
+                    .iter()
+                    .any(|p| { p.alpha() > 0 && p.red() == p.green() && p.green() == p.blue() }),
+                "fallback paints the ordinary white outline"
+            );
+        }
+        let mut collector = SolidCollector {
+            layers: vec![],
+            pending: None,
+            invalid: false,
+        };
+        ttf_parser::colr::Painter::push_clip(&mut collector);
+        assert!(collector.invalid);
+    }
+
+    #[test]
+    fn unusable_colr_layer_glyphs_do_not_steal_outline_fallback() {
+        let space = ttf_parser::Face::parse(BUNDLED[0], 0)
+            .unwrap()
+            .glyph_index(' ')
+            .unwrap()
+            .0;
+        for layer in [u16::MAX, space] {
+            let broken = colr_test_face_with_layer(&[0], 0, Some(layer));
+            let face = ttf_parser::Face::parse(&broken, 0).unwrap();
+            assert!(
+                solid_for(&face, 'A').is_none(),
+                "missing/empty layer has no colour coverage"
+            );
+            assert!(
+                has_outline(&face, face.glyph_index('A').unwrap()),
+                "the base glyph's ordinary outline can still be borrowed"
+            );
+            let mut db = fontdb::Database::new();
+            db.load_font_data(broken);
+            db.load_font_data(BUNDLED[3].to_vec());
+            let fonts = Fonts {
+                db,
+                cache: Mutex::default(),
+            };
+            let regular = fonts
+                .db
+                .faces()
+                .find(|face| face.weight.0 == 400)
+                .unwrap()
+                .id;
+            let bold = fonts
+                .db
+                .faces()
+                .find(|face| face.weight.0 == 700)
+                .unwrap()
+                .id;
+            let mut cache = Cache::default();
+            fonts.learn(&mut cache, &['A']);
+            let coverage = cache.covers.get(&'A').unwrap();
+            assert!(
+                coverage.layered.is_empty(),
+                "learn must not register an unusable colour face"
+            );
+            let want = Want {
+                weight: 700,
+                italic: false,
+            };
+            assert_eq!(fonts.nearest(Some(coverage), want), Some(bold));
+
+            // Actual assignment with an own face lacking A must borrow
+            // the usable matching outline, rather than the broken layer.
+            let empty_cmap = test_face_with_tables(vec![(*b"cmap", vec![0, 0, 0, 0])]);
+            let own = ttf_parser::Face::parse(&empty_cmap, 0).unwrap();
+            assert!(own.glyph_index('A').is_none());
+            let mut ids = vec![regular];
+            assert_eq!(fonts.assign("A", &own, &cache, want, &mut ids), vec![1]);
+            assert_eq!(ids[1], bold);
+        }
+    }
+
+    #[test]
+    fn bitmap_only_lines_keep_colours_background_and_word_highlight_boxes() {
+        let bytes = bitmap_test_face();
+        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+        assert!(bitmap_for(&face, 'A').is_some());
+        let mut db = fontdb::Database::new();
+        db.load_font_data(bytes);
+        let fonts = Fonts {
+            db,
+            cache: Mutex::default(),
+        };
+        let mut title = style("A A");
+        title.font_family = BUNDLED_FAMILY.into();
+        title.font_weight = 400.0;
+        title.font_size = 0.1;
+        title.color = "#00ff00".into();
+        title.background = "#0000ff".into();
+        title.shadow = false;
+        title.stroke_width = 0.0;
+        for align in [Align::Left, Align::Center, Align::Right] {
+            title.align = align;
+            let out = render(&fonts, &title, 640, 360).unwrap();
+            let pixmap = Pixmap::decode_png(&out.png).unwrap();
+            assert_eq!(out.words.len(), 2);
+            let mut red = 0;
+            let mut blue = 0;
+            for (index, pixel) in pixmap.pixels().iter().enumerate() {
+                if pixel.red() > 200 && pixel.green() < 20 && pixel.blue() < 20 {
+                    red += 1;
+                    let x = (index % 640) as i32;
+                    let y = (index / 640) as i32;
+                    assert!(
+                        out.words.iter().any(|word| {
+                            x >= word.x
+                                && x < word.x + word.width as i32
+                                && y >= word.y
+                                && y < word.y + word.height as i32
+                        }),
+                        "bitmap pixel at ({x}, {y}) must be included in word highlights"
+                    );
+                }
+                if pixel.blue() > 200 && pixel.red() < 20 {
+                    blue += 1;
+                }
+            }
+            assert!(
+                red > 200,
+                "the glyph paints its own red, not the green text fill"
+            );
+            assert!(
+                blue > 100,
+                "a bitmap-only line retains its background plate"
+            );
+            assert!(out.block_width > 0 && out.block_height > 0);
+        }
+    }
+
+    #[test]
+    fn bitmap_fallback_is_preferred_over_an_outline_substitute() {
+        let mut db = fontdb::Database::new();
+        db.load_font_data(bitmap_test_face());
+        db.load_font_data(BUNDLED[3].to_vec());
+        let fonts = Fonts {
+            db,
+            cache: Mutex::default(),
+        };
+        let regular = fonts
+            .db
+            .faces()
+            .find(|face| face.weight.0 == 400)
+            .unwrap()
+            .id;
+        let bold = fonts
+            .db
+            .faces()
+            .find(|face| face.weight.0 == 700)
+            .unwrap()
+            .id;
+        let coverage = Coverage {
+            bitmap: vec![regular],
+            layered: vec![],
+            outline: vec![bold],
+        };
+        let want = Want {
+            weight: 700,
+            italic: false,
+        };
+        assert_eq!(fonts.nearest(Some(&coverage), want), Some(regular));
+        let layered = Coverage {
+            bitmap: vec![],
+            layered: vec![regular],
+            outline: vec![bold],
+        };
+        assert_eq!(fonts.nearest(Some(&layered), want), Some(regular));
+        assert!(layered.has(regular) && !layered.has(bold));
+        let bitmap_first = Coverage {
+            bitmap: vec![bold],
+            layered: vec![regular],
+            outline: vec![],
+        };
+        assert_eq!(fonts.nearest(Some(&bitmap_first), want), Some(bold));
+        assert!(bitmap_first.has(bold) && !bitmap_first.has(regular));
+        let plain = Coverage {
+            bitmap: vec![],
+            layered: vec![],
+            outline: vec![bold],
+        };
+        assert_eq!(fonts.nearest(Some(&plain), want), Some(bold));
+        assert_eq!(fonts.nearest(None, want), None);
+    }
 
     #[test]
     fn a_font_file_names_its_family_and_anything_else_names_none() {
@@ -1935,6 +2827,52 @@ mod tests {
         assert_eq!(face_of[second], face_of[second - 1]);
     }
 
+    /// Portable title fallback must cover actual CJK text even when a
+    /// Latin preset is requested and no platform font has been loaded.
+    #[test]
+    fn cjk_titles_shape_and_raster_without_system_fonts() {
+        let mut db = fontdb::Database::new();
+        load_bundled_fonts(&mut db);
+        let fonts = Fonts {
+            db,
+            cache: Mutex::default(),
+        };
+        let mut title = style("简体中文 繁體中文 한국어 日本語 かな カナ سلام VeyCut 2026");
+        title.font_family = "Inter".into();
+        let cast = fonts.cast(&title).expect("portable multilingual casting");
+        let assignments = &cast.paragraphs[0];
+        for (offset, character) in title.content.char_indices() {
+            if character.is_whitespace() {
+                continue;
+            }
+            let face_index = assignments[offset];
+            let (bytes, index) = &cast.faces[face_index];
+            let face = ttf_parser::Face::parse((**bytes).as_ref(), *index).expect("chosen face");
+            assert!(
+                draws(&face, character),
+                "no bundled glyph for {character:?}"
+            );
+        }
+        let face = ttf_parser::Face::parse(CJK_FALLBACK, 0).expect("portable CJK face");
+        for character in "简体中文繁體한국어".chars() {
+            assert!(draws(&face, character), "CJK asset misses {character:?}");
+        }
+        title.font_size = 0.045;
+        title.max_width = 0.9;
+        title.shadow = false;
+        let frame = render_frame(&fonts, &title, 640, 360).expect("portable mixed-script raster");
+        assert!(frame.block_width > 0 && frame.block_width <= 640);
+        assert!(frame.block_height > 0 && frame.block_height <= 360);
+        assert!(!frame.words.is_empty());
+        assert!(
+            frame
+                .words
+                .iter()
+                .all(|word| word.width > 0 && word.height > 0)
+        );
+        assert!(frame.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    }
+
     /// Persian is available even with no system fonts. Contextual forms
     /// and reading order are exercised, and CI retains rendered examples.
     #[test]
@@ -1961,9 +2899,7 @@ mod tests {
             "letters must use contextual forms"
         );
         let mut db = fontdb::Database::new();
-        for bytes in BUNDLED.iter().chain(BASE_FONTS.iter()) {
-            db.load_font_data(bytes.to_vec());
-        }
+        load_bundled_fonts(&mut db);
         let fonts = Fonts {
             db,
             cache: Mutex::default(),

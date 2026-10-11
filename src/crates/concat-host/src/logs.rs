@@ -109,7 +109,7 @@ fn install(sink: Option<Sink>, extra: Option<Box<dyn log::Log>>) -> Result<(), S
         .map(|()| log::set_max_level(level))
         .map_err(|_| "a logger was already installed".to_owned())?;
     log::info!(
-        "Concat {} · {} {} · {level}",
+        "VeyCut {} · {} {} · {level}",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -141,7 +141,7 @@ fn begin(dirs: &AppDirs) -> Result<(PathBuf, std::fs::File), String> {
     std::fs::create_dir_all(&folder)
         .map_err(|error| format!("could not create {}: {error}", folder.display()))?;
     prune(&folder);
-    let path = folder.join(format!("concat-{}.log", stamp(now(), Stamp::File)));
+    let path = folder.join(format!("veycut-{}.log", stamp(now(), Stamp::File)));
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -165,13 +165,25 @@ fn prune(folder: &Path) {
         .filter(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("concat-") && name.ends_with(".log"))
+                .is_some_and(|name| {
+                    (name.starts_with("veycut-") || name.starts_with("concat-"))
+                        && name.ends_with(".log")
+                })
         })
         .collect();
     if ours.len() < KEEP {
         return;
     }
-    ours.sort();
+    ours.sort_by_key(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| {
+                name.strip_prefix("veycut-")
+                    .or_else(|| name.strip_prefix("concat-"))
+            })
+            .unwrap_or_default()
+            .to_owned()
+    });
     // One short of KEEP, because the run doing the pruning is about to
     // make its own.
     let doomed = ours.len().saturating_sub(KEEP.saturating_sub(1));
@@ -458,6 +470,12 @@ mod tests {
         let dirs = AppDirs::under(&root);
 
         let path = open(&dirs, None).expect("a log file");
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("veycut-")
+        );
         assert_eq!(path.parent(), Some(folder(&dirs).as_path()));
         assert_eq!(current(), Some(path.as_path()));
 
@@ -466,6 +484,7 @@ mod tests {
 
         let written = std::fs::read_to_string(&path).expect("reads back");
         // The header the install writes, and then the line.
+        assert!(written.contains("VeyCut"), "{written}");
         assert!(written.contains(env!("CARGO_PKG_VERSION")), "{written}");
         assert!(written.contains("WARN"), "{written}");
         assert!(written.contains("the kettle is broken"), "{written}");

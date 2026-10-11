@@ -46,12 +46,12 @@ fn capture(
     window.set_size(PhysicalSize::new(width, height));
     let mut pixels = vec![Pixel::default(); (width * height) as usize];
     window.request_redraw();
-    // Lay out once, then settle the tab thumb and field animations before
-    // retaining pixels. The clock advances without sleeping or a GUI loop.
+    // Lay out once, then settle the tabs, fields and 380 ms export sheet
+    // before retaining pixels. Virtual time adds no real sleep or GUI loop.
     window.draw_if_needed(|renderer| {
         renderer.render(&mut pixels, width as usize);
     });
-    clock.set(clock.get() + Duration::from_millis(250));
+    clock.set(clock.get() + Duration::from_millis(500));
     slint::platform::update_timers_and_animations();
     window.request_redraw();
     let rendered = window.draw_if_needed(|renderer| {
@@ -227,4 +227,88 @@ fn project_and_caption_forms_render_at_desktop_and_phone_sizes() {
         "Create thumb must reset on reopen"
     );
     app.set_captions(crate::ui::CaptionsSheetData::default());
+    // The actual export tree must also lay out at phone and desktop widths.
+    let strings = |values: &[&str]| {
+        slint::ModelRc::new(slint::VecModel::from(
+            values
+                .iter()
+                .map(|s| slint::SharedString::from(*s))
+                .collect::<Vec<_>>(),
+        ))
+    };
+    let weak = app.as_weak();
+    app.on_export_resolution_changed(move |resolution| {
+        let app = weak.upgrade().expect("live fixture");
+        let mut data = app.get_export();
+        data.resolution = resolution;
+        app.set_export(data);
+    });
+    for (width, height) in [(1400, 900), (900, 600), (360, 640)] {
+        app.set_phone(width < 600);
+        app.set_export(crate::ui::ExportData {
+            open: true,
+            name: "Portrait captions".into(),
+            path: "Movies/Portrait captions.mp4".into(),
+            format: "720 × 1280 · 30 fps".into(),
+            duration: "0:02".into(),
+            contents: "3 clips · 2 titles".into(),
+            resolutions: strings(&["2160 × 3840", "1080 × 1920", "720 × 1280"]),
+            resolution_details: strings(&["4K", "1080p", "720p"]),
+            resolution_disabled: slint::ModelRc::new(slint::VecModel::from(vec![
+                false, false, false,
+            ])),
+            resolution: 2,
+            rates: strings(&["30 fps", "25 fps"]),
+            rate_details: strings(&["Timeline size", ""]),
+            h264_encodable: true,
+            hevc_encodable: true,
+            av1_encodable: true,
+            quality: 1,
+            encoding: "H.264 · 720p".into(),
+            size_high: "3 MB".into(),
+            size_balanced: "2 MB".into(),
+            size_small: "1 MB".into(),
+            ..Default::default()
+        });
+        let initial = capture(&window, &clock, "export-resized", width, height);
+        if width == 1400 {
+            let click = |x, y| {
+                let position = slint::LogicalPosition::new(x, y);
+                app.window()
+                    .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                        position,
+                        button: slint::platform::PointerEventButton::Left,
+                    });
+                app.window()
+                    .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                        position,
+                        button: slint::platform::PointerEventButton::Left,
+                    });
+            };
+            click(750.0, 115.0);
+            capture(&window, &clock, "export-resolution-options", width, height);
+            click(750.0, 151.0);
+            assert_eq!(app.get_export().resolution, 0, "pointer must choose 4K");
+            let selected = capture(&window, &clock, "export-resolution-selected", width, height);
+            let mut reset = app.get_export();
+            reset.resolution = 2;
+            app.set_export(reset);
+            let restored = capture(&window, &clock, "export-resolution-reset", width, height);
+            let label = |pixels: &[Pixel]| -> Vec<[u8; 3]> {
+                (105..125)
+                    .flat_map(|y| (618..795).map(move |x| pixels[y * 1400 + x].0))
+                    .collect()
+            };
+            assert_ne!(
+                label(&initial),
+                label(&selected),
+                "visible size must follow the chosen option"
+            );
+            assert!(
+                label(&initial) == label(&restored),
+                "controller reset must restore visible size after a real dropdown click"
+            );
+        }
+        app.set_export(crate::ui::ExportData::default());
+    }
 }

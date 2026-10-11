@@ -39,7 +39,7 @@ export struct ExportData {
     resolution: int,
     /// the resolution ladder as this project would come out at each
     /// rung - "1080 × 1920" on a 9:16 edit - with its names, and which
-    /// rungs cannot be picked: every one but the timeline's own
+    /// rungs exceed the safe encoder frame bounds
     resolutions: [string],
     resolution-details: [string],
     resolution-disabled: [bool],
@@ -350,11 +350,9 @@ component OutputSection inherits DialogSection {
 
     DialogRow {
         label: I18n.t("export.resolution");
-        // The timeline's own size, and the ladder it sits on for scale:
-        // a 9:16 edit is 1080 × 1920, not 1920 × 1080, and it exports at
-        // the size it was cut at - the other rungs are shown and cannot be
-        // picked. https://github.com/jub0t/Concat/issues/109
+        // An aspect-preserving output ladder independent of the editing frame.
         Select {
+            controlled: true;
             current: root.data.resolution;
             options: root.data.resolutions;
             details: root.data.resolution-details;
@@ -366,6 +364,7 @@ component OutputSection inherits DialogSection {
     DialogRow {
         label: I18n.t("common.frameRate");
         Select {
+            controlled: true;
             current: root.data.rate;
             options: root.data.rates;
             details: root.data.rate-details;
@@ -378,6 +377,7 @@ component OutputSection inherits DialogSection {
     if root.data.hdr-timeline && root.data.deep-available: DialogRow {
         label: I18n.t("common.color");
         Select {
+            controlled: true;
             current: root.data.hdr ? 0 : 1;
             options: [root.data.hdr-label, "SDR"];
             details: [I18n.t("export.asTheTimeline"), I18n.t("export.toneMapped")];
@@ -392,6 +392,7 @@ component OutputSection inherits DialogSection {
     if !root.data.hdr: DialogRow {
         label: I18n.t("export.codec");
         Select {
+            controlled: true;
             current: root.data.codec;
             options: ["H.264", "HEVC", "AV1"];
             details: [
@@ -406,6 +407,7 @@ component OutputSection inherits DialogSection {
     if root.data.hdr: DialogRow {
         label: I18n.t("export.codec");
         Select {
+            controlled: true;
             current: root.data.codec - 1;
             options: ["HEVC", "AV1"];
             details: [
@@ -504,6 +506,7 @@ component AdvancedSection inherits VerticalLayout {
         DialogRow {
             label: I18n.t("common.mode");
             Select {
+            controlled: true;
                 current: root.data.rate-mode;
                 options: [I18n.t("export.vbr"), I18n.t("export.cbr")];
                 changed(index) => { root.rate-mode-changed(index); }
@@ -524,6 +527,7 @@ component AdvancedSection inherits VerticalLayout {
         DialogRow {
             label: I18n.t("common.colourRange");
             Select {
+            controlled: true;
                 current: root.data.color-range;
                 options: [I18n.t("common.limited"), I18n.t("common.full")];
                 details: [I18n.t("export.videoYoutube"), I18n.t("export.screenContent")];
