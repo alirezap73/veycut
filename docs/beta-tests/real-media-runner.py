@@ -14,6 +14,9 @@ URL = "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x3
 EXPECTED_ARCHIVE_BYTES = 121284117
 MAX_ARCHIVE_BYTES = 130000000
 MAX_SOURCE_BYTES = 150000000
+EXPECTED_SOURCE_BYTES = 121283919
+EXPECTED_SOURCE_VIDEO = (640, 359, "h264")
+EXPECTED_SOURCE_DURATION = 596.461678
 CREDITS = """Big Buck Bunny — © 2008 Blender Foundation / www.bigbuckbunny.org.
 Film and its original audio: Creative Commons Attribution 3.0.
 Licence and credits: https://peach.blender.org/about/
@@ -91,15 +94,17 @@ def prepare(temp, evidence):
         # Stream only one verified member to a fixed path, never extractall.
         with bundle.open(movie) as member, source.open("wb") as output:
             shutil.copyfileobj(member, output, 1024 * 1024)
-        assert source.stat().st_size == movie.file_size
+        assert source.stat().st_size == movie.file_size == EXPECTED_SOURCE_BYTES
     info = probe(source)
     evidence.joinpath("REAL-MEDIA-SOURCE-PROBE.json").write_text(json.dumps(info, indent=2) + "\n")
     video = next(stream for stream in info["streams"] if stream["codec_type"] == "video")
     observed_video = (video["width"], video["height"], video["codec_name"])
-    assert observed_video == (640, 360, "h264"), f"Official source video metadata: {observed_video!r}"
-    assert any(stream["codec_type"] == "audio" for stream in info["streams"])
+    assert observed_video == EXPECTED_SOURCE_VIDEO, f"Official source video metadata: {observed_video!r}"
+    audio = next(stream for stream in info["streams"] if stream["codec_type"] == "audio")
+    assert (audio["codec_name"], audio["channels"], int(audio["sample_rate"])) == ("aac", 2, 44100)
     duration = float(info["format"]["duration"])
     assert 570 <= duration <= 660, "Fixture must be full-length, not a trailer or short loop"
+    assert abs(duration - EXPECTED_SOURCE_DURATION) <= 0.1, "Official full source duration changed"
     assert "mp4" in info["format"]["format_name"].split(",")
     decode_all(source, 360)
     evidence.joinpath("REAL-MEDIA-SOURCE.json").write_text(json.dumps({
