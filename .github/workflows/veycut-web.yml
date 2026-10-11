@@ -28,6 +28,12 @@ jobs:
         with:
           workspaces: src
           key: veycut-browser
+          cache-on-failure: 'true'
+          cache-workspace-crates: 'true'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-0.2.127-linux-x64
       - name: Check portable bridge
         working-directory: src
         run: |
@@ -39,7 +45,10 @@ jobs:
         working-directory: src
         run: |
           cargo build -p veycut-web --release --target wasm32-unknown-unknown --locked
-          cargo install wasm-bindgen-cli --version 0.2.127 --locked
+          if ! command -v wasm-bindgen > /dev/null; then
+            cargo install wasm-bindgen-cli --version 0.2.127 --locked
+          fi
+          test "$(wasm-bindgen --version)" = 'wasm-bindgen 0.2.127'
           wasm-bindgen target/wasm32-unknown-unknown/release/veycut_web.wasm --target web --out-dir ../web/pkg
       - uses: actions/setup-node@v6
         with:
@@ -69,12 +78,27 @@ jobs:
           done
           playwright-cli open http://127.0.0.1:4173/ --browser=chromium > output/playwright/open.log
           playwright-cli snapshot --filename=output/playwright/initial.yml
+          playwright-cli run-code --filename=scripts/veycut_web_browser_check.js > output/playwright/edit.log
+          playwright-cli snapshot --filename=output/playwright/reconnect.yml
+          reconnect_ref=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          snapshot = Path('output/playwright/reconnect.yml').read_text()
+          refs = re.findall(r'button "Reconnect selected media" \[ref=(e\d+)\]', snapshot)
+          assert len(refs) == 1, snapshot
+          print(refs[0])
+          PY
+          )
+          playwright-cli click "$reconnect_ref"
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
           playwright-cli run-code --filename=scripts/veycut_web_browser_check.js > output/playwright/check.log
           python3 - <<'PY'
           from pathlib import Path
-          log = Path('output/playwright/check.log').read_text()
-          assert 'VEYCUT_WEB_CHECKS_PASSED' in log, log
           import json
+          report = json.loads(Path('output/playwright/browser-report.json').read_text())
+          assert report['status'] == 'passed' and report['engine'] == 'wasm'
+          assert report['clips'] == 2 and report['captions'] == 2 and report['language'] == 'fa'
+          assert len(report['checks']) == 9
           project = json.loads(Path('output/playwright/project.json').read_text())
           assert len(project['clips']) == 2
           assert project['engine'] == 'wasm'
