@@ -440,16 +440,63 @@ jobs:
                   ["x": rectangle.minX, "y": rectangle.minY, "width": rectangle.width, "height": rectangle.height]
               }
               func click(_ rectangle: CGRect, expected: (String) -> Bool) {
-                  guard let fresh = unique(nodes(application), expected), fresh.1 == rectangle else {
-                      fail("selector_unverified")
+                  // A progress update can relayout the footer after the AX report.
+                  // Re-resolve the same unique label; never click its stale rectangle.
+                  let deadline = Date().addingTimeInterval(2)
+                  var previous: CGRect?
+                  var observations: [[String: Any]] = []
+                  while Date() < deadline {
+                      let currentNodes = nodes(application)
+                      let matchingCount = currentNodes.filter { labels($0).contains(where: expected) }.count
+                      guard let fresh = unique(currentNodes, expected) else {
+                          observations.append(["matching_label_nodes": matchingCount, "unique_visible_bounds": false])
+                          previous = nil
+                          report["click_selector_observations"] = Array(observations.suffix(24))
+                          if currentNodes.flatMap({ Array(labels($0)) }).contains(where: { $0.hasPrefix("Exported ·") }) {
+                              fail("cancellation_unobserved")
+                          }
+                          Thread.sleep(forTimeInterval: 0.05)
+                          continue
+                      }
+                      let current = fresh.1
+                      observations.append(["matching_label_nodes": matchingCount, "unique_visible_bounds": true, "bounds": boundsReport(current)])
+                      report["click_selector_observations"] = Array(observations.suffix(24))
+                      if let prior = previous {
+                          let movement = max(max(abs(current.minX - prior.minX), abs(current.minY - prior.minY)),
+                                             max(abs(current.width - prior.width), abs(current.height - prior.height)))
+                          if movement <= 0.5 {
+                              let point = CGPoint(x: current.midX, y: current.midY)
+                              let clickedLabels = Array(labels(fresh.0)).sorted()
+                              let emittedAt = Date().timeIntervalSince1970
+                              for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                                  let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!
+                                  event.flags = []
+                                  event.post(tap: .cghidEventTap)
+                                  Thread.sleep(forTimeInterval: 0.04)
+                              }
+                              let completedAt = Date().timeIntervalSince1970
+                              var clicks = report["verified_clicks"] as? [[String: Any]] ?? []
+                              clicks.append(["labels": clickedLabels,
+                                             "earlier_bounds": boundsReport(rectangle),
+                                             "clicked_bounds": boundsReport(current),
+                                             "pointer_x": point.x, "pointer_y": point.y,
+                                             "events_emitted_epoch_seconds": emittedAt,
+                                             "events_completed_epoch_seconds": completedAt,
+                                             "route": "unique_visible_label_with_stable_fresh_AX_bounds"])
+                              report["verified_clicks"] = clicks
+                              if clickedLabels.contains("Cancel export") {
+                                  // Written only AFTER the actual native pointer event sequence.
+                                  report["cancel_click_epoch_seconds"] = completedAt
+                              }
+                              writeReport()
+                              return
+                          }
+                      }
+                      previous = current
+                      Thread.sleep(forTimeInterval: 0.05)
                   }
-                  let point = CGPoint(x: rectangle.midX, y: rectangle.midY)
-                  for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-                      let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!
-                      event.flags = []
-                      event.post(tap: .cghidEventTap)
-                      Thread.sleep(forTimeInterval: 0.04)
-                  }
+                  report["selector_failure_detail"] = "same_label_fresh_bounds_missing_ambiguous_or_unstable_for_two_seconds"
+                  fail("selector_unverified")
               }
               func workDirectories() -> Set<String> {
                   Set(((try? manager.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasPrefix(".veycut-export-") })
@@ -494,7 +541,7 @@ jobs:
                           report["cancel_bounds"] = boundsReport(cancel.1)
                           report["work_observations"] = work
                           report["active_ax"] = snapshot(application)
-                          report["cancel_epoch_seconds"] = Date().timeIntervalSince1970
+                          report["cancel_request_epoch_seconds"] = Date().timeIntervalSince1970
                           writeReport()
                           click(cancel.1, expected: { $0 == "Cancel export" })
                           let settle = Date().addingTimeInterval(10)
@@ -1441,3 +1488,4 @@ jobs:
           name: VeyCut-Mac-package-inspection
           path: evidence/
           if-no-files-found: error
+
