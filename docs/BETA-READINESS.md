@@ -8,7 +8,15 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
-## Current source validation at e46372a
+## Current source validation at 9a7b5e7
+
+Development source `9a7b5e7` passed [native validation](https://github.com/alirezap73/veycut/actions/runs/38101849643): **789 successful Rust test invocations**, Linux workspace/transport lints, the quick performance check, macOS compilation and WebAssembly checks. The Mac job compiles all targets; it does not execute the native test suite. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38101847158) passed **231 invocations** (218 Rust and 13 Python). Counts are executions, not a feature-completion percentage.
+
+New passing regressions cover PNG/BGRA colour strikes and alpha composition, bitmap-only backgrounds/word highlights and fallback, fitted still-image reader dimensions, unusable frame-rate fallback, oversized export rejection before output/GPU work, loaded extreme-time repair and atomic clipboard rejection. Source also adds compact stereo meter readouts and moves native folder dialogs outside editor borrows, with stale-project answer guards. See [the editing milestone](FEATURE-PROGRESS.md) for explicit scope and remaining GUI checks.
+
+The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38102915695) is being built separately. The earlier 0.3.0 package below does not contain these changes. Native tests and compilation do not establish packaged gesture/dialog behaviour or independent installation. Public downloads and development version **0.3.1** remain unchanged.
+
+## Previous source validation at e46372a
 
 Clip duplication and clipboard paste now insert a complete snapshot as one edit. A selected group duplicates as one undo step. Regression tests cover all six clip kinds, styling and timing preservation, paste after deleting the original, gap placement and failure rollback. [Native validation](https://github.com/alirezap73/veycut/actions/runs/38067689837) passed 775 native test invocations, Linux lints, macOS compilation and WebAssembly checks. [Development checks](https://github.com/alirezap73/veycut/actions/runs/38067695299) passed 225 test invocations (213 Rust and 12 Python).
 
