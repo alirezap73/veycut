@@ -8,6 +8,26 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
+## Stereo layout and GPU failure runtime at e6bce73
+
+Source `e6bce73` fixes the initial/resized meter width through nested layouts,
+with bounded shrinking in tiny windows. Uncaptured GPU errors and device loss
+share a failure flag across siblings; failed textures/readbacks are refused
+and frame exports use the existing device-recovery path.
+
+[Exact-source validation](https://github.com/alirezap73/veycut/actions/runs/38109658662)
+passed **801 Rust test invocations**, Linux lints/performance, WebAssembly and
+macOS all-target compilation. All four dock-layout regressions and the real
+captured/uncaptured GPU-validation regression passed. The Mac job compiles
+rather than executing native tests.
+
+[Its Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38115406465)
+is building. The previous navigation candidate built successfully, with
+[caption navigation inspection](https://github.com/alirezap73/veycut/actions/runs/38115397274)
+and [core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38115400994)
+running on its fixed inspection reference. Those inspections do not include
+the later meter/GPU changes. Development version remains **0.3.1**.
+
 ## Validated navigation runtime at 36e98b7
 
 Source `36e98b7855d7c6a550cedf39a17e537eb68fe3c9` selects every newly
@@ -24,7 +44,7 @@ The Mac job compiles targets rather than executing native tests. The same run
 passed **263 development invocations** (249 Rust and 14 Python).
 
 The [matching candidate](https://github.com/alirezap73/veycut/actions/runs/38108844684)
-is being built from source `af14bfb` with the same runtime. The intervening change only teaches the package gate to verify the known full-check wrapper, including its successful quick/native jobs; 13 gate tests pass. New GUI navigation and duplicate-selection
+built successfully from source `af14bfb` with the same runtime. The intervening change only teaches the package gate to verify the known full-check wrapper, including its successful quick/native jobs; 13 gate tests pass. New GUI navigation and duplicate-selection
 checks remain pending; the earlier package below does not contain these changes.
 The extended scenario now has 98 entries, including a keyboard-only
 new-copy deletion/undo/redo check that verifies exact IDs and preserved originals.
@@ -52,7 +72,7 @@ built successfully from source `57337d63761060124cdf0acd8b80be8d92eaeb41`.
 Commits after runtime `32acd2f` change validation infrastructure only; candidate
 policy checks confirmed runtime identity. [Core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108357089) passed all 55 steps: native import/placement, split undo/redo, editable bilingual subtitles, replacement, subtitle-file export, save/reopen and video export. The fully decoded output is H.264/AAC at 720×1280, 30 fps and 60 frames over two seconds. Extracted frames visually show Persian shaping and the unique English caption with a coloured emoji; this uses the available system font and does not establish COLR portability. The DMG checksum is `63cd403e001e3faa3aa34b99db82a311861d4ba63538b08c8fa73e70929b3533`.
 
-[Extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) failed the playback-position assertion after cancelling a held native import panel. It did not reach accepted-panel or 32-second export verification. A screenshot also shows the default meter pane clipping its right channel: layout correction is required. [A diagnostic repeat](https://github.com/alirezap73/veycut/actions/runs/38109391594) records exact playback positions and audio errors before the unchanged assertion; bounded logs avoid oversized diagnostic artifacts. No runtime defect is inferred from the assertion alone.
+[Extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) failed the playback-position assertion after cancelling a held native import panel. It did not reach accepted-panel or 32-second export verification. A screenshot also shows the default meter pane clipping its right channel: layout correction is required. [The diagnostic repeat](https://github.com/alirezap73/veycut/actions/runs/38109391594) also failed: playback started at zero, no pause log was observed after 21.39 seconds, and no audio-unavailable error was recorded. The missing pause action is under investigation; the assertion remains unchanged and no accepted-panel or longer-export pass is claimed.
 The earlier fixed inspection reference uses a 97-entry scenario, including observed
 native import panels held for four seconds during playback, cancellation and
 acceptance; the scenario itself is not passing evidence until run against a
