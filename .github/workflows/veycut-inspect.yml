@@ -257,7 +257,7 @@ jobs:
               }
               return nil
           }
-          if action == "open" || action == "import" || action == "caption-pick" {
+          if action == "open" || action == "import" || action == "caption-pick" || action == "import-held" || action == "import-cancel" {
               if action != "caption-pick" { key(action == "open" ? 31 : 34, .maskCommand) }
               Thread.sleep(forTimeInterval: 3)
               let element = AXUIElementCreateApplication(pid)
@@ -265,6 +265,21 @@ jobs:
               guard contains(element, role: "AXSheet") || contains(element, role: "AXDialog") else {
                   fputs("Native project picker not observed\n", stderr)
                   exit(4)
+              }
+              if action == "import-held" || action == "import-cancel" {
+                  print("native_dialog_before_hold")
+                  print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+                  Thread.sleep(forTimeInterval: 4)
+                  guard contains(element, role: "AXSheet") || contains(element, role: "AXDialog") else { exit(21) }
+                  print("native_dialog_after_four_second_hold")
+                  print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
+                  if action == "import-cancel" {
+                      key(53)
+                      Thread.sleep(forTimeInterval: 1)
+                      guard !contains(element, role: "AXSheet") && !contains(element, role: "AXDialog") else { exit(22) }
+                      print("native_dialog_cancelled")
+                      exit(0)
+                  }
               }
               key(5, [.maskCommand, .maskShift])
               Thread.sleep(forTimeInterval: 2)
@@ -326,6 +341,13 @@ jobs:
               }
               print("native_click \(location.x),\(location.y)")
               Thread.sleep(forTimeInterval: 2)
+          } else if action == "play-start" {
+              key(115)
+              key(49)
+              Thread.sleep(forTimeInterval: 1)
+          } else if action == "play-toggle" {
+              key(49)
+              Thread.sleep(forTimeInterval: 1)
           } else if action == "select-all" {
               key(0, .maskCommand)
           } else if action == "copy" || action == "paste" {
@@ -464,12 +486,15 @@ jobs:
               if os.environ['EXTENDED_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
                   actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
-              assert isinstance(actions, list) and len(actions) <= 96
+              assert isinstance(actions, list) and len(actions) <= 100
               core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
+              ui_environment = dict(os.environ)
+              if os.environ["EXTENDED_GUI"] == "true":
+                  ui_environment["CONCAT_LOG"] = "debug"
               for cycle in range(1, 3):
                   ui_log = pathlib.Path(f'evidence/project-ui-{cycle}.log')
                   with ui_log.open('w') as log:
-                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
+                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT, env=ui_environment)
                       try:
                           time.sleep(15)
                           before = manifest.stat().st_mtime_ns
@@ -580,6 +605,44 @@ jobs:
                                               assert state['clips'] == repeated_snapshot['clips'] and state['media'] == repeated_snapshot['media'], 'Redo/reopen changed repeated clips'
                                           repeated_snapshot = state
                                           core['repeated_timeline_seconds'] = 32
+                                  elif action == 'playback-dialog-check':
+                                      import re
+                                      dialog_before = json.loads(manifest.read_text())
+                                      assert len(dialog_before['clips']) == 16 and max(c['start'] + c['duration'] for c in dialog_before['clips']) == 32
+                                      accepted_sample = temp / 'native-playback-import.mp4'
+                                      shutil.copyfile(sample, accepted_sample)
+                                      assert all(m['path'] != str(accepted_sample) for m in dialog_before['media'])
+                                      playback_positions = {}
+                                      for mode in ('cancel', 'accept'):
+                                          log_offset = ui_log.stat().st_size
+                                          ui(process, 'play-start')
+                                          ui(process, 'import-cancel' if mode == 'cancel' else 'import-held', accepted_sample)
+                                          assert process.poll() is None, 'Native dialog terminated editor during playback'
+                                          ui(process, 'play-toggle')
+                                          received = ui_log.read_bytes()[log_offset:].decode(errors='replace')
+                                          playing = re.findall(r'playback: playing from ([0-9.]+)s', received)
+                                          paused = re.findall(r'playback: paused at ([0-9.]+)s', received)
+                                          assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head'
+                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback timers did not advance through the held native panel'
+                                          assert not any(term in received for term in ('panicked at', 'BorrowMutError', 'already borrowed')), 'Native dialog borrowed Studio across playback timers'
+                                          playback_positions[mode] = float(paused[0])
+                                          for _ in range(6):
+                                              ui(process, 'save')
+                                              dialog_after = json.loads(manifest.read_text())
+                                              if mode == 'cancel' or any(m['path'] == str(accepted_sample) for m in dialog_after['media']):
+                                                  break
+                                              time.sleep(2)
+                                          else:
+                                              raise AssertionError('Accepted native import was not saved')
+                                          assert dialog_after['clips'] == dialog_before['clips'], 'Native import changed the repeated timeline'
+                                          if mode == 'cancel':
+                                              assert dialog_after['media'] == dialog_before['media'], 'Cancelled picker changed media'
+                                          else:
+                                              additions = [m for m in dialog_after['media'] if m['id'] not in {old['id'] for old in dialog_before['media']}]
+                                              assert len(additions) == 1 and additions[0]['path'] == str(accepted_sample)
+                                              assert [m for m in dialog_after['media'] if m['id'] in {old['id'] for old in dialog_before['media']}] == dialog_before['media'], 'Accepted import changed existing media'
+                                              assert additions[0]['width'] == 720 and additions[0]['height'] == 1280 and additions[0]['hasAudio']
+                                      core['native_dialog_playback_verified'] = {'hold_seconds': 4, 'paused_positions_seconds': playback_positions, 'cancel_preserved_media_and_clips': True, 'accepted_new_media_without_timeline_changes': True}
                                   elif action == 'track-baseline':
                                       track_baseline = json.loads(manifest.read_text())
                                       track_added_snapshot = None
@@ -639,7 +702,7 @@ jobs:
                                       assert process.wait(timeout=30) == 0
                                       saved_before_reopen = manifest.stat().st_mtime_ns
                                       log_offset = ui_log.stat().st_size
-                                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT)
+                                      process = subprocess.Popen([str(temp / 'VeyCut.app/Contents/MacOS/concat')], stdout=log, stderr=subprocess.STDOUT, env=ui_environment)
                                       time.sleep(15)
                                       ui(process, 'open')
                                       ui(process, 'save')

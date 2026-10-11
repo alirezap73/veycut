@@ -224,6 +224,9 @@
     "arg": "16"
   },
   {
+    "action": "playback-dialog-check"
+  },
+  {
     "action": "export-open"
   },
   {
