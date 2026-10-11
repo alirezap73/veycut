@@ -48,6 +48,11 @@ desktop.ini
 .env
 .env.local
 
+# Generated browser bindings and browser-test evidence.
+/web/pkg/
+/output/playwright/
+/.playwright-cli/
+
 # An FFmpeg development build unpacked locally for the linked engine
 # (headers + import libraries), pointed at with FFMPEG_DIR. Large and
 # machine-specific.

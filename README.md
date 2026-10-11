@@ -35,6 +35,10 @@ The previously verified development runtime (`e46372a`) makes duplication and pa
 
 The next milestone is a reliable Apple silicon macOS beta covering media import, timeline edits, text/audio, save/reopen and export. The public preview stays at **0.2.0-preview.1**; the development candidate remains unpublished and its version is fixed. See [verified scope and remaining beta gates](docs/BETA-READINESS.md), the [small sample and manual editing check](docs/BETA-TEST.md), and the beta bug form in Issues. Development source is on [development/0.3.0](https://github.com/alirezap73/veycut/tree/development/0.3.0).
 
+## Browser prototype
+
+The new [Web prototype](web/README.md) develops alongside the Mac beta, with local video import/preview, trim/split, Undo/Redo, project JSON save/reopen and bilingual SRT editing. A portable WebAssembly bridge uses the shared project engine; browser decoding and local media connections stay in JavaScript. The VeyCut Web workflow builds the static package and checks actual browser editing on a GitHub runner. This is an early prototype with **no video rendering/export**, no external model service and no hosted public editor yet. Browser compatibility and longer editing sessions remain to be verified. The Mac package and app version do not change for this work.
+
 ## Version 0.2.0 changes
 
 - **Caption workspace:** separate Create, Files and Edit tabs, with a scrolling dialog for smaller windows.
