@@ -328,6 +328,9 @@ jobs:
               Thread.sleep(forTimeInterval: 2)
           } else if action == "select-all" {
               key(0, .maskCommand)
+          } else if action == "copy" || action == "paste" {
+              key(action == "copy" ? 8 : 9, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
           } else if action == "type-text" {
               let characters = Array(CommandLine.arguments[3].utf16)
               guard !characters.isEmpty && characters.count <= 200 else { exit(18) }
@@ -461,7 +464,7 @@ jobs:
               if os.environ['EXTENDED_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
                   actions = json.loads(pathlib.Path('docs/beta-tests/extended-gui.json').read_text())
-              assert isinstance(actions, list) and len(actions) <= 64
+              assert isinstance(actions, list) and len(actions) <= 96
               core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
               for cycle in range(1, 3):
                   ui_log = pathlib.Path(f'evidence/project-ui-{cycle}.log')
@@ -540,7 +543,7 @@ jobs:
                                       ui(process, action, pathlib.Path('docs/beta-samples/captions-2s.vtt').resolve())
                                   elif action in ('click', 'double-click', 'drag', 'paste-text', 'type-text'):
                                       ui(process, action, argument)
-                                  elif action in ('select-all', 'duplicate', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
+                                  elif action in ('select-all', 'copy', 'paste', 'duplicate', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
                                       ui(process, action)
                                   elif action == 'placement-check':
                                       state = json.loads(manifest.read_text())
@@ -570,11 +573,32 @@ jobs:
                                           assert piece['kind'] == 'video' and piece['mediaId'] == imported_id
                                           assert {k: v for k, v in piece.items() if k not in ('id', 'start')} == {k: v for k, v in original_imported_clip.items() if k not in ('id', 'start')}, 'Duplicate changed clip source or styling'
                                           assert abs(piece['start'] - 2 * number) < 0.001 and abs(piece['duration'] - 2) < 0.001 and abs(piece['sourceStart']) < 0.001 and piece['speed'] == 1
+                                      if count == 4 and any(step['action'] == 'paste' for step in core['steps']):
+                                          core['group_clipboard_verified'] = True
                                       if count == 16:
                                           if 'repeated_snapshot' in locals():
                                               assert state['clips'] == repeated_snapshot['clips'] and state['media'] == repeated_snapshot['media'], 'Redo/reopen changed repeated clips'
                                           repeated_snapshot = state
                                           core['repeated_timeline_seconds'] = 32
+                                  elif action == 'track-baseline':
+                                      track_baseline = json.loads(manifest.read_text())
+                                      track_added_snapshot = None
+                                  elif action == 'track-check':
+                                      state = json.loads(manifest.read_text())
+                                      assert state['clips'] == track_baseline['clips'], 'Track placement changed existing clips'
+                                      if argument == 'restored':
+                                          assert state['tracks'] == track_baseline['tracks'], 'Track undo changed the original stack'
+                                      else:
+                                          assert argument in ('top', 'bottom')
+                                          assert len(state['tracks']) == len(track_baseline['tracks']) + 1
+                                          original = state['tracks'][:-1] if argument == 'top' else state['tracks'][1:]
+                                          assert original == track_baseline['tracks'], 'Track placement changed existing order'
+                                          new_id = state['tracks'][-1 if argument == 'top' else 0]['id']
+                                          assert new_id not in {track['id'] for track in track_baseline['tracks']}
+                                          if track_added_snapshot is not None:
+                                              assert state['tracks'] == track_added_snapshot, 'Track redo changed its identity'
+                                          track_added_snapshot = state['tracks']
+                                          core[argument + '_track_menu_verified'] = True
                                   elif action in ('split-check', 'split-undo-check'):
                                       state = json.loads(manifest.read_text())
                                       pieces = sorted([c for c in state['clips'] if c['kind'] == 'video'], key=lambda c: c['start'])

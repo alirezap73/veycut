@@ -4,9 +4,9 @@
 
 VeyCut is a native video editor with timeline editing, video effects, transitions, titles, captions and local speech tools. Product repository: https://github.com/alirezap73/veycut.
 
-## Version 0.3.0 source changes
+## Development changes
 
-Development source is now **0.3.1**, a small patch for independent detached-audio movement, directly clickable track-placement choices and correct audio-meter labels. The previously verified 0.3.0 package below does not contain these fixes; matching validation and packaging are tracked separately. Public downloads remain unchanged. GitHub's file list shows the last commit that changed each file, so an old commit mentioning 0.1.0 is not the current app version.
+Development source is now **0.3.1**, with grouped copy/paste across timelines, a multi-selection duplicate shortcut, independent detached-audio movement, directly clickable track-placement choices and correct audio-meter labels. The previously verified 0.3.0 package below does not contain these changes; matching validation and packaging are tracked separately. Public downloads remain unchanged. GitHub's file list shows the last commit that changed each file, so an old commit mentioning 0.1.0 is not the current app version.
 
 This development source adds selectable export resolutions without changing the editing project. Titles and captions are rasterized at the selected output size. Export files are isolated per job; the finished output refuses an existing file, including one created during rendering, and failed/cancelled jobs clean up their own work files. Cancelled jobs and replies from an earlier project cannot replace the current export status.
 

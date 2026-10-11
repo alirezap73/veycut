@@ -302,6 +302,13 @@ pub enum Command {
         /// Requested timeline position, floored at zero.
         start: f64,
     },
+    /// Pastes complete snapshots at their supplied final tracks/times as
+    /// one atomic edit. Conflicts are refused without moving individuals.
+    /// Detached links within the group follow the new IDs; others clear.
+    PasteClips {
+        /// Each full snapshot with its desired destination track/start.
+        clips: Vec<Clip>,
+    },
     /// [`Command::AddClip`] without naming a lane: lands on the lowest
     /// track with nothing in the clip's span, falling back to the bottom
     /// track (overlap and all) rather than refusing.
@@ -794,6 +801,12 @@ pub enum CommandError {
         /// The [`why_not_merge`] sentence, verbatim.
         reason: String,
     },
+    /// A grouped paste could not preserve the requested layout.
+    #[error("Cannot paste these clips: {reason}")]
+    CannotPaste {
+        /// Why the complete group was refused.
+        reason: String,
+    },
     /// [`Command::RemoveTrack`] would have deleted the last track.
     #[error("A timeline needs at least one track.")]
     LastTrack,
@@ -918,70 +931,72 @@ impl Command {
                         .any(|key| bad([key.at, key.value]) || bad(key.ease.0))
             })
         }
+        fn bad_snapshot(clip: &Clip) -> bool {
+            bad([
+                clip.start,
+                clip.duration,
+                clip.source_start,
+                clip.speed,
+                clip.volume,
+                clip.fade_in,
+                clip.fade_out,
+                clip.scale,
+                clip.offset_x,
+                clip.offset_y,
+                clip.rotation,
+                clip.stretch_x,
+                clip.stretch_y,
+                clip.opacity,
+            ]) || bad_chain(&clip.filters)
+                || bad_chain(&clip.video_effects)
+                || clip
+                    .keys
+                    .iter()
+                    .any(|key| bad([key.at, key.value]) || bad(key.ease.0))
+                || clip
+                    .speed_curve
+                    .iter()
+                    .flatten()
+                    .any(|point| bad([point.at, point.speed]))
+                || clip
+                    .crop
+                    .iter()
+                    .any(|crop| bad([crop.left, crop.top, crop.right, crop.bottom]))
+                || clip
+                    .transition_in
+                    .iter()
+                    .any(|transition| bad([transition.duration]))
+                || clip
+                    .cutout
+                    .iter()
+                    .any(|cutout| bad([cutout.feather]) || cutout.strokes.iter().any(bad_stroke))
+                || clip
+                    .shape
+                    .iter()
+                    .any(|shape| bad([shape.size, shape.stroke_width]))
+                || clip.text.iter().any(|style| {
+                    bad([
+                        style.font_size,
+                        style.font_weight,
+                        style.opacity,
+                        style.stroke_width,
+                        style.line_height,
+                        style.tracking,
+                        style.max_width,
+                        style.max_height,
+                        style.background_radius,
+                        style.background_padding_x,
+                        style.background_padding_y,
+                    ])
+                })
+        }
         match self {
             Command::Batch { commands } => commands.iter().any(Command::has_non_finite),
             Command::AddMedia { item } | Command::FillSlot { item, .. } => {
                 bad(item.duration) || bad(item.frame_rate)
             }
-            Command::PasteClip { clip, start, .. } => {
-                bad([
-                    *start,
-                    clip.start,
-                    clip.duration,
-                    clip.source_start,
-                    clip.speed,
-                    clip.volume,
-                    clip.fade_in,
-                    clip.fade_out,
-                    clip.scale,
-                    clip.offset_x,
-                    clip.offset_y,
-                    clip.rotation,
-                    clip.stretch_x,
-                    clip.stretch_y,
-                    clip.opacity,
-                ]) || bad_chain(&clip.filters)
-                    || bad_chain(&clip.video_effects)
-                    || clip
-                        .keys
-                        .iter()
-                        .any(|key| bad([key.at, key.value]) || bad(key.ease.0))
-                    || clip
-                        .speed_curve
-                        .iter()
-                        .flatten()
-                        .any(|point| bad([point.at, point.speed]))
-                    || clip
-                        .crop
-                        .iter()
-                        .any(|crop| bad([crop.left, crop.top, crop.right, crop.bottom]))
-                    || clip
-                        .transition_in
-                        .iter()
-                        .any(|transition| bad([transition.duration]))
-                    || clip.cutout.iter().any(|cutout| {
-                        bad([cutout.feather]) || cutout.strokes.iter().any(bad_stroke)
-                    })
-                    || clip
-                        .shape
-                        .iter()
-                        .any(|shape| bad([shape.size, shape.stroke_width]))
-                    || clip.text.iter().any(|style| {
-                        bad([
-                            style.font_size,
-                            style.font_weight,
-                            style.opacity,
-                            style.stroke_width,
-                            style.line_height,
-                            style.tracking,
-                            style.max_width,
-                            style.max_height,
-                            style.background_radius,
-                            style.background_padding_x,
-                            style.background_padding_y,
-                        ])
-                    })
-            }
+            Command::PasteClip { clip, start, .. } => bad([*start]) || bad_snapshot(clip),
+            Command::PasteClips { clips } => clips.iter().any(bad_snapshot),
             Command::AddClip { start, .. } | Command::AddClipAtFirstFree { start, .. } => {
                 bad([*start])
             }
@@ -1152,6 +1167,7 @@ pub fn apply(
         | Command::AddClipAtFirstFree { .. }
         | Command::DuplicateClip { .. }
         | Command::PasteClip { .. }
+        | Command::PasteClips { .. }
         | Command::AddTextClip { .. }
         | Command::AddShapeClip { .. }
         | Command::AddLayerClip { .. }

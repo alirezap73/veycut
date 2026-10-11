@@ -441,6 +441,227 @@ mod tests {
         assert!(editor.project().active().clips.is_empty());
     }
 
+    fn group_paste_fixture() -> (Editor, Vec<crate::model::Clip>) {
+        let editor = Editor::from_document(&json!({
+            "media": [{"id":"m1", "path":"/fixture.mp4", "kind":"video", "duration":20.0, "hasAudio":true}],
+            "tracks": [{"id":"T1"}, {"id":"T2"}, {"id":"T3"}],
+            "clips": [
+                {"id":"c1", "trackId":"T1", "mediaId":"m1", "kind":"video",
+                 "start":1.0, "duration":2.0, "sourceStart":3.0, "speed":0.75,
+                 "volume":0.4, "offsetX":0.2, "scale":1.3,
+                 "filters":[{"id":"volume", "params":{"volume":0.8}}],
+                 "videoEffects":[{"id":"concat.grain", "params":{"amount":0.3}}],
+                 "keys":[{"property":"opacity", "at":0.0, "value":0.3}],
+                 "unknownFutureStyle":{"kept":true}},
+                {"id":"c2", "trackId":"T2", "mediaId":"", "kind":"text",
+                 "start":4.0, "duration":1.5,
+                 "text":{"content":"سلام Styled caption", "fontFamily":"Vazirmatn", "fontSize":0.06,
+                         "strokeWidth":0.002, "background":"#123456"}},
+                {"id":"c3", "trackId":"T2", "mediaId":"m1", "kind":"audio",
+                 "start":8.0, "duration":2.0, "detachedFrom":"c1"}
+            ]
+        })).unwrap();
+        let snapshots = ["c1", "c2"]
+            .iter()
+            .map(|id| editor.project().active().clip(id).unwrap().clone())
+            .collect();
+        (editor, snapshots)
+    }
+
+    #[test]
+    fn grouped_paste_preserves_complete_layout_styles_and_exact_undo_redo() {
+        let (mut editor, mut snapshots) = group_paste_fixture();
+        snapshots[0].track_id = "T3".into();
+        snapshots[0].start = 20.0;
+        snapshots[1].start = 23.0;
+        let before = editor.project().clone();
+        let command = Command::PasteClips {
+            clips: snapshots.clone(),
+        };
+        let wire = serde_json::to_value(command).unwrap();
+        assert_eq!(wire["op"], "pasteClips");
+        let outcome = editor.apply(serde_json::from_value(wire).unwrap()).unwrap();
+        let copied: Vec<_> = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .filter(|clip| before.active().clip(&clip.id).is_none())
+            .collect();
+        assert_eq!(copied.len(), 2);
+        assert_eq!(outcome.created_id.as_deref(), Some(copied[1].id.as_str()));
+        for (copy, source) in copied.iter().zip(snapshots) {
+            let mut expected = source;
+            expected.id = copy.id.clone();
+            assert_eq!(copy.as_ref(), &expected);
+        }
+        assert_eq!(copied[1].start - copied[0].start, 3.0);
+        let after = editor.project().clone();
+        editor.undo();
+        assert_eq!(editor.project(), &before);
+        assert!(!editor.can_undo(), "one paste is one complete undo step");
+        editor.redo();
+        assert_eq!(editor.project(), &after);
+    }
+
+    #[test]
+    fn grouped_snapshots_survive_source_deletion_and_paste_into_another_timeline() {
+        let (mut editor, mut snapshots) = group_paste_fixture();
+        editor
+            .apply(Command::RemoveClips {
+                clip_ids: vec!["c1".into(), "c2".into()],
+                ripple: false,
+            })
+            .unwrap();
+        editor.apply(Command::AddTimeline).unwrap();
+        let tracks = &editor.project().active().tracks;
+        assert_ne!(tracks[0].id, "T1");
+        for (index, snapshot) in snapshots.iter_mut().enumerate() {
+            snapshot.track_id = tracks[index].id.clone();
+            snapshot.start += 10.0;
+        }
+        let before = editor.project().clone();
+        editor
+            .apply(Command::PasteClips {
+                clips: snapshots.clone(),
+            })
+            .unwrap();
+        assert_eq!(editor.project().active().clips.len(), 2);
+        for (copy, source) in editor.project().active().clips.iter().zip(snapshots) {
+            let mut expected = source;
+            expected.id = copy.id.clone();
+            assert_eq!(copy.as_ref(), &expected);
+        }
+        let after = editor.project().clone();
+        editor.undo();
+        assert_eq!(editor.project(), &before);
+        editor.redo();
+        assert_eq!(editor.project(), &after);
+    }
+
+    #[test]
+    fn grouped_paste_remaps_internal_detached_links_and_clears_external_links() {
+        let (mut editor, snapshots) = group_paste_fixture();
+        let mut video = snapshots[0].clone();
+        let mut audio = editor.project().active().clip("c3").unwrap().clone();
+        video.start = 20.0;
+        audio.start = 20.0;
+        let before = editor.project().clone();
+        editor
+            .apply(Command::PasteClips {
+                clips: vec![video, audio.clone()],
+            })
+            .unwrap();
+        let timeline = editor.project().active();
+        let copied_video = &timeline.clips[3];
+        let copied_audio = &timeline.clips[4];
+        assert_ne!(copied_video.id, "c1");
+        assert_eq!(
+            copied_audio.detached_from.as_deref(),
+            Some(copied_video.id.as_str())
+        );
+        let after = editor.project().clone();
+        editor.undo();
+        assert_eq!(editor.project(), &before);
+        editor.redo();
+        assert_eq!(editor.project(), &after);
+        audio.start = 30.0;
+        let id = editor
+            .apply(Command::PasteClips { clips: vec![audio] })
+            .unwrap()
+            .created_id
+            .unwrap();
+        assert!(
+            editor
+                .project()
+                .active()
+                .clip(&id)
+                .unwrap()
+                .detached_from
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn invalid_grouped_paste_never_partially_changes_the_project_or_history() {
+        let (mut editor, mut snapshots) = group_paste_fixture();
+        snapshots[0].start = 20.0;
+        snapshots[1].start = 23.0;
+        let before = editor.project().clone();
+        let empty = editor.apply(Command::PasteClips { clips: vec![] }).unwrap();
+        assert!(!empty.applied);
+        assert!(empty.created_id.is_none());
+        for case in 0..10 {
+            let mut clips = snapshots.clone();
+            match case {
+                0 => {
+                    clips[1].track_id = "missing".into();
+                }
+                1 => {
+                    clips[1].kind = ClipKind::Video;
+                    clips[1].media_id = "missing".into();
+                }
+                2 => {
+                    clips[1].start = f64::INFINITY;
+                }
+                3 => {
+                    clips[1].filters.push(crate::model::AppliedFilter {
+                        id: "volume".into(),
+                        params: [("volume".into(), f64::NAN)].into(),
+                        ..crate::model::AppliedFilter::new("volume")
+                    });
+                }
+                4 => {
+                    clips[1].track_id = "T1".into();
+                    clips[1].start = 1.5;
+                }
+                5 => {
+                    clips[1].id = clips[0].id.clone();
+                }
+                6 => {
+                    clips[1].track_id = clips[0].track_id.clone();
+                    clips[1].start = 20.5;
+                }
+                7 => {
+                    clips[1].start = -1.0;
+                }
+                8 => {
+                    clips[1].duration = 0.0;
+                }
+                _ => {
+                    clips[1].start = f64::MAX;
+                    clips[1].duration = f64::MAX;
+                }
+            }
+            let error = editor.apply(Command::PasteClips { clips }).unwrap_err();
+            match case {
+                0 => assert!(matches!(error, crate::CommandError::TrackGone)),
+                1 => assert!(matches!(error, crate::CommandError::MediaGone)),
+                2 | 3 | 9 => assert!(matches!(error, crate::CommandError::NotANumber)),
+                _ => assert!(matches!(error, crate::CommandError::CannotPaste { .. })),
+            }
+            assert_eq!(
+                editor.project(),
+                &before,
+                "case {case} rolls back the entire group"
+            );
+            assert!(!editor.can_undo(), "case {case} adds no undo record");
+        }
+        // No invalid attempt minted IDs: two independent fresh editors
+        // must allocate the same first valid paste IDs and complete state.
+        let mut clean = Editor::from_document(&crate::to_document(&settings(), &before)).unwrap();
+        let expected = clean
+            .apply(Command::PasteClips {
+                clips: snapshots.clone(),
+            })
+            .unwrap();
+        let actual = editor
+            .apply(Command::PasteClips { clips: snapshots })
+            .unwrap();
+        assert_eq!(actual.created_id, expected.created_id);
+        assert_eq!(editor.project(), clean.project());
+    }
+
     /// Editor with one media item and one clip at [0, 10) on track one.
     fn fixture() -> (Editor, String, String) {
         let mut editor = Editor::new();

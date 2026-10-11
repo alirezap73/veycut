@@ -1,7 +1,9 @@
 # VeyCut beta development protocol
 
-Keep the public preview and development version fixed until the beta gates in
-[BETA-READINESS.md](BETA-READINESS.md) are met. More commits are not a new milestone.
+Keep the public preview unchanged until the beta gates in
+[BETA-READINESS.md](BETA-READINESS.md) are met. The explicitly requested development
+patch increment is 0.3.1; keep it fixed while validating these changes. More
+commits are not another version increment or a new public milestone.
 
 ## Parallel work
 

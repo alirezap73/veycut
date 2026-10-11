@@ -62,6 +62,8 @@ pub(super) fn apply(
             start,
         } => insert_snapshot(project, mint, *clip, track_id, start),
 
+        Command::PasteClips { clips } => insert_snapshots(project, mint, clips),
+
         Command::AddClipAtFirstFree { media_id, start } => {
             let media = project
                 .media_by_id(&media_id)
@@ -866,6 +868,91 @@ pub fn why_not_merge(timeline: &Timeline, clip_ids: &[String]) -> Option<String>
         }
     }
     None
+}
+
+/// Validates the complete layout before allocating IDs or changing clips.
+/// Individual nearest-gap searches would distort a copied group’s timing.
+fn insert_snapshots(
+    project: &mut Project,
+    mint: &mut IdMint,
+    snapshots: Vec<Clip>,
+) -> Result<Outcome, CommandError> {
+    if snapshots.is_empty() {
+        return Ok(Outcome::default());
+    }
+    let mut originals = HashSet::new();
+    let mut copies = Vec::with_capacity(snapshots.len());
+    for snapshot in snapshots {
+        if snapshot.id.is_empty() || !originals.insert(snapshot.id.clone()) {
+            return Err(CommandError::CannotPaste {
+                reason: "Copied clips must have distinct source IDs.".into(),
+            });
+        }
+        if project.active().track(&snapshot.track_id).is_none() {
+            return Err(CommandError::TrackGone);
+        }
+        if matches!(
+            snapshot.kind,
+            ClipKind::Video | ClipKind::Audio | ClipKind::Image
+        ) && project.media_by_id(&snapshot.media_id).is_none()
+        {
+            return Err(CommandError::MediaGone);
+        }
+        if snapshot.start < 0.0 || snapshot.duration <= 0.0 {
+            return Err(CommandError::CannotPaste {
+                reason: "Clip positions must be nonnegative and lengths positive.".into(),
+            });
+        }
+        let copy = snapshot.tidy();
+        if !(copy.start + copy.duration).is_finite() {
+            return Err(CommandError::NotANumber);
+        }
+        if !project
+            .active()
+            .is_free(&copy.track_id, copy.start, copy.duration, &[])
+        {
+            return Err(CommandError::CannotPaste {
+                reason: "The destination overlaps an existing clip. Choose another position."
+                    .into(),
+            });
+        }
+        copies.push(copy);
+    }
+    // Malformed snapshots must not create overlapping clips on one lane.
+    for (index, left) in copies.iter().enumerate() {
+        if copies[index + 1..].iter().any(|right| {
+            left.track_id == right.track_id
+                && left.start < right.start + right.duration - crate::placement::TOUCH
+                && right.start < left.start + left.duration - crate::placement::TOUCH
+        }) {
+            return Err(CommandError::CannotPaste {
+                reason: "Copied clips overlap each other on the same destination track.".into(),
+            });
+        }
+    }
+    let replacements: std::collections::HashMap<String, String> = copies
+        .iter()
+        .map(|clip| (clip.id.clone(), mint.next("c")))
+        .collect();
+    let mut created_id = None;
+    for mut copy in copies {
+        copy.id = replacements[&copy.id].clone();
+        copy.detached_from = copy
+            .detached_from
+            .and_then(|source| replacements.get(&source).cloned());
+        if matches!(
+            copy.kind,
+            ClipKind::Text | ClipKind::Shape | ClipKind::Layer
+        ) {
+            copy.media_id.clear();
+        }
+        created_id = Some(copy.id.clone());
+        project.active_mut().clips.push(Arc::new(copy));
+    }
+    Ok(Outcome {
+        created_id,
+        applied: true,
+    })
 }
 
 /// Validates references before minting or mutating, then places the complete

@@ -141,7 +141,33 @@
     "arg": "2"
   },
   {
-    "action": "duplicate"
+    "action": "select-all"
+  },
+  {
+    "action": "copy"
+  },
+  {
+    "action": "paste"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "4"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "repeated-check",
+    "arg": "2"
+  },
+  {
+    "action": "redo"
   },
   {
     "action": "save"
@@ -214,5 +240,87 @@
   {
     "action": "click",
     "arg": "0.9726562500,0.0367107195"
+  },
+  {
+    "action": "track-baseline"
+  },
+  {
+    "action": "click",
+    "arg": "0.0283203125,0.7004405286"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.0830078125,0.7503671072"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "top"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "restored"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "top"
+  },
+  {
+    "action": "track-baseline"
+  },
+  {
+    "action": "click",
+    "arg": "0.0283203125,0.7004405286"
+  },
+  {
+    "action": "snapshot"
+  },
+  {
+    "action": "click",
+    "arg": "0.0830078125,0.7885462555"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "bottom"
+  },
+  {
+    "action": "undo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "restored"
+  },
+  {
+    "action": "redo"
+  },
+  {
+    "action": "save"
+  },
+  {
+    "action": "track-check",
+    "arg": "bottom"
   }
 ]

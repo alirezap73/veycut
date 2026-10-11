@@ -5,7 +5,9 @@
 - Detached sound and picture move independently unless explicitly selected together; the reattachment link is retained.
 - The track-add menu exposes top and bottom placement as directly clickable rows.
 - Audio meter labels display their actual negative dB values.
-- A packaged-editor scenario now exercises clip movement, both edge trims, undo/redo and a 32-second repeated-media export on a Mac runner.
+- Copy/paste preserves a selected group's timing, track layout and full clip properties across timelines; invalid destinations refuse the whole edit.
+- The duplicate shortcut accepts multiple selected clips.
+- Packaged-editor scenarios exercise clip movement, both edge trims, grouped clipboard operations, track placement and a 32-second repeated-media export on a Mac runner. A failed run remains partial evidence until its corrected scenario passes.
 
 Native validation and a matching installer inspection are required for these source changes. The previously verified 0.3.0 package does not contain them. This patch increment does not create a public beta release.
 

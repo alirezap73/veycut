@@ -392,6 +392,82 @@ fn drag_origins(timeline: &Timeline, selection: &[String], primary: &str) -> Vec
         .collect()
 }
 
+/// Full snapshots and display rows survive changes to the active timeline.
+#[derive(Clone)]
+pub struct HeldClip {
+    clip: Clip,
+    row: i32,
+}
+
+fn copy_clips(timeline: &Timeline, ids: &[String]) -> Vec<HeldClip> {
+    ids.iter()
+        .filter_map(|id| {
+            let clip = timeline.clip(id)?;
+            let index = timeline
+                .tracks
+                .iter()
+                .position(|track| track.id == clip.track_id)?;
+            Some(HeldClip {
+                clip: clip.clone(),
+                row: timeline.tracks.len() as i32 - 1 - index as i32,
+            })
+        })
+        .collect()
+}
+
+/// Shift the complete group once; the engine either accepts its layout or
+/// refuses it, rather than independently finding a gap for every clip.
+fn prepare_paste(
+    held: &[HeldClip],
+    timeline: &Timeline,
+    start: f64,
+    target_row: Option<i32>,
+    locked: impl Fn(&str) -> bool,
+) -> Result<Vec<Clip>, String> {
+    if held.is_empty() || !start.is_finite() || start < 0.0 {
+        return Err("Cannot paste an empty group or invalid time".to_owned());
+    }
+    let first = held
+        .iter()
+        .map(|entry| entry.clip.start)
+        .fold(f64::INFINITY, f64::min);
+    let top = held.iter().map(|entry| entry.row).min().unwrap();
+    let shift = match target_row {
+        Some(row) => row
+            .checked_sub(top)
+            .ok_or("Cannot paste this track layout")?,
+        None => 0,
+    };
+    held.iter()
+        .map(|entry| {
+            if !entry.clip.start.is_finite()
+                || !entry.clip.duration.is_finite()
+                || entry.clip.duration <= 0.0
+            {
+                return Err("Cannot paste invalid clip timing".to_owned());
+            }
+            let row = entry
+                .row
+                .checked_add(shift)
+                .ok_or("Cannot paste this track layout")?;
+            if row < 0 || row as usize >= timeline.tracks.len() {
+                return Err("Add enough tracks before pasting this group".to_owned());
+            }
+            let track = &timeline.tracks[timeline.tracks.len() - 1 - row as usize];
+            if locked(&track.id) {
+                return Err("Unlock the destination tracks before pasting".to_owned());
+            }
+            let mut clip = entry.clip.clone();
+            clip.track_id = track.id.clone();
+            clip.start = start + entry.clip.start - first;
+            if !clip.start.is_finite() || clip.start < 0.0 {
+                return Err("Cannot paste invalid clip timing".to_owned());
+            }
+            Ok(clip)
+        })
+        .collect()
+}
+
 /// A pointer gesture in flight, previewed on the echo.
 pub enum Gesture {
     None,
@@ -797,8 +873,8 @@ pub struct Studio {
     pub hover: Option<f32>,
     /// Stops the burst of sound a hover with audio plays.
     hover_hush: slint::Timer,
-    /// One clip, held for Paste.
-    pub clipboard: Option<Clip>,
+    /// Complete selected clips and their source display rows, held for Paste.
+    pub clipboard: Option<Vec<HeldClip>>,
     /// The monitor: its frame, and the requests for the next.
     pub monitor: crate::panes::monitor::MonitorPane,
 
@@ -6705,20 +6781,76 @@ impl Studio {
         }
     }
 
-    /// Inserts a clipboard snapshot after its supplied position. The original
-    /// clip may have been deleted, and paste may target a different track.
-    /// The engine preserves the complete snapshot and publishes it in one edit.
-    pub fn duplicate(&mut self, source: &Clip) {
-        let mut clip = source.clone();
-        if !matches!(clip.kind, model::ClipKind::Text | model::ClipKind::Shape) {
-            clip.name = format!("{} copy", clip.name);
+    fn copy_selection(&mut self, anchor: Option<&str>) {
+        self.flush_commit();
+        let ids = match anchor {
+            Some(id) if !self.selection.iter().any(|held| held == id) => vec![id.to_owned()],
+            _ => self.selection.clone(),
+        };
+        let held = copy_clips(self.timeline(), &ids);
+        if !held.is_empty() {
+            self.clipboard = Some(held);
         }
-        if let Some(id) = self.apply(Command::PasteClip {
-            clip: Box::new(clip),
-            track_id: source.track_id.clone(),
-            start: (source.start + source.duration).max(0.0),
-        }) {
-            self.selection = vec![id];
+    }
+
+    fn paste_selection(&mut self, anchor: Option<&str>) {
+        self.flush_commit();
+        let Some(held) = self.clipboard.clone() else {
+            return;
+        };
+        let (start, row) = if let Some(clip) = anchor.and_then(|id| self.clip(id)) {
+            (
+                clip.start + clip.duration,
+                Some(self.row_of(&clip.track_id)),
+            )
+        } else {
+            let selected: Vec<&Clip> = self
+                .selection
+                .iter()
+                .filter_map(|id| self.clip(id))
+                .collect();
+            if selected.is_empty() {
+                (f64::from(self.playhead).max(0.0), None)
+            } else {
+                let end = selected
+                    .iter()
+                    .map(|clip| clip.start + clip.duration)
+                    .fold(0.0, f64::max);
+                let row = selected
+                    .iter()
+                    .map(|clip| self.row_of(&clip.track_id))
+                    .min();
+                (end, row)
+            }
+        };
+        let clips = match prepare_paste(&held, self.timeline(), start, row, |id| self.locked(id)) {
+            Ok(clips) => clips,
+            Err(error) => {
+                self.notify(&error, true);
+                return;
+            }
+        };
+        let previous_selection = self.selection.clone();
+        let before: HashSet<String> = self
+            .timeline()
+            .clips
+            .iter()
+            .map(|clip| clip.id.clone())
+            .collect();
+        match self.apply_checked(Command::PasteClips { clips }) {
+            Ok(_) => {
+                self.selection = self
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|clip| !before.contains(&clip.id))
+                    .map(|clip| clip.id.clone())
+                    .collect();
+            }
+            Err(error) => {
+                self.selection = previous_selection;
+                self.notify(&error, true);
+            }
         }
     }
 
@@ -6874,6 +7006,7 @@ impl Studio {
                 self.handle(crate::panes::Msg::Captions(
                     crate::panes::captions::CaptionsMsg::Cancel,
                 ));
+                self.clipboard = None;
                 self.session = Some(session);
                 crate::host::next_project_epoch();
                 self.forget_art();
@@ -7027,6 +7160,7 @@ impl Studio {
         }
         self.export.reset_for_project(&self.host.exporter);
         self.relink.reset();
+        self.clipboard = None;
         self.session = None;
         // Whatever a worker still brings back for this project is dropped
         // at delivery; the sheets that were waiting on one stop waiting.
@@ -9993,7 +10127,9 @@ impl Studio {
             }
             // ⇧⌫, from the key table; plain ⌫ comes in as its own callback.
             "ripple-delete" => self.ripple_delete_selected(),
-            "copy" | "duplicate" | "mute" => {
+            "copy" => self.copy_selection(None),
+            "duplicate" => self.duplicate_selected(),
+            "mute" => {
                 if let Some(id) = self.sole_selection() {
                     self.clip_action(&id, action);
                 }
@@ -10012,23 +10148,7 @@ impl Studio {
                 self.menu_target = None;
                 self.freeze_at_playhead();
             }
-            "paste" => {
-                let Some(held) = self.clipboard.clone() else {
-                    return;
-                };
-                match self.sole_selection() {
-                    // After the selected clip, on its lane, as the menu does.
-                    Some(id) => self.clip_action(&id, "paste"),
-                    // Nothing selected: at the playhead, on the lane it was
-                    // copied from. `duplicate` lays a copy after its source,
-                    // so the source is placed one length before the playhead.
-                    None => {
-                        let mut source = held;
-                        source.start = f64::from(self.playhead) - source.duration;
-                        self.duplicate(&source);
-                    }
-                }
-            }
+            "paste" => self.paste_selection(None),
             _ => {}
         }
     }
@@ -10042,17 +10162,9 @@ impl Studio {
             return;
         };
         match action {
-            "copy" => self.clipboard = Some(clip),
+            "copy" => self.copy_selection(Some(id)),
             "duplicate" => self.duplicate_selected(),
-            "paste" => {
-                if let Some(held) = self.clipboard.clone() {
-                    let mut source = held;
-                    // Pasted after the clip that was right-clicked, on its lane.
-                    source.track_id = clip.track_id.clone();
-                    source.start = clip.start + clip.duration - source.duration;
-                    self.duplicate(&source);
-                }
-            }
+            "paste" => self.paste_selection(Some(id)),
             "split" => {
                 let at = self.playhead;
                 self.flush_commit();
@@ -10190,6 +10302,74 @@ mod tests {
         custom_rate, fps_of, grading_rows, home_folder, key_commands, packed, place_in, shown,
         wheel_partners, write_keyable,
     };
+
+    /// A copied group keeps its complete snapshots and relative layout even
+    /// when the destination timeline has entirely different track IDs.
+    #[test]
+    fn clipboard_group_maps_display_rows_without_distorting_snapshots() {
+        use concat_project::model::{Clip, ClipKind, Project};
+        use std::sync::Arc;
+        let mut source = Project::new();
+        let mut picture = Clip::blank("video", "T4", ClipKind::Video, "video", 10.0, 2.0);
+        picture.media_id = "m1".to_owned();
+        picture.source_start = 1.0;
+        picture.speed = 0.5;
+        picture.stretch_x = 1.25;
+        picture
+            .extra
+            .insert("futureStyle".to_owned(), serde_json::json!({"amount": 7}));
+        let mut sound = Clip::blank("audio", "T2", ClipKind::Audio, "audio", 12.0, 1.0);
+        sound.media_id = "m1".to_owned();
+        sound.volume = 0.25;
+        sound.detached_from = Some(picture.id.clone());
+        source.active_mut().clips = vec![Arc::new(picture.clone()), Arc::new(sound.clone())];
+        let held = super::copy_clips(source.active(), &["audio".to_owned(), "video".to_owned()]);
+        assert_eq!(held.len(), 2);
+        // Copy order cannot change the group origin or its lane offsets.
+        assert_eq!((held[0].row, held[1].row), (2, 0));
+        source.active_mut().clips.clear();
+        let mut target = Project::new();
+        for (index, track) in target.active_mut().tracks.iter_mut().enumerate() {
+            track.id = format!("destination-{index}");
+        }
+        let pasted =
+            super::prepare_paste(&held, target.active(), 30.0, Some(1), |_| false).unwrap();
+        let mut expected_sound = sound.clone();
+        expected_sound.start = 32.0;
+        expected_sound.track_id = "destination-0".to_owned();
+        let mut expected_picture = picture.clone();
+        expected_picture.start = 30.0;
+        expected_picture.track_id = "destination-2".to_owned();
+        assert_eq!(
+            serde_json::to_value(&pasted).unwrap(),
+            serde_json::to_value([expected_sound, expected_picture]).unwrap()
+        );
+        let at_playhead =
+            super::prepare_paste(&held, target.active(), 5.0, None, |_| false).unwrap();
+        assert_eq!((at_playhead[0].start, at_playhead[1].start), (7.0, 5.0));
+        assert_eq!(at_playhead[0].track_id, "destination-1");
+        assert_eq!(at_playhead[1].track_id, "destination-3");
+        assert!(
+            super::prepare_paste(&held, target.active(), 30.0, Some(2), |_| false).is_err(),
+            "all source rows must fit"
+        );
+        assert!(
+            super::prepare_paste(&held, target.active(), 30.0, Some(1), |id| id
+                == "destination-0")
+            .is_err(),
+            "one locked lane refuses the whole group"
+        );
+        assert!(super::prepare_paste(&held, target.active(), f64::NAN, None, |_| false).is_err());
+        assert!(super::prepare_paste(&held, target.active(), 0.0, Some(-1), |_| false).is_err());
+        let mut invalid = held.clone();
+        invalid[1].clip.start = f64::INFINITY;
+        assert!(super::prepare_paste(&invalid, target.active(), 0.0, None, |_| false).is_err());
+        assert_eq!(
+            serde_json::to_value(&held[0].clip).unwrap(),
+            serde_json::to_value(sound).unwrap(),
+            "preparation and rejection never mutate clipboard"
+        );
+    }
 
     /// Dragging either half of detached media leaves the other half in
     /// place; explicitly selecting both still moves them as one undo step.
