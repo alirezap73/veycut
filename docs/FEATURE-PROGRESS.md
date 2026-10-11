@@ -6,7 +6,7 @@ packaged GUI evidence and independent installation are distinct milestones.
 | Area | Development source | Verification needed for this revision |
 | --- | --- | --- |
 | Timeline groups | Grouped copy/paste preserves timing, track layout and properties; multi-clip duplicate with all new copies selected, and detached-audio movement | Engine group regressions passed; new duplicate-selection and packaged gesture verification pending |
-| Titles and captions | English/Persian caption files, group timing/style, replacement and paged cue navigation; supported PNG/BGRA strikes and COLR v0 solid-layer colour glyph rendering | 31 rendering tests passed; new cue-navigation tests, GUI navigation and packaged rendering pending |
+| Titles and captions | English/Persian caption files, group timing/style, replacement and paged cue navigation; supported PNG/BGRA strikes and COLR v0 solid-layer colour glyph rendering | 31 rendering tests and 3 cue-navigation tests passed; GUI navigation and matching packaged rendering pending |
 | Sound metering | dB ruler, stereo bars, held peak and clipping reset in the compact dock | UI compilation passed; new screenshots and real playback/clip-reset checks pending |
 | Mixed media | Fitted still-image decoding and arithmetic-checked frame rates | Reader/probe regressions passed; portrait-photo GUI/export checks pending |
 | Native dialogs | Media/menu and LUT imports, frame/audio/subtitle saves, export, relink and project folder selection release the editor borrow before native dialogs process timers; stale project replies are discarded | macOS compilation passed; native picker during playback pending |

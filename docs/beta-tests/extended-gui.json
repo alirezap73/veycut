@@ -141,6 +141,9 @@
     "arg": "2"
   },
   {
+    "action": "duplicate-selection-check"
+  },
+  {
     "action": "select-all"
   },
   {

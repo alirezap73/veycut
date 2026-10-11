@@ -408,6 +408,12 @@ jobs:
           } else if action == "save" {
               key(1, .maskCommand)
               Thread.sleep(forTimeInterval: 3)
+          } else if action == "duplicate-selected" {
+              key(2, .maskCommand)
+              Thread.sleep(forTimeInterval: 2)
+          } else if action == "delete-selected" {
+              key(51)
+              Thread.sleep(forTimeInterval: 1)
           } else if action == "duplicate" {
               key(0, .maskCommand)
               key(2, .maskCommand)
@@ -570,8 +576,43 @@ jobs:
                                       ui(process, action, pathlib.Path('docs/beta-samples/captions-2s.vtt').resolve())
                                   elif action in ('click', 'double-click', 'drag', 'paste-text', 'type-text'):
                                       ui(process, action, argument)
-                                  elif action in ('select-all', 'copy', 'paste', 'duplicate', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
+                                  elif action in ('select-all', 'copy', 'paste', 'duplicate', 'duplicate-selected', 'delete-selected', 'split', 'save', 'undo', 'redo', 'export-open', 'dismiss', 'caption-save'):
                                       ui(process, action)
+                                  elif action == 'duplicate-selection-check':
+                                      baseline = json.loads(manifest.read_text())
+                                      assert len(baseline['clips']) == 2, 'Duplicate selection needs two baseline clips'
+                                      original_ids = {clip['id'] for clip in baseline['clips']}
+                                      assert len(original_ids) == 2
+                                      ui(process, 'select-all')
+                                      ui(process, 'duplicate-selected')
+                                      ui(process, 'save')
+                                      duplicated = json.loads(manifest.read_text())
+                                      assert len(duplicated['clips']) == 4
+                                      assert len({clip['id'] for clip in duplicated['clips']}) == 4
+                                      assert [clip for clip in duplicated['clips'] if clip['id'] in original_ids] == baseline['clips'], 'Duplicate changed original IDs or properties'
+                                      copies = [clip for clip in duplicated['clips'] if clip['id'] not in original_ids]
+                                      assert len(copies) == 2
+                                      for clip in copies:
+                                          properties = {key: value for key, value in clip.items() if key not in ('id', 'start')}
+                                          assert any(properties == {key: value for key, value in original.items() if key not in ('id', 'start')} for original in baseline['clips']), 'Duplicate changed copied source or styling'
+                                      assert all(clip['start'] >= max(original['start'] + original['duration'] for original in baseline['clips']) for clip in copies), 'Expected copied tail clips before deletion'
+                                      assert duplicated['tracks'] == baseline['tracks'] and duplicated['media'] == baseline['media']
+                                      ui(process, 'snapshot', pathlib.Path(f'evidence/core-{index}.png').resolve())
+                                      # No Select All after duplication: deleting exactly the two
+                                      # copies proves the product retained the full new selection.
+                                      for gesture, expected in [('delete-selected', baseline), ('undo', duplicated), ('redo', baseline), ('undo', duplicated)]:
+                                          ui(process, gesture)
+                                          ui(process, 'save')
+                                          state = json.loads(manifest.read_text())
+                                          assert state['clips'] == expected['clips'], f'{gesture} changed duplicate selection IDs, count or properties'
+                                          assert state['tracks'] == baseline['tracks'] and state['media'] == baseline['media'], f'{gesture} changed unrelated project data'
+                                      # Undo the duplication itself so the existing clipboard and
+                                      # repeated-export checks still begin with their original two.
+                                      ui(process, 'undo')
+                                      ui(process, 'save')
+                                      restored = json.loads(manifest.read_text())
+                                      assert restored['clips'] == baseline['clips'] and restored['tracks'] == baseline['tracks'] and restored['media'] == baseline['media'], 'Duplicate-selection cleanup changed baseline'
+                                      core['duplicate_selection_verified'] = {'copied_clips': 2, 'delete_selected_preserved_originals': True, 'single_undo_redo_preserved_copy_ids_and_properties': True, 'cleanup_restored_baseline': True}
                                   elif action == 'placement-check':
                                       state = json.loads(manifest.read_text())
                                       imported_id = next(m['id'] for m in state['media'] if m['path'] == str(imported_sample))

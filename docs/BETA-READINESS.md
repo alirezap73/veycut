@@ -8,16 +8,27 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
-## Current navigation changes — validation pending
+## Validated navigation runtime at 36e98b7
 
-The next source batch selects every newly duplicated clip and adds caption
-navigation with chronological time ranges, bounded UTF-8 previews and 50-row
-pages. Choosing a row selects its title, seeks to its start and closes the
-sheet; callbacks verify the original project/timeline and current clip.
-Navigation regressions cover sorting, scope, page bounds, stale tokens and
-invalid targets. These new regressions have not run yet. Neither the validation
-nor the candidate for runtime `32acd2f` below covers these later changes.
-Development remains **0.3.1**; no new public release is created.
+Source `36e98b7855d7c6a550cedf39a17e537eb68fe3c9` selects every newly
+duplicated clip and adds caption navigation with chronological time ranges,
+bounded UTF-8 previews and 50-row pages. Choosing a row selects its title,
+seeks to its start and closes the sheet; callbacks verify the original
+project/timeline and current clip.
+
+[Exact-source validation](https://github.com/alirezap73/veycut/actions/runs/38107827064)
+passed **796 Rust test invocations**, Linux lints/performance, macOS all-target
+compilation and WebAssembly. All three navigation regressions passed: sorting,
+scope, page bounds, stale tokens, invalid targets and bounded UTF-8 previews.
+The Mac job compiles targets rather than executing native tests. The same run
+passed **263 development invocations** (249 Rust and 14 Python).
+
+The [matching candidate](https://github.com/alirezap73/veycut/actions/runs/38108844684)
+is being built from source `af14bfb` with the same runtime. The intervening change only teaches the package gate to verify the known full-check wrapper, including its successful quick/native jobs; 13 gate tests pass. New GUI navigation and duplicate-selection
+checks remain pending; the earlier package below does not contain these changes.
+The extended scenario now has 98 entries, including a keyboard-only
+new-copy deletion/undo/redo check that verifies exact IDs and preserved originals.
+A scenario definition is not passing evidence. Development remains **0.3.1**.
 
 ## Validated runtime source at 32acd2f
 
@@ -37,10 +48,10 @@ passed **263 invocations** (249 Rust and 14 Python), including 31 title tests.
 Counts describe test executions, not a feature-completion percentage.
 
 The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38106368671)
-is being built from source `57337d63761060124cdf0acd8b80be8d92eaeb41`.
+built successfully from source `57337d63761060124cdf0acd8b80be8d92eaeb41`.
 Commits after runtime `32acd2f` change validation infrastructure only; candidate
-policy checks confirmed runtime identity. Packaged GUI results are pending.
-The committed extended GUI scenario now has 97 steps, including observed
+policy checks confirmed runtime identity. [Core GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108357089) and [extended GUI inspection](https://github.com/alirezap73/veycut/actions/runs/38108362606) are running on the fixed inspection reference.
+The earlier fixed inspection reference uses a 97-entry scenario, including observed
 native import panels held for four seconds during playback, cancellation and
 acceptance; the scenario itself is not passing evidence until run against a
 matching package. No earlier package contains all these source changes.
