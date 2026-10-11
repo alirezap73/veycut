@@ -6785,8 +6785,27 @@ impl Studio {
         } else {
             Command::Batch { commands }
         };
-        if let Some(id) = self.apply(command) {
-            self.selection = vec![id];
+        let previous_selection = self.selection.clone();
+        let before: HashSet<String> = self
+            .timeline()
+            .clips
+            .iter()
+            .map(|clip| clip.id.clone())
+            .collect();
+        match self.apply_checked(command) {
+            Ok(_) => {
+                self.selection = self
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|clip| !before.contains(&clip.id))
+                    .map(|clip| clip.id.clone())
+                    .collect();
+            }
+            Err(error) => {
+                self.selection = previous_selection;
+                self.notify(&error, true);
+            }
         }
     }
 

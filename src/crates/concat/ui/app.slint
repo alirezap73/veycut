@@ -26,7 +26,7 @@ import { ModelData, SettingsData, SettingsDialog, SystemFactData } from "dialogs
 import { ProjectDialog, ProjectSheetData } from "dialogs/project.slint";
 import { RelinkDialog, RelinkData, MissingMediaItem } from "dialogs/relink.slint";
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
-import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
+import { CaptionsDialog, CaptionsSheetData, CaptionNavigationRow } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
@@ -62,7 +62,7 @@ export {
     SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
     TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
-    CaptionsSheetData, SpeechSheetData,
+    CaptionsSheetData, CaptionNavigationRow, SpeechSheetData,
 }
 
 export component App inherits Window {
@@ -303,6 +303,8 @@ export component App inherits Window {
     callback captions-shift-text();
     callback captions-restyle-text();
     callback captions-replace-text();
+    callback captions-navigate(clip-id: string, epoch: string, timeline-id: string);
+    callback captions-navigation-page-changed(page: int, epoch: string, timeline-id: string);
 
     callback captions-export-srt();
     callback captions-srt-origin-changed(index: int);
@@ -857,6 +859,8 @@ export component App inherits Window {
         shift-text => { root.captions-shift-text(); }
         restyle-text => { root.captions-restyle-text(); }
         replace-text => { root.captions-replace-text(); }
+        navigate(clip-id, epoch, timeline-id) => { root.captions-navigate(clip-id, epoch, timeline-id); }
+        navigation-page-changed(page, epoch, timeline-id) => { root.captions-navigation-page-changed(page, epoch, timeline-id); }
 
         export-srt => { root.captions-export-srt(); }
         srt-origin-changed(index) => { root.captions-srt-origin-changed(index); }

@@ -21,7 +21,69 @@ import { Select } from "../primitives/select.slint";
 // the sound it is, so it gets a real bar and not a sweep. The language is
 // the transcriber's to work out.
 
+// Local row control: its explicit text width never expands the list to
+// the label's preferred width. Keep the full preview in the AX label.
+component CaptionNavigationButton inherits Rectangle {
+    in property <string> label;
+    callback clicked();
+    property <bool> ring: false;
+
+    min-width: 0px;
+    horizontal-stretch: 1;
+    min-height: 28px;
+    max-height: 28px;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: root.ring ? Theme.accent
+        : touch.has-hover ? Theme.line-strong : Theme.line;
+    background: touch.has-hover ? Theme.field-hover : Theme.field;
+    accessible-role: button;
+    accessible-label: I18n.t("captions.editTab") + " " + root.label;
+
+    // Declared before TouchArea, following the existing IconButton.
+    fs := FocusScope {
+        focus-gained(reason) => { root.ring = reason == FocusReason.tab-navigation; }
+        focus-lost(reason) => { root.ring = false; }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+    Text {
+        x: 12px;
+        width: Math.max(0px, parent.width - 24px);
+        height: parent.height;
+        text: root.label;
+        color: Theme.fg;
+        font-size: Theme.fs;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { fs.focus(); root.clicked(); }
+    }
+}
+
+export struct CaptionNavigationRow {
+    clip-id: string,
+    epoch: string,
+    timeline-id: string,
+    range: string,
+    preview: string,
+}
+
 export struct CaptionsSheetData {
+    navigation-rows: [CaptionNavigationRow],
+    navigation-page: int,
+    navigation-epoch: string,
+    navigation-timeline: string,
+    navigation-range: string,
+    navigation-previous: bool,
+    navigation-next: bool,
     open: bool,
     /// The selected clip has sound, and the sheet transcribes it.
     from-sound: bool,
@@ -75,6 +137,8 @@ export component CaptionsDialog inherits Modal {
     callback shift-text();
     callback restyle-text();
     callback replace-text();
+    callback navigate(clip-id: string, epoch: string, timeline-id: string);
+    callback navigation-page-changed(page: int, epoch: string, timeline-id: string);
 
     callback export-srt();
     callback srt-origin-changed(index: int);
@@ -389,6 +453,42 @@ export component CaptionsDialog inherits Modal {
             if !root.data.running && root.section == 2: Text {
                 text: I18n.t("captions.editHint");
                 color: Theme.fg-muted; font-size: Theme.fs-sm; wrap: word-wrap;
+            }
+            if !root.data.running && root.section == 2: VerticalLayout {
+                spacing: 4px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        label: "‹"; enabled: root.data.navigation-previous;
+                        accessible-role: button;
+                        accessible-label: "‹ " + root.data.navigation-range;
+                        clicked => { root.navigation-page-changed(root.data.navigation-page - 1, root.data.navigation-epoch, root.data.navigation-timeline); }
+                    }
+                    Text {
+                        text: root.data.navigation-range;
+                        color: Theme.fg-muted; font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        horizontal-alignment: center; horizontal-stretch: 1;
+                    }
+                    Button {
+                        label: "›"; enabled: root.data.navigation-next;
+                        accessible-role: button;
+                        accessible-label: root.data.navigation-range + " ›";
+                        clicked => { root.navigation-page-changed(root.data.navigation-page + 1, root.data.navigation-epoch, root.data.navigation-timeline); }
+                    }
+                }
+                Flickable {
+                    height: root.data.navigation-rows.length > 0 ? 144px : 0px;
+                    content-height: cue-list.preferred-height;
+                    cue-list := VerticalLayout {
+                        width: parent.width;
+                        spacing: 4px;
+                        for row in root.data.navigation-rows: CaptionNavigationButton {
+                            label: row.range + " · " + row.preview;
+                            clicked => { root.navigate(row.clip-id, row.epoch, row.timeline-id); }
+                        }
+                    }
+                }
             }
             if !root.data.running && root.section == 0: Button {
                 block: true;

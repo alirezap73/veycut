@@ -8,7 +8,18 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
-## Current development source at 32acd2f
+## Current navigation changes — validation pending
+
+The next source batch selects every newly duplicated clip and adds caption
+navigation with chronological time ranges, bounded UTF-8 previews and 50-row
+pages. Choosing a row selects its title, seeks to its start and closes the
+sheet; callbacks verify the original project/timeline and current clip.
+Navigation regressions cover sorting, scope, page bounds, stale tokens and
+invalid targets. These new regressions have not run yet. Neither the validation
+nor the candidate for runtime `32acd2f` below covers these later changes.
+Development remains **0.3.1**; no new public release is created.
+
+## Validated runtime source at 32acd2f
 
 Development source `32acd2f` adds COLR v0 solid colour layers, bounded to 128
 layers with palette alpha/title foreground and rejection of unusable layer

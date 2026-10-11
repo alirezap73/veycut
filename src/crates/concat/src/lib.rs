@@ -1610,6 +1610,24 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.on_captions_replace_text(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ReplaceText));
     }));
+    app.on_captions_navigate(on_window!(
+        |state, clip_id: SharedString, epoch: SharedString, timeline_id: SharedString| {
+            state.handle(Msg::Captions(CaptionsMsg::Navigate {
+                clip_id: clip_id.to_string(),
+                epoch: epoch.to_string(),
+                timeline_id: timeline_id.to_string(),
+            }));
+        }
+    ));
+    app.on_captions_navigation_page_changed(on_window!(
+        |state, page: i32, epoch: SharedString, timeline_id: SharedString| {
+            state.handle(Msg::Captions(CaptionsMsg::NavigationPage {
+                page,
+                epoch: epoch.to_string(),
+                timeline_id: timeline_id.to_string(),
+            }));
+        }
+    ));
     app.on_captions_export_srt(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ExportSrt));
     }));

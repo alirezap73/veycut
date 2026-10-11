@@ -26,7 +26,7 @@ use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::panes::settings::installed;
 use crate::studio::Studio;
-use crate::ui::CaptionsSheetData;
+use crate::ui::{CaptionNavigationRow, CaptionsSheetData};
 
 /// Where a caption sits, by the sheet's row: a frame-height fraction from
 /// the centre, positive down. Bottom, centre, top.
@@ -56,6 +56,16 @@ pub enum CaptionsMsg {
     SrtOriginChanged(i32),
     ExportSrt,
     SectionChanged(i32),
+    Navigate {
+        clip_id: String,
+        epoch: String,
+        timeline_id: String,
+    },
+    NavigationPage {
+        page: i32,
+        epoch: String,
+        timeline_id: String,
+    },
     ExportFormatChanged(i32),
     ScopeChanged(i32),
     OffsetEdited(String),
@@ -113,6 +123,7 @@ pub struct CaptionsPane {
     /// Whether imported SRT times are relative to the playhead snapshot.
     pub srt_at_playhead: bool,
     pub section: usize,
+    navigation_page: usize,
     pub export_vtt: bool,
     pub all_text: bool,
     pub offset: String,
@@ -136,7 +147,58 @@ impl CaptionsPane {
         match msg {
             CaptionsMsg::SectionChanged(index) => self.section = (index.max(0) as usize).min(2),
             CaptionsMsg::ExportFormatChanged(index) => self.export_vtt = index == 1,
-            CaptionsMsg::ScopeChanged(index) => self.all_text = index == 1,
+            CaptionsMsg::ScopeChanged(index) => {
+                self.all_text = index == 1;
+                self.navigation_page = 0;
+            }
+            CaptionsMsg::NavigationPage {
+                page,
+                epoch,
+                timeline_id,
+            } => {
+                if self.open
+                    && !self.running
+                    && epoch == crate::host::project_epoch().to_string()
+                    && timeline_id == studio.project().active().id
+                {
+                    self.navigation_page = page.max(0) as usize;
+                }
+            }
+            CaptionsMsg::Navigate {
+                clip_id,
+                epoch,
+                timeline_id,
+            } => {
+                if !self.open || self.running {
+                    return;
+                }
+                let current = crate::host::project_epoch().to_string();
+                if navigation_target(
+                    studio.project().active(),
+                    &current,
+                    &epoch,
+                    &timeline_id,
+                    &clip_id,
+                )
+                .is_none()
+                {
+                    return;
+                }
+                // Commit the old inspector draft before changing selection.
+                studio.flush_commit();
+                if let Some(start) = navigation_target(
+                    studio.project().active(),
+                    &current,
+                    &epoch,
+                    &timeline_id,
+                    &clip_id,
+                ) {
+                    studio.selection = vec![clip_id];
+                    studio.transition_selected = None;
+                    studio.seek(start);
+                    self.open = false;
+                }
+            }
             CaptionsMsg::OffsetEdited(text) => self.offset = text,
             CaptionsMsg::FindEdited(text) => self.find = text,
             CaptionsMsg::ReplacementEdited(text) => self.replacement = text,
@@ -537,7 +599,44 @@ impl CaptionsPane {
 
     /// The sheet as Slint shows it.
     pub fn data(&self, studio: &Studio) -> CaptionsSheetData {
+        let timeline = studio.project().active();
+        let ids = (!self.all_text).then_some(studio.selection.as_slice());
+        let (clips, total, page) = if self.open && self.section == 2 && !self.running {
+            navigation_page(timeline, ids, self.navigation_page)
+        } else {
+            (Vec::new(), 0, 0)
+        };
+        let epoch = crate::host::project_epoch().to_string();
+        let rate = timeline.video.rate() as f32;
+        let rows = clips
+            .into_iter()
+            .map(|clip| CaptionNavigationRow {
+                clip_id: clip.id.as_str().into(),
+                epoch: epoch.as_str().into(),
+                timeline_id: timeline.id.as_str().into(),
+                range: format!(
+                    "{} – {}",
+                    crate::format::frames_timecode(clip.start as f32, rate),
+                    crate::format::frames_timecode((clip.start + clip.duration) as f32, rate),
+                )
+                .into(),
+                preview: navigation_preview(&clip.text.as_ref().expect("text row").content).into(),
+            })
+            .collect::<Vec<_>>();
+        let first = if total == 0 {
+            0
+        } else {
+            page * NAVIGATION_PAGE_SIZE + 1
+        };
+        let last = (page * NAVIGATION_PAGE_SIZE + rows.len()).min(total);
         CaptionsSheetData {
+            navigation_rows: slint::ModelRc::new(slint::VecModel::from(rows)),
+            navigation_page: page as i32,
+            navigation_epoch: epoch.into(),
+            navigation_timeline: timeline.id.as_str().into(),
+            navigation_range: format!("{first}–{last} / {total}").into(),
+            navigation_previous: page > 0,
+            navigation_next: last < total,
             open: self.open,
             from_sound: self.clip.is_some(),
             text: self.text.as_str().into(),
@@ -567,6 +666,92 @@ impl CaptionsPane {
             message: self.message.as_str().into(),
         }
     }
+}
+
+/// Only a page is materialised as Slint rows; full text previews stay bounded.
+const NAVIGATION_PAGE_SIZE: usize = 50;
+const NAVIGATION_PREVIEW_CHARS: usize = 160;
+
+fn navigation_page<'a>(
+    timeline: &'a concat_project::model::Timeline,
+    ids: Option<&[String]>,
+    requested: usize,
+) -> (Vec<&'a concat_project::model::Clip>, usize, usize) {
+    let scope: Option<std::collections::HashSet<&str>> =
+        ids.map(|ids| ids.iter().map(String::as_str).collect());
+    let mut clips: Vec<_> = timeline
+        .clips
+        .iter()
+        .map(|clip| clip.as_ref())
+        .filter(|clip| {
+            clip.text.is_some()
+                && scope
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(clip.id.as_str()))
+                && clip.start >= 0.0
+                && clip.duration > 0.0
+                && (clip.start as f32).is_finite()
+                && ((clip.start + clip.duration) as f32).is_finite()
+        })
+        .collect();
+    clips.sort_by(|a, b| {
+        a.start
+            .total_cmp(&b.start)
+            .then_with(|| a.track_id.cmp(&b.track_id))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let total = clips.len();
+    let page = requested.min(total.saturating_sub(1) / NAVIGATION_PAGE_SIZE);
+    let rows = clips
+        .into_iter()
+        .skip(page * NAVIGATION_PAGE_SIZE)
+        .take(NAVIGATION_PAGE_SIZE)
+        .collect();
+    (rows, total, page)
+}
+
+/// Row tokens bind IDs to the project and timeline that displayed them.
+fn navigation_target(
+    timeline: &concat_project::model::Timeline,
+    current_epoch: &str,
+    row_epoch: &str,
+    row_timeline: &str,
+    id: &str,
+) -> Option<f32> {
+    if current_epoch != row_epoch || timeline.id != row_timeline {
+        return None;
+    }
+    let clip = timeline.clip(id)?;
+    let start = clip.start as f32;
+    (clip.text.is_some() && clip.start >= 0.0 && start.is_finite()).then_some(start)
+}
+
+fn navigation_preview(text: &str) -> String {
+    let mut preview = String::new();
+    let mut count = 0;
+    let mut space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            space = !preview.is_empty();
+            continue;
+        }
+        if count >= NAVIGATION_PREVIEW_CHARS {
+            preview.push('…');
+            break;
+        }
+        if space {
+            preview.push(' ');
+            count += 1;
+            space = false;
+            if count >= NAVIGATION_PREVIEW_CHARS {
+                preview.push('…');
+                break;
+            }
+        }
+        preview.push(ch);
+        count += 1;
+    }
+    preview
 }
 
 /// One caption as a title clip: its words, when and for how long, and
@@ -683,6 +868,80 @@ fn wrap_caption(sentence: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::script_captions;
+
+    #[test]
+    fn caption_navigation_sorts_scopes_and_bounds_pages() {
+        let clips: Vec<_> = (0..103).rev().map(|index| serde_json::json!({
+            "id":format!("c{index:03}"),"kind":"text","trackId":"T1","mediaId":"",
+            "start":index as f64,"duration":1.0,"text":{"content":format!("سلام {index}")}
+        })).chain([serde_json::json!({"id":"video","kind":"video","trackId":"T1","mediaId":"m1","start":0.0,"duration":1.0})]).collect();
+        let editor = concat_project::Editor::from_document(&serde_json::json!({
+            "tracks":[{"id":"T1"}],"clips":clips,
+            "media":[{"id":"m1","path":"/fixture.mp4","kind":"video","duration":200.0}]
+        }))
+        .unwrap();
+        let timeline = editor.project().active();
+        let (rows, total, page) = super::navigation_page(timeline, None, 0);
+        assert_eq!((rows.len(), total, page), (50, 103, 0));
+        assert_eq!(rows[0].id, "c000");
+        assert_eq!(rows[49].id, "c049");
+        let (rows, total, page) = super::navigation_page(timeline, None, usize::MAX);
+        assert_eq!((rows.len(), total, page), (3, 103, 2));
+        assert_eq!(rows[0].id, "c100");
+        let ids = vec!["c010".into(), "video".into(), "c002".into()];
+        let (rows, total, page) = super::navigation_page(timeline, Some(&ids), 99);
+        assert_eq!((rows.len(), total, page), (2, 2, 0));
+        assert_eq!(rows[0].id, "c002");
+        let empty: Vec<String> = vec![];
+        assert!(
+            super::navigation_page(timeline, Some(&empty), 0)
+                .0
+                .is_empty()
+        );
+        assert_eq!(
+            super::navigation_target(timeline, "42", "42", &timeline.id, "c002"),
+            Some(2.0)
+        );
+        assert!(super::navigation_target(timeline, "43", "42", &timeline.id, "c002").is_none());
+        assert!(
+            super::navigation_target(timeline, "42", "42", "different-timeline", "c002").is_none()
+        );
+        assert!(super::navigation_target(timeline, "42", "42", &timeline.id, "missing").is_none());
+        assert!(super::navigation_target(timeline, "42", "42", &timeline.id, "video").is_none());
+    }
+
+    #[test]
+    fn caption_navigation_ties_are_stable_and_invalid_times_are_excluded() {
+        let editor = concat_project::Editor::from_document(&serde_json::json!({
+            "tracks":[{"id":"T1"},{"id":"T2"}],
+            "clips":[
+                {"id":"z","kind":"text","trackId":"T2","mediaId":"","start":1.0,"duration":1.0,"text":{"content":"Hello"}},
+                {"id":"b","kind":"text","trackId":"T1","mediaId":"","start":1.0,"duration":1.0,"text":{"content":"سلام"}},
+                {"id":"a","kind":"text","trackId":"T1","mediaId":"","start":1.0,"duration":1.0,"text":{"content":"first"}}
+            ]
+        })).unwrap();
+        let mut timeline = editor.project().active().clone();
+        let (rows, _, _) = super::navigation_page(&timeline, None, 0);
+        assert_eq!(
+            rows.iter().map(|clip| clip.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "z"]
+        );
+        std::sync::Arc::make_mut(&mut timeline.clips[0]).start = f64::INFINITY;
+        let (rows, total, _) = super::navigation_page(&timeline, None, 0);
+        assert_eq!(total, 2);
+        assert!(rows.iter().all(|clip| clip.id != "z"));
+        assert!(super::navigation_target(&timeline, "1", "1", &timeline.id, "z").is_none());
+    }
+
+    #[test]
+    fn caption_navigation_preview_is_utf8_safe_and_bounded() {
+        assert_eq!(super::navigation_preview("  سلام\n\tHello  "), "سلام Hello");
+        let text = "س".repeat(1000);
+        let preview = super::navigation_preview(&text);
+        assert_eq!(preview.chars().count(), 161);
+        assert!(preview.ends_with('…'));
+        assert_eq!(super::navigation_preview("   \n "), "");
+    }
 
     /// Persian questions are separate captions just as English questions
     /// are; decimal punctuation and mixed-language words remain intact.
