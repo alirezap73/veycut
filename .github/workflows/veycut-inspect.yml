@@ -44,6 +44,11 @@ on:
         type: boolean
         default: false
 
+      real_media_probe:
+        description: Import and reopen an official full-length 640x360 movie through the native picker
+        type: boolean
+        default: false
+
 permissions:
   contents: read
   actions: read
@@ -79,6 +84,10 @@ jobs:
               manifest = subprocess.check_output(['git', 'show', revision + ':src/Cargo.toml'], text=True)
               version = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"', manifest, re.M).group(1)
               f.write('PACKAGE_VERSION=' + version + '\n')
+              panel = subprocess.check_output(['git', 'show', revision + ':src/crates/concat/ui/primitives/panel.slint'], text=True)
+              icon_button = panel.split('export component IconButton', 1)[1]
+              accessible_pause = 'accessible-role: button;' in icon_button and 'accessible-label: root.label;' in icon_button
+              f.write('EXPECT_ACCESSIBLE_PAUSE=' + ('true' if accessible_pause else 'false') + '\n')
           PYTHON
       - uses: actions/download-artifact@v8
         with:
@@ -87,20 +96,36 @@ jobs:
           name: VeyCut-macos-arm64
           path: bundles
       - name: Ensure independent video decoder for GUI export checks
-        if: inputs.core_gui || inputs.extended_gui || contains(inputs.gui_actions, 'video-check')
+        if: inputs.core_gui || inputs.extended_gui || inputs.real_media_probe || contains(inputs.gui_actions, 'video-check')
         run: |
           if ! command -v ffprobe >/dev/null || ! command -v ffmpeg >/dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
           fi
+      - name: Prepare official real media on the runner
+        if: inputs.real_media_probe
+        timeout-minutes: 12
+        env:
+          CORE_GUI: ${{ inputs.core_gui }}
+          EXTENDED_GUI: ${{ inputs.extended_gui }}
+          CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
+          GUI_ACTIONS: ${{ inputs.gui_actions }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          assert all(os.environ[name] != 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI')), 'Choose one committed GUI scenario per run'
+          assert json.loads(os.environ['GUI_ACTIONS']) == [], 'Real-media probe uses its own bounded actions'
+          PYTHON
+          python3 docs/beta-tests/real-media-runner.py prepare
       - name: Inspect mounted package and launch editor
         env:
           SESSION_SECONDS: ${{ inputs.session_seconds }}
           LAUNCH_CYCLES: ${{ inputs.launch_cycles }}
           ACCESSIBILITY_PROBE: ${{ inputs.accessibility_probe }}
-          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui }}
+          PROJECT_SMOKE: ${{ inputs.project_smoke || inputs.core_gui || inputs.extended_gui || inputs.caption_navigation_gui || inputs.real_media_probe }}
           CORE_GUI: ${{ inputs.core_gui }}
           EXTENDED_GUI: ${{ inputs.extended_gui }}
           CAPTION_NAVIGATION_GUI: ${{ inputs.caption_navigation_gui }}
+          REAL_MEDIA_PROBE: ${{ inputs.real_media_probe }}
           EDITOR_PROBE: ${{ inputs.editor_probe }}
           GUI_ACTIONS: ${{ inputs.gui_actions }}
         run: |
@@ -485,6 +510,10 @@ jobs:
                   point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
                   route = "observed_AX_Pause"
               } else {
+                  guard ProcessInfo.processInfo.environment["EXPECT_ACCESSIBLE_PAUSE"] != "true" else {
+                      fputs("Package source exposes accessible buttons, but AX Pause is missing\n", stderr)
+                      exit(43)
+                  }
                   // Older packaged IconButton has no AX role/name. This point was
                   // observed in playback-meters-cancel.png, the complete 1024x681
                   // window capture: Pause at (612,392), including its titlebar.
@@ -641,7 +670,21 @@ jobs:
               project.mkdir()
               sample = pathlib.Path('docs/beta-samples/portrait-2s.mp4').resolve()
               imported_sample = temp / 'native-import-copy.mp4'
-              shutil.copyfile(sample, imported_sample)
+              real_media_probe = os.environ['REAL_MEDIA_PROBE'] == 'true'
+              if real_media_probe:
+                  import hashlib
+                  real_source = temp / 'veycut-real-media' / 'BigBuckBunny-full.mp4'
+                  source_metadata = json.loads(pathlib.Path('evidence/REAL-MEDIA-SOURCE.json').read_text())
+                  assert source_metadata['full_source_decode_passed']
+                  assert 0 < real_source.stat().st_size <= 150000000
+                  shutil.copyfile(real_source, imported_sample)
+                  digest = hashlib.sha256()
+                  with imported_sample.open('rb') as stream:
+                      while chunk := stream.read(1024 * 1024):
+                          digest.update(chunk)
+                  assert digest.hexdigest() == source_metadata['source_sha256_observed_on_runner']
+              else:
+                  shutil.copyfile(sample, imported_sample)
               video = {'width': 720, 'height': 1280, 'rateNum': 30, 'rateDen': 1}
               clip = {'id': 'c1', 'trackId': 'T1', 'mediaId': 'm1', 'name': 'GUI fixture', 'kind': 'video', 'start': 0, 'duration': 2, 'sourceStart': 0, 'speed': 1, 'volume': 1, 'scale': 1, 'opacity': 1}
               fixture = {'concat': os.environ['PACKAGE_VERSION'], 'version': 1, 'name': 'VeyCut GUI fixture', 'video': video, 'media': [{'id': 'm1', 'path': str(sample), 'name': sample.name, 'kind': 'video', 'duration': 2, 'width': 720, 'height': 1280, 'frameRate': 30, 'frameRateFraction': '30/1', 'hasAudio': True}], 'activeTimelineId': 'TL1', 'timelines': [{'id': 'TL1', 'name': 'Timeline 1', 'video': video, 'tracks': [{'id': 'T1', 'visible': True, 'muted': False}], 'clips': [clip]}]}
@@ -653,6 +696,7 @@ jobs:
                   pathlib.Path('evidence/UI-CALLS.json').write_text(json.dumps(ui_calls, indent=2))
                   with open(f'evidence/ui-action-{process.pid}-{len(ui_calls)}-{action}.txt', 'w') as output:
                       subprocess.run([str(temp / 'project-ui'), str(process.pid), action, str(path)], stdout=output, check=True, timeout=60)
+              assert sum(os.environ[name] == 'true' for name in ('CORE_GUI', 'EXTENDED_GUI', 'CAPTION_NAVIGATION_GUI', 'REAL_MEDIA_PROBE')) <= 1, 'Choose one committed GUI scenario per run'
               actions = json.loads(pathlib.Path('docs/beta-tests/core-gui.json').read_text()) if os.environ['CORE_GUI'] == 'true' else json.loads(os.environ['GUI_ACTIONS'])
               if os.environ['EXTENDED_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true', 'Choose one committed GUI scenario per run'
@@ -660,6 +704,12 @@ jobs:
               if os.environ['CAPTION_NAVIGATION_GUI'] == 'true':
                   assert os.environ['CORE_GUI'] != 'true' and os.environ['EXTENDED_GUI'] != 'true', 'Choose one committed GUI scenario per run'
                   actions = json.loads(pathlib.Path('docs/beta-tests/caption-navigation-gui.json').read_text())
+              if real_media_probe:
+                  assert json.loads(os.environ['GUI_ACTIONS']) == []
+                  actions = [
+                      {'action': 'click', 'arg': '0.2294921875,0.6989720999'},
+                      {'action': 'snapshot'},
+                  ]
               assert isinstance(actions, list) and len(actions) <= 100
               core = {'source_revision': os.environ['PACKAGE_REVISION'], 'steps': [], 'split_verified': False, 'subtitle_verified': False, 'gui_export_verified': False}
               ui_environment = dict(os.environ)
@@ -693,7 +743,35 @@ jobs:
                           assert any(c['id'] == 'c1' for c in saved.get('clips', [])), 'Seeded timeline did not survive native save'
                           imported = [m for m in saved['media'] if m['path'] == str(imported_sample)]
                           assert len(imported) == 1 and imported[0]['id'] != 'm1', 'Native import did not persist a new media entry'
-                          assert imported[0]['width'] == 720 and imported[0]['height'] == 1280 and imported[0]['hasAudio'], 'Imported metadata mismatch'
+                          if real_media_probe:
+                              movie = imported[0]
+                              duration = float(movie['duration'])
+                              independent_duration = float(source_metadata['probe']['format']['duration'])
+                              assert movie['width'] == 640 and movie['height'] == 360 and movie['hasAudio'], 'Real movie metadata mismatch'
+                              assert 570 <= duration <= 660 and abs(duration - independent_duration) <= 0.15, 'Full movie duration mismatch'
+                              assert movie['path'] == str(imported_sample)
+                              assert len(saved['media']) == 2 and next(m for m in saved['media'] if m['id'] == 'm1')['path'] == str(sample)
+                              assert all(c.get('mediaId') == 'm1' for c in saved['clips']), 'Original seed clip changed unexpectedly'
+                              real_result = {
+                                  'source_revision': os.environ['PACKAGE_REVISION'],
+                                  'native_gui_import_verified': True,
+                                  'registered_media': movie,
+                                  'full_source_path': str(real_source),
+                                  'native_picker_import_path': str(imported_sample),
+                                  'source_file_bytes': real_source.stat().st_size,
+                                  'source_sha256_observed_on_runner': source_metadata['source_sha256_observed_on_runner'],
+                                  'native_import_copy_sha256': digest.hexdigest(),
+                                  'independent_source_probe_and_full_decode_passed': True,
+                                  'saved_cycle': cycle,
+                                  'native_project_reopen_verified': cycle == 2,
+                                  'original_seed_clip_retained': True,
+                                  'movie_placed_on_timeline': False,
+                                  'movie_seek_trim_subtitle_export_verified': False,
+                                  'clean_consumer_mac_installation_verified': False,
+                              }
+                              pathlib.Path('evidence/REAL-MEDIA-UI.json').write_text(json.dumps(real_result, indent=2) + '\n')
+                          else:
+                              assert imported[0]['width'] == 720 and imported[0]['height'] == 1280 and imported[0]['hasAudio'], 'Imported metadata mismatch'
                           if cycle == 1:
                               assert len(saved['clips']) == 2, 'Native duplication did not create two clips'
                               assert abs(sum(c['duration'] for c in saved['clips']) - 4) < 0.01
@@ -1068,8 +1146,16 @@ jobs:
                               log_tail = stream.read(1024 * 1024)
                           ui_log.write_bytes(log_tail)
               result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'see_CORE-GUI-TEST.json' if actions else 'duplicate_undo_redo_only', 'native_split_verified': core['split_verified'], 'gui_export_verified': core['gui_export_verified'], 'editable_subtitle_verified': core['subtitle_verified'], 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
+              if real_media_probe:
+                  result['media_import_verified'] = 'official_full_movie_native_picker_and_reopen'
+                  result['editing_verified'] = 'original_seed_clip_only; imported_movie_editing_not_tested'
+                  result['real_media_probe_verified'] = True
               pathlib.Path('evidence/PROJECT-UI-TEST.json').write_text(json.dumps(result, indent=2) + '\n')
           PYTHON
+      - name: Remove runner-temporary full movie
+        if: always() && inputs.real_media_probe
+        run: |
+          rm -f "$RUNNER_TEMP/veycut-real-media/official-movie.zip" "$RUNNER_TEMP/veycut-real-media/BigBuckBunny-full.mp4" "$RUNNER_TEMP/native-import-copy.mp4"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
