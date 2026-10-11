@@ -1817,11 +1817,61 @@ fn an_export_decodes_on_the_hardware_when_preferred() {
     // stream the preference leaves on the CPU, which decodes it faster
     // (concat_media::hardware::hardware_wins).
     let sources = Sources::make_in(scratch.path(), VideoCodec::Hevc);
-    // A reader opened the way the engine opens them follows the preference
-    // onto the device, on a machine that has one.
+    // A platform default names the API to request, not a usable decoder.
+    // In particular, Windows CI's software GPU need not provide HEVC
+    // acceleration. Compare the preference with an explicit request for
+    // this same stream after decoding, when fallback has taken effect.
+    let requested = HwDevice::platform_default().map_or_else(
+        || DecodeOptions::default().in_software(),
+        |device| DecodeOptions::default().accelerated(device),
+    );
+    let mut explicit = Decoder::open(&sources.peek, &requested).expect("explicit request opens");
+    let explicit_frame = explicit.next_frame().expect("decodes").expect("a frame");
+    let explicit_at = explicit.position();
+    let actual_hardware = explicit.hardware();
+    if std::env::var("VEYCUT_REQUIRE_HW_DECODE").as_deref() == Ok("1") {
+        assert!(
+            actual_hardware.is_some(),
+            "hardware decoding is required on this machine"
+        );
+        assert_eq!(actual_hardware, HwDevice::platform_default());
+    }
+    eprintln!(
+        "HEVC decode requested {:?}; actual {actual_hardware:?}",
+        HwDevice::platform_default()
+    );
+
+    let mut software = Decoder::open(&sources.peek, &DecodeOptions::default().in_software())
+        .expect("software reference opens");
+    let software_frame = software.next_frame().expect("decodes").expect("a frame");
+    let software_at = software.position();
     let mut reader = Decoder::open(&sources.peek, &DecodeOptions::default()).expect("opens");
-    reader.next_frame().expect("decodes").expect("a frame");
-    assert_eq!(reader.hardware(), HwDevice::platform_default());
+    let preferred_frame = reader.next_frame().expect("decodes").expect("a frame");
+    let preferred_at = reader.position();
+    assert_eq!(
+        reader.hardware(),
+        actual_hardware,
+        "preference follows the explicit request"
+    );
+    assert_eq!(preferred_at, explicit_at);
+    assert_eq!(preferred_at, software_at);
+    for frame in [&explicit_frame, &preferred_frame] {
+        assert_eq!(frame.width(), software_frame.width());
+        assert_eq!(frame.height(), software_frame.height());
+        let difference = frame
+            .pixels()
+            .iter()
+            .zip(software_frame.pixels())
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            difference <= 8,
+            "decoded frame differs from software by {difference} levels"
+        );
+    }
+    drop(explicit);
+    drop(software);
     drop(reader);
     let mut studio = Studio::new(scratch.path(), "Hardware", video(WIDTH, HEIGHT, 30, 1));
     let peek = studio.import(&sources.peek);
