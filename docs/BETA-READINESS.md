@@ -19,7 +19,35 @@ failure, not evidence of failed CJK rendering. That test is corrected.
 
 [Full validation](https://github.com/alirezap73/veycut/actions/runs/38117995463) passed **806 Rust test invocations**, **0 failed**, with **1 ignored model/audio transcription test**. Quick checks passed **271 invocations** (**250 Rust + 21 Python**). All four CJK UI regressions and the mixed-script raster test passed, along with Linux lints/performance, gRPC checks, WebAssembly and macOS all-target compilation. The Mac job compiles targets rather than executing native tests.
 
-The [final candidate](https://github.com/alirezap73/veycut/actions/runs/38119080271) is building from package source `39cc82c`, which includes runtime `974c65e`. Matching packaged GUI evidence is not yet available. An independent Apple silicon Mac/tester is available; its actual installation and real-footage report await the final package. Earlier package results do not establish packaged CJK rendering or the new AX controls. Development remains 0.3.1 and no official beta is published.
+The [final candidate](https://github.com/alirezap73/veycut/actions/runs/38119080271) built successfully from package source `39cc82cebf1904c1b65f860d6fe674b0ca1aacd2`, which includes runtime `974c65e`. Matching [core](https://github.com/alirezap73/veycut/actions/runs/38121113154), [caption-navigation](https://github.com/alirezap73/veycut/actions/runs/38121118094) and [extended](https://github.com/alirezap73/veycut/actions/runs/38121124147) GUI checks passed **55**, **23** and **98** actions. The extended check observed the **AX Pause control**, then paused at **17.473 seconds** after native-panel cancellation and **24.967 seconds** after acceptance, meeting `4 <= paused < 32`. Its 32-second H.264/AAC output at 720×1280/30 fps, 960 frames and 48 kHz stereo fully decoded. This does not establish bare-Space focus restoration or timer updates during the held panel.
+
+[Exact-package real-movie import/reopen](https://github.com/alirezap73/veycut/actions/runs/38121129800) also passed with a 596.46-second, 640×359 H.264/AAC movie. This is import/reopen only; the movie was not placed on the timeline, edited or exported. CJK UI/raster regressions passed in source validation; these packaged scenarios are not a separate CJK-text GUI proof.
+
+The **69,563,828-byte** DMG SHA-256 is `2150c1b883449d1013a9e2d01a177b569795f4bc7244664d16bfd0b339829c1d`. `v0.3.1-beta.1` is staged as an **unpublished draft**; public downloads remain **0.2.0-preview.1**. An independent Mac/tester is available, but its actual installation and real-footage editing report is still pending. Earlier package results remain specific to their own source. Development remains 0.3.1 and no official beta is published.
+
+## Exact-package light local check
+
+The final source `39cc82cebf1904c1b65f860d6fe674b0ca1aacd2` package was checked on the development Mac,
+**macOS 27.0.1 arm64**, after explicit authorization for the DMG download and
+light test. Actual report checks confirm package hash, strict signature,
+native media import, split at one second, Undo and Redo with identical IDs and
+properties, bilingual caption import, English replacement `Local beta check`,
+and normal save/close/reopen with all four clips identical.
+
+Export through the UI produced two seconds of H.264, **720×1280**, **30 fps**,
+**60 frames**, with AAC **48 kHz stereo**. All video/audio streams decoded.
+Both-channel RMS was zero for the first-second silence and about 0.35353 for
+the second-second tone. Extracted frames visually confirmed Persian and the
+unique edited English caption. VeyCut was quit and the DMG unmounted afterwards.
+No local code build, model download or long-media rendering was performed.
+
+This is **not an independent clean consumer installation**: it used the
+existing development Mac, a two-second generated fixture and GitHub CLI download.
+Browser quarantine/Gatekeeper flow, separate-player viewing, 10–15-minute real
+editing and real-camera footage remain unverified. QuickTime automation timed
+out; decoding/frame review is separate evidence. CPU/memory were not sampled,
+so no zero-load or measured performance claim is made. An independent Mac/tester
+is available; a source-matched completed report remains a release gate.
 
 ## Stereo layout and GPU failure runtime at e6bce73
 
@@ -175,4 +203,4 @@ Full builds and media/GUI tests stay on GitHub runners when local laptop use mus
 
 هدف، بتای قابل‌اعتماد برای مک Apple silicon است: ورود رسانه، برش و جابه‌جایی، متن و صدا، ذخیره و بازکردن، و خروجی. نسخهٔ عمومی فعلاً ۰٫۲ می‌ماند؛ شمارهٔ کاندید توسعه افزایش نمی‌یابد. درصد نزدیکی به محصولات دیگر تعیین نشده است.
 
-آزمون موتور، خروجی واقعی و بازشدن بسته موفق بوده‌اند. ورود فایل از پنجرهٔ انتخاب، جابه‌جایی و کوتاه‌کردن کلیپ، و خروجی ۳۲ ثانیه‌ای با نمونهٔ مصنوعی روی سرور تأیید شده‌اند. استفادهٔ کامل روی دستگاه مستقل، کشیدن‌ورهاکردن و جلسات طولانی با فایل واقعی هنوز تأیید نشده‌اند. آخرین تغییرات کد نیز در انتظار آزمون مطابق همان نسخه هستند. انتشار بعدی به تکمیل این بررسی‌ها و رفع خطاهای مشاهده‌شده وابسته است. مشکل گرافیک ویندوز ثبت شده و فایل نصب ویندوز در این بتا ارائه نمی‌شود.
+آزمون موتور، خروجی واقعی و بازشدن بسته موفق بوده‌اند. ورود فایل از پنجرهٔ انتخاب، جابه‌جایی و کوتاه‌کردن کلیپ، و خروجی ۳۲ ثانیه‌ای با نمونهٔ مصنوعی روی سرور تأیید شده‌اند. استفادهٔ کامل روی دستگاه مستقل، کشیدن‌ورهاکردن و جلسات طولانی با فایل واقعی هنوز تأیید نشده‌اند. بستهٔ نهایی و آزمون رابط مطابق همان سورس نیز موفق شده‌اند؛ آزمون سبک روی مک توسعه جای نصب مستقل و کار طولانی با فایل واقعی را نمی‌گیرد. انتشار بعدی به تکمیل این بررسی‌ها و رفع خطاهای مشاهده‌شده وابسته است. مشکل گرافیک ویندوز ثبت شده و فایل نصب ویندوز در این بتا ارائه نمی‌شود.
