@@ -433,7 +433,7 @@ jobs:
               Thread.sleep(forTimeInterval: 1)
           } else if action == "play-pause-button" {
               // Native panels can leave Space routed away from the editor.
-              // Click the actual, observed Pause control; a Play control is a failure.
+              // Prefer the observed AX Pause control; older packages use a verified window coordinate.
               AXUIElementSetMessagingTimeout(application, 0.5)
               func pauseControl(_ element: AXUIElement, _ depth: Int = 0) -> AXUIElement? {
                   guard depth < 24 else { return nil }
@@ -453,34 +453,58 @@ jobs:
                   }
                   return nil
               }
-              guard let target = pauseControl(application) else {
-                  fputs("Active Pause control not observed after native panel\n", stderr)
-                  exit(37)
+              guard !contains(application, role: "AXSheet") && !contains(application, role: "AXDialog") else {
+                  fputs("Native panel still open; refusing playback click\n", stderr)
+                  exit(41)
               }
-              var rawPosition: CFTypeRef?
-              var rawSize: CFTypeRef?
-              AXUIElementCopyAttributeValue(target, "AXPosition" as CFString, &rawPosition)
-              AXUIElementCopyAttributeValue(target, "AXSize" as CFString, &rawSize)
-              guard let rawPosition = rawPosition, let rawSize = rawSize,
-                    CFGetTypeID(rawPosition) == AXValueGetTypeID(),
-                    CFGetTypeID(rawSize) == AXValueGetTypeID() else { exit(38) }
-              var position = CGPoint.zero
-              var size = CGSize.zero
-              guard AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position),
-                    AXValueGetValue(rawSize as! AXValue, .cgSize, &size),
-                    size.width > 0, size.height > 0 else { exit(39) }
               let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-              guard windows.contains(where: {
-                  guard ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid),
-                        ($0[kCGWindowLayer as String] as? Int) == 0,
-                        let bounds = $0[kCGWindowBounds as String] as? [String: Double],
-                        let x = bounds["X"], let y = bounds["Y"],
-                        let width = bounds["Width"], let height = bounds["Height"] else { return false }
-                  return width >= 900 && position.x >= x && position.y >= y
-                      && position.x + size.width <= x + width && position.y + size.height <= y + height
-              }) else { exit(40) }
-              let point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
-              print("Observed active Pause control; clicking native center \(point.x),\(point.y)")
+              let point: CGPoint
+              let route: String
+              if let target = pauseControl(application) {
+                  var rawPosition: CFTypeRef?
+                  var rawSize: CFTypeRef?
+                  AXUIElementCopyAttributeValue(target, "AXPosition" as CFString, &rawPosition)
+                  AXUIElementCopyAttributeValue(target, "AXSize" as CFString, &rawSize)
+                  guard let rawPosition = rawPosition, let rawSize = rawSize,
+                        CFGetTypeID(rawPosition) == AXValueGetTypeID(),
+                        CFGetTypeID(rawSize) == AXValueGetTypeID() else { exit(38) }
+                  var position = CGPoint.zero
+                  var size = CGSize.zero
+                  guard AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position),
+                        AXValueGetValue(rawSize as! AXValue, .cgSize, &size),
+                        size.width > 0, size.height > 0 else { exit(39) }
+                  guard windows.contains(where: {
+                      guard ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid),
+                            ($0[kCGWindowLayer as String] as? Int) == 0,
+                            let bounds = $0[kCGWindowBounds as String] as? [String: Double],
+                            let x = bounds["X"], let y = bounds["Y"],
+                            let width = bounds["Width"], let height = bounds["Height"] else { return false }
+                      return width >= 900 && position.x >= x && position.y >= y
+                          && position.x + size.width <= x + width && position.y + size.height <= y + height
+                  }) else { exit(40) }
+                  point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+                  route = "observed_AX_Pause"
+              } else {
+                  // Older packaged IconButton has no AX role/name. This point was
+                  // observed in playback-meters-cancel.png, the complete 1024x681
+                  // window capture: Pause at (612,392), including its titlebar.
+                  let matching = windows.filter {
+                      guard ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid),
+                            ($0[kCGWindowLayer as String] as? Int) == 0,
+                            let bounds = $0[kCGWindowBounds as String] as? [String: Double] else { return false }
+                      return bounds["Width"] == 1024 && bounds["Height"] == 681
+                  }
+                  guard matching.count == 1,
+                        let bounds = matching[0][kCGWindowBounds as String] as? [String: Double],
+                        let x = bounds["X"], let y = bounds["Y"] else {
+                      fputs("No unique screenshot-confirmed 1024x681 editor window; refusing coordinate fallback\n", stderr)
+                      exit(42)
+                  }
+                  point = CGPoint(x: x + 612, y: y + 392)
+                  route = "screenshot_confirmed_coordinate_without_AX"
+              }
+              let report: [String: Any] = ["pause_control_route": route, "native_pointer_x": point.x, "native_pointer_y": point.y, "AX_Pause_observed": route == "observed_AX_Pause"]
+              print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]), encoding: .utf8)!)
               for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
                   CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!.post(tap: .cghidEventTap)
                   Thread.sleep(forTimeInterval: 0.08)
