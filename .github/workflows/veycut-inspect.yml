@@ -617,16 +617,42 @@ jobs:
                                       playback_positions = {}
                                       for mode in ('cancel', 'accept'):
                                           log_offset = ui_log.stat().st_size
+                                          playback_started_at = time.monotonic()
                                           ui(process, 'play-start')
                                           ui(process, 'snapshot', pathlib.Path(f'evidence/playback-meters-{mode}.png').resolve())
                                           ui(process, 'import-cancel' if mode == 'cancel' else 'import-held', accepted_sample)
                                           assert process.poll() is None, 'Native dialog terminated editor during playback'
                                           ui(process, 'play-toggle')
-                                          received = ui_log.read_bytes()[log_offset:].decode(errors='replace')
+                                          from collections import deque
+                                          important = deque(maxlen=2000)
+                                          unavailable = deque(maxlen=20)
+                                          with ui_log.open('r', errors='replace') as stream:
+                                              for line in stream:
+                                                  if 'audio output unavailable' in line:
+                                                      unavailable.append(line.strip()[:1024])
+                                          with ui_log.open('rb') as stream:
+                                              stream.seek(log_offset)
+                                              for line in stream:
+                                                  decoded = line.decode(errors='replace')
+                                                  if any(term in decoded for term in ('playback:', 'panicked at', 'BorrowMutError', 'already borrowed')):
+                                                      important.append(decoded[:2048])
+                                          received = ''.join(important)
                                           playing = re.findall(r'playback: playing from ([0-9.]+)s', received)
                                           paused = re.findall(r'playback: paused at ([0-9.]+)s', received)
-                                          assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head'
-                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback did not survive and advance across the native panel test'
+                                          playback_diagnostic = {
+                                              'source_revision': os.environ['PACKAGE_REVISION'],
+                                              'mode': mode,
+                                              'playing_positions_seconds': playing,
+                                              'paused_positions_seconds': paused,
+                                              'elapsed_wall_seconds': time.monotonic() - playback_started_at,
+                                              'timeline_seconds': max(c['start'] + c['duration'] for c in dialog_before['clips']),
+                                              'audio_unavailable_log': list(unavailable),
+                                              'passed_advancement_requirement': len(paused) == 1 and 4 <= float(paused[0]) < 32,
+                                          }
+                                          pathlib.Path(f'evidence/playback-dialog-{mode}-diagnostic.json').write_text(json.dumps(playback_diagnostic, indent=2) + '\n')
+                                          print('Native dialog playback diagnostic:', json.dumps(playback_diagnostic), flush=True)
+                                          assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head: ' + json.dumps(playback_diagnostic)
+                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback did not survive and advance across the native panel test: ' + json.dumps(playback_diagnostic)
                                           assert not any(term in received for term in ('panicked at', 'BorrowMutError', 'already borrowed')), 'Native dialog borrowed Studio across playback timers'
                                           playback_positions[mode] = float(paused[0])
                                           for _ in range(6):
@@ -766,6 +792,18 @@ jobs:
                               except subprocess.TimeoutExpired:
                                   process.kill()
                                   process.wait()
+                          # Preserve bounded diagnostic lines plus a 1 MiB tail, even on assertion failure.
+                          from collections import deque
+                          retained = deque(maxlen=2000)
+                          with ui_log.open('r', errors='replace') as stream:
+                              for line in stream:
+                                  if any(term in line for term in ('playback:', 'audio output unavailable', 'panicked at', 'BorrowMutError', 'already borrowed')):
+                                      retained.append(line[:2048])
+                          ui_log.with_suffix('.diagnostic.log').write_text(''.join(retained))
+                          with ui_log.open('rb') as stream:
+                              stream.seek(max(0, ui_log.stat().st_size - 1024 * 1024))
+                              log_tail = stream.read(1024 * 1024)
+                          ui_log.write_bytes(log_tail)
               result = {'source_revision': os.environ['PACKAGE_REVISION'], 'native_project_picker_observed': True, 'native_project_open_save_close_reopen_verified': True, 'failed_save_keeps_window_and_retry_verified': True, 'duplicate_undo_redo_verified': True, 'unsaved_undo_preserved_through_failed_close_verified': True, 'media_import_verified': 'generated_mp4_picker_only', 'editing_verified': 'see_CORE-GUI-TEST.json' if actions else 'duplicate_undo_redo_only', 'native_split_verified': core['split_verified'], 'gui_export_verified': core['gui_export_verified'], 'editable_subtitle_verified': core['subtitle_verified'], 'initial_project_seeded_outside_ui': True, 'imported_media_seeded_outside_ui': False}
               pathlib.Path('evidence/PROJECT-UI-TEST.json').write_text(json.dumps(result, indent=2) + '\n')
           PYTHON
