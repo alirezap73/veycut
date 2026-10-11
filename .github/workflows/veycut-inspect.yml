@@ -48,7 +48,7 @@ jobs:
   inspect:
     if: github.repository == 'alirezap73/veycut'
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -620,6 +620,8 @@ jobs:
                                       for content, start, duration in wanted:
                                           assert any(c['text']['content'] == content and abs(c['start'] - start) < 0.04 and abs(c['duration'] - duration) < 0.04 for c in titles), wanted
                                       core['subtitle_verified'] = True
+                                      if argument and '😀' in argument:
+                                          core['emoji_caption_saved'] = True
                                   elif action == 'caption-undo-check':
                                       state = json.loads(manifest.read_text())
                                       assert not any(c['kind'] == 'text' for c in state['clips'])

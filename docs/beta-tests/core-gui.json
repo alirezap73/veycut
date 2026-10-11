@@ -112,7 +112,7 @@
   },
   {
     "action": "type-text",
-    "arg": "GUI subtitle pass"
+    "arg": "GUI subtitle pass 😀"
   },
   {
     "action": "click",
@@ -130,7 +130,7 @@
   },
   {
     "action": "caption-check",
-    "arg": "GUI subtitle pass"
+    "arg": "GUI subtitle pass 😀"
   },
   {
     "action": "click",
@@ -157,7 +157,7 @@
   },
   {
     "action": "subtitle-file-check",
-    "arg": "GUI subtitle pass"
+    "arg": "GUI subtitle pass 😀"
   },
   {
     "action": "click",
@@ -168,7 +168,7 @@
   },
   {
     "action": "caption-check",
-    "arg": "GUI subtitle pass"
+    "arg": "GUI subtitle pass 😀"
   },
   {
     "action": "export-open"
