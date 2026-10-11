@@ -310,6 +310,21 @@ pub const BASE_FONTS: [&[u8]; 42] = [
     include_bytes!("../fonts/ZenTokyoZoo-Regular.ttf"),
 ];
 
+/// Portable CJK fallback shared by the UI and title painter. This is a
+/// subset of Noto Sans CJK SC Regular; the complete OFL 1.1 licence and
+/// copyright are in fonts/LICENSE-NotoSansCJK.txt. Regional glyph forms
+/// follow Simplified Chinese when no system or project face covers them.
+pub const CJK_FALLBACK: &[u8] = include_bytes!("../fonts/NotoSansCJKsc-UI.otf");
+
+/// Loads portable faces without consulting the platform. Keep tests on
+/// this same path so a system font cannot hide missing bundled coverage.
+fn load_bundled_fonts(db: &mut fontdb::Database) {
+    for face in BUNDLED.iter().chain(BASE_FONTS.iter()) {
+        db.load_font_data(face.to_vec());
+    }
+    db.load_font_data(CJK_FALLBACK.to_vec());
+}
+
 /// Faces that used to be bundled and no longer are: a document that names
 /// one is painted in the bundled face, not in whatever the system offers
 /// for a name it does not know.
@@ -320,9 +335,7 @@ impl Fonts {
     pub fn new() -> Fonts {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
-        for face in BUNDLED.iter().chain(BASE_FONTS.iter()) {
-            db.load_font_data(face.to_vec());
-        }
+        load_bundled_fonts(&mut db);
         Fonts {
             db,
             cache: Mutex::default(),
@@ -2814,6 +2827,52 @@ A",
         assert_eq!(face_of[second], face_of[second - 1]);
     }
 
+    /// Portable title fallback must cover actual CJK text even when a
+    /// Latin preset is requested and no platform font has been loaded.
+    #[test]
+    fn cjk_titles_shape_and_raster_without_system_fonts() {
+        let mut db = fontdb::Database::new();
+        load_bundled_fonts(&mut db);
+        let fonts = Fonts {
+            db,
+            cache: Mutex::default(),
+        };
+        let mut title = style("简体中文 繁體中文 한국어 日本語 かな カナ سلام VeyCut 2026");
+        title.font_family = "Inter".into();
+        let cast = fonts.cast(&title).expect("portable multilingual casting");
+        let assignments = &cast.paragraphs[0];
+        for (offset, character) in title.content.char_indices() {
+            if character.is_whitespace() {
+                continue;
+            }
+            let face_index = assignments[offset];
+            let (bytes, index) = &cast.faces[face_index];
+            let face = ttf_parser::Face::parse((**bytes).as_ref(), *index).expect("chosen face");
+            assert!(
+                draws(&face, character),
+                "no bundled glyph for {character:?}"
+            );
+        }
+        let face = ttf_parser::Face::parse(CJK_FALLBACK, 0).expect("portable CJK face");
+        for character in "简体中文繁體한국어".chars() {
+            assert!(draws(&face, character), "CJK asset misses {character:?}");
+        }
+        title.font_size = 0.045;
+        title.max_width = 0.9;
+        title.shadow = false;
+        let frame = render_frame(&fonts, &title, 640, 360).expect("portable mixed-script raster");
+        assert!(frame.block_width > 0 && frame.block_width <= 640);
+        assert!(frame.block_height > 0 && frame.block_height <= 360);
+        assert!(!frame.words.is_empty());
+        assert!(
+            frame
+                .words
+                .iter()
+                .all(|word| word.width > 0 && word.height > 0)
+        );
+        assert!(frame.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    }
+
     /// Persian is available even with no system fonts. Contextual forms
     /// and reading order are exercised, and CI retains rendered examples.
     #[test]
@@ -2840,9 +2899,7 @@ A",
             "letters must use contextual forms"
         );
         let mut db = fontdb::Database::new();
-        for bytes in BUNDLED.iter().chain(BASE_FONTS.iter()) {
-            db.load_font_data(bytes.to_vec());
-        }
+        load_bundled_fonts(&mut db);
         let fonts = Fonts {
             db,
             cache: Mutex::default(),

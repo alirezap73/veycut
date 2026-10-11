@@ -72,6 +72,8 @@ and registered with the window for the text presets. Each file's licence is
 beside it in `src/crates/concat-text/fonts/`, as `LICENSE-<Family>.txt`;
 OFL is the SIL Open Font License 1.1.
 
+- **Noto Sans CJK SC Regular** — Copyright © 2014–2021 Adobe (http://www.adobe.com/). SIL Open Font License 1.1. A portable character subset is shared by the interface and title painter; its regional glyph forms follow Simplified Chinese. Full copyright and licence: src/crates/concat-text/fonts/LICENSE-NotoSansCJK.txt. Asset SHA-256: 6931a4a090bd566870f64013cb9b7c47c608fc38c5d01de5f66effb6eb25fe51.
+
 - **Vazirmatn** — Copyright 2015 The Vazirmatn Project Authors. SIL Open Font License 1.1. Bundled Persian/Arabic font; variable font rendered at its default weight. Source: Google Fonts revision `8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5`, `ofl/vazirmatn/Vazirmatn[wght].ttf`. SHA-256: `696249a2c74b39ffdef55de4df2809c5b639d3ff80d618d8160a095d2fd49dca`. Full license: `src/crates/concat-text/fonts/LICENSE-Vazirmatn.txt`.
 
 - **Inter** — Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter). OFL. See `fonts/LICENSE-Inter.txt`.
