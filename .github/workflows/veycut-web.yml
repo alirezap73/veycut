@@ -75,7 +75,17 @@ jobs:
           PY
           python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/playwright/server.log 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid"; playwright-cli close || true' EXIT
+          cleanup_browser() {
+            result=$?
+            if [ "$result" -ne 0 ]; then
+              timeout 20s playwright-cli snapshot --filename=output/playwright/failure-snapshot.yml > output/playwright/failure-snapshot.log 2>&1 || true
+              timeout 20s playwright-cli console > output/playwright/failure-console.log 2>&1 || true
+            fi
+            kill "$server_pid" || true
+            playwright-cli close || true
+            exit "$result"
+          }
+          trap cleanup_browser EXIT
           for attempt in {1..20}; do
             if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
             sleep 1
@@ -186,6 +196,15 @@ jobs:
           assert len(pcm) >= 10000
           rms = math.sqrt(sum((sample / 32768) ** 2 for sample in pcm) / len(pcm))
           assert rms > .001, 'Source tone missing from decoded audio'
+          def window_rms(start, end):
+              samples = pcm[round(start * 8000):round(end * 8000)]
+              assert len(samples) >= 1600, ('Decoded audio too short for timing window', start, end)
+              return math.sqrt(sum((sample / 32768) ** 2 for sample in samples) / len(samples))
+          # The fixture is silent before source1s, then contains a tone.
+          # Leading0.2s plus source0.2-1.0 keeps the intended global onset1.0s.
+          silence_rms, tone_rms = window_rms(.25, .65), window_rms(1.2, 1.5)
+          assert silence_rms < .001, ('Tone arrived early', silence_rms)
+          assert tone_rms > .001 and tone_rms > silence_rms * 5, ('Tone absent after intended onset', tone_rms, silence_rms)
           def caption_frame(at, name):
               run(['ffmpeg', '-v', 'error', '-ss', str(at), '-i', str(output), '-frames:v', '1', '-y', str(folder / name)])
               rgb = run(['ffmpeg', '-v', 'error', '-i', str(folder / name), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
@@ -198,7 +217,12 @@ jobs:
           assert caption_pixels > 100 and blank_pixels < max(40, caption_pixels * .05), (caption_pixels, blank_pixels)
           evidence = {'status': 'passed', 'fullDecode': True, 'dimensions': [360, 640],
               'expectedTimelineSeconds': 1.8, 'allowedPtsEndSeconds': [1.45, 2.15],
-              'decoded': decoded, 'audioRms': rms, 'captionRegionBrightPixels': caption_pixels,
+              'decoded': decoded, 'audioRms': rms,
+              'audioTiming': {'expectedToneOnsetSeconds': 1.0,
+                  'silenceWindowSeconds': [.25, .65], 'silenceRms': silence_rms,
+                  'toneWindowSeconds': [1.2, 1.5], 'toneRms': tone_rms,
+                  'precision': 'Bounded separated windows, not sample-accurate synchronization.'},
+              'captionRegionBrightPixels': caption_pixels,
               'endedCaptionRegionBrightPixels': blank_pixels, 'endedCaptionFrameSeconds': blank_at,
               'limits': 'Duration rejection and offered dimensions tested; size cap enforced on output, not stress-tested.',
               'precision': 'Real-time browser output; this synthetic short fixture does not prove frame-accurate timing or real user footage.'}
