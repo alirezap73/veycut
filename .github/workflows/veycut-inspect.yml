@@ -431,6 +431,61 @@ jobs:
               key(115)
               key(49)
               Thread.sleep(forTimeInterval: 1)
+          } else if action == "play-pause-button" {
+              // Native panels can leave Space routed away from the editor.
+              // Click the actual, observed Pause control; a Play control is a failure.
+              AXUIElementSetMessagingTimeout(application, 0.5)
+              func pauseControl(_ element: AXUIElement, _ depth: Int = 0) -> AXUIElement? {
+                  guard depth < 24 else { return nil }
+                  var role: CFTypeRef?
+                  AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &role)
+                  if (role as? String) == "AXButton" {
+                      for name in ["AXTitle", "AXDescription"] {
+                          var value: CFTypeRef?
+                          AXUIElementCopyAttributeValue(element, name as CFString, &value)
+                          if (value as? String) == "Pause" { return element }
+                      }
+                  }
+                  var children: CFTypeRef?
+                  AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children)
+                  for child in (children as? [AXUIElement] ?? []).prefix(200) {
+                      if let target = pauseControl(child, depth + 1) { return target }
+                  }
+                  return nil
+              }
+              guard let target = pauseControl(application) else {
+                  fputs("Active Pause control not observed after native panel\n", stderr)
+                  exit(37)
+              }
+              var rawPosition: CFTypeRef?
+              var rawSize: CFTypeRef?
+              AXUIElementCopyAttributeValue(target, "AXPosition" as CFString, &rawPosition)
+              AXUIElementCopyAttributeValue(target, "AXSize" as CFString, &rawSize)
+              guard let rawPosition = rawPosition, let rawSize = rawSize,
+                    CFGetTypeID(rawPosition) == AXValueGetTypeID(),
+                    CFGetTypeID(rawSize) == AXValueGetTypeID() else { exit(38) }
+              var position = CGPoint.zero
+              var size = CGSize.zero
+              guard AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position),
+                    AXValueGetValue(rawSize as! AXValue, .cgSize, &size),
+                    size.width > 0, size.height > 0 else { exit(39) }
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+              guard windows.contains(where: {
+                  guard ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid),
+                        ($0[kCGWindowLayer as String] as? Int) == 0,
+                        let bounds = $0[kCGWindowBounds as String] as? [String: Double],
+                        let x = bounds["X"], let y = bounds["Y"],
+                        let width = bounds["Width"], let height = bounds["Height"] else { return false }
+                  return width >= 900 && position.x >= x && position.y >= y
+                      && position.x + size.width <= x + width && position.y + size.height <= y + height
+              }) else { exit(40) }
+              let point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+              print("Observed active Pause control; clicking native center \(point.x),\(point.y)")
+              for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                  CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!.post(tap: .cghidEventTap)
+                  Thread.sleep(forTimeInterval: 0.08)
+              }
+              Thread.sleep(forTimeInterval: 1)
           } else if action == "play-toggle" {
               key(49)
               Thread.sleep(forTimeInterval: 1)
@@ -802,7 +857,7 @@ jobs:
                                           ui(process, 'snapshot', pathlib.Path(f'evidence/playback-meters-{mode}.png').resolve())
                                           ui(process, 'import-cancel' if mode == 'cancel' else 'import-held', accepted_sample)
                                           assert process.poll() is None, 'Native dialog terminated editor during playback'
-                                          ui(process, 'play-toggle')
+                                          ui(process, 'play-pause-button')
                                           from collections import deque
                                           important = deque(maxlen=2000)
                                           unavailable = deque(maxlen=20)
