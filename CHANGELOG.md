@@ -7,7 +7,7 @@
 - Audio meter labels display their actual negative dB values.
 - Copy/paste preserves a selected group's timing, track layout and full clip properties across timelines; invalid destinations refuse the whole edit.
 - The duplicate shortcut accepts multiple selected clips.
-- Titles and captions render supported PNG/BGRA colour font glyphs, with bounded decoding, bitmap fallback and word-highlight/background preservation. COLR/SVG colour fonts and identical Slint text-widget rendering are outside this change.
+- Titles and captions render supported PNG/BGRA strikes and COLR v0 solid colour layers, with bounded decoding/layers, palette alpha and title foreground, bitmap-first fallback and word-highlight/background preservation. COLR v1/SVG fonts, palette selection and identical Slint text-widget rendering are outside this change.
 - The audio meter adds a dB ruler, stereo labels and a held-peak reading, retaining the compact dock and clickable clip indicator.
 - Still-image reads preserve fitted dimensions, and unusable container frame rates fall back before reaching frame arithmetic.
 - Native media/LUT import, frame/audio/subtitle save and folder dialogs run without borrowing editor state across their nested event loop; replies from a previous project are discarded.

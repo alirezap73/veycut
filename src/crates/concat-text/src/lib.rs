@@ -220,17 +220,20 @@ struct Cache {
     covers: HashMap<char, Coverage>,
 }
 
-/// Borrow bitmap colours before a monochrome substitute, irrespective of
-/// the title's weight. Ordinary outline fallback keeps its original order.
+/// Borrow bitmap colours first, then supported solid layers, before a
+/// monochrome substitute. Outline fallback keeps its original order.
 #[derive(Default)]
 struct Coverage {
     bitmap: Vec<fontdb::ID>,
+    layered: Vec<fontdb::ID>,
     outline: Vec<fontdb::ID>,
 }
 
 impl Coverage {
     fn has(&self, id: fontdb::ID) -> bool {
-        self.bitmap.contains(&id) || (self.bitmap.is_empty() && self.outline.contains(&id))
+        self.bitmap.contains(&id)
+            || (self.bitmap.is_empty() && self.layered.contains(&id))
+            || (self.bitmap.is_empty() && self.layered.is_empty() && self.outline.contains(&id))
     }
 }
 
@@ -483,6 +486,8 @@ impl Fonts {
                     if let Some(covers) = cache.covers.get_mut(&ch) {
                         if bitmap_for(&face, ch).is_some() {
                             covers.bitmap.push(info.id);
+                        } else if solid_for(&face, ch).is_some() {
+                            covers.layered.push(info.id);
                         } else if draws(&face, ch) {
                             covers.outline.push(info.id);
                         }
@@ -543,7 +548,9 @@ impl Fonts {
                 })
                 .map(|info| info.id)
         };
-        closest(&covers.bitmap).or_else(|| closest(&covers.outline))
+        closest(&covers.bitmap)
+            .or_else(|| closest(&covers.layered))
+            .or_else(|| closest(&covers.outline))
     }
 
     /// A face's bytes, opened once and kept.
@@ -585,22 +592,41 @@ struct Casting {
 }
 
 /// Whether a face can draw a character as an outline or a supported,
-/// bounded bitmap. Unsupported colour formats still use outline fallback.
+/// bounded bitmap/solid layers. Other colour formats use outline fallback.
 fn draws(face: &ttf_parser::Face<'_>, ch: char) -> bool {
-    struct Nowhere;
-    impl ttf_parser::OutlineBuilder for Nowhere {
-        fn move_to(&mut self, _: f32, _: f32) {}
-        fn line_to(&mut self, _: f32, _: f32) {}
-        fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {}
-        fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {}
-        fn close(&mut self) {}
-    }
     let Some(glyph) = face.glyph_index(ch) else {
         return false;
     };
     ch.is_whitespace()
-        || face.outline_glyph(glyph, &mut Nowhere).is_some()
+        || has_outline(face, glyph)
         || bitmap_for(face, ch).is_some()
+        || solid_for(face, ch).is_some()
+}
+
+/// Probe geometry without allocating a glyph path. A mapping alone (or
+/// an empty/degenerate outline) must not make a broken colour font eligible.
+fn has_outline(face: &ttf_parser::Face<'_>, glyph: ttf_parser::GlyphId) -> bool {
+    #[derive(Default)]
+    struct Probe {
+        segment: bool,
+    }
+    impl ttf_parser::OutlineBuilder for Probe {
+        fn move_to(&mut self, _: f32, _: f32) {}
+        fn line_to(&mut self, _: f32, _: f32) {
+            self.segment = true;
+        }
+        fn quad_to(&mut self, _: f32, _: f32, _: f32, _: f32) {
+            self.segment = true;
+        }
+        fn curve_to(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) {
+            self.segment = true;
+        }
+        fn close(&mut self) {}
+    }
+    let mut probe = Probe::default();
+    face.outline_glyph(glyph, &mut probe).is_some_and(|bounds| {
+        probe.segment && bounds.x_max > bounds.x_min && bounds.y_max > bounds.y_min
+    })
 }
 
 /// Decode one supported strike only after checking dimensions and storage.
@@ -695,6 +721,174 @@ impl BitmapMark {
     }
 }
 
+/// Only COLR version 0 is followed: an ordered list of solid outline
+/// layers, using palette zero (or the title fill for palette 0xffff).
+/// Validate the selected record before asking the parser to visit layers.
+const MAX_COLOUR_LAYERS: usize = 128;
+
+fn solid_layers(
+    face: &ttf_parser::Face<'_>,
+    glyph: ttf_parser::GlyphId,
+    foreground: ttf_parser::RgbaColor,
+) -> Option<Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>> {
+    let table = face
+        .raw_face()
+        .table(ttf_parser::Tag::from_bytes(b"COLR"))?;
+    let read16 = |at| Some(u16::from_be_bytes(table.get(at..at + 2)?.try_into().ok()?));
+    let read32 = |at| Some(u32::from_be_bytes(table.get(at..at + 4)?.try_into().ok()?));
+    if read16(0)? != 0 {
+        return None;
+    }
+    let count = usize::from(read16(2)?);
+    let offset = usize::try_from(read32(4)?).ok()?;
+    let records = table.get(offset..offset.checked_add(count.checked_mul(6)?)?)?;
+    let record = records
+        .chunks_exact(6)
+        .find(|record| u16::from_be_bytes([record[0], record[1]]) == glyph.0)?;
+    let first = usize::from(u16::from_be_bytes([record[2], record[3]]));
+    let layers = usize::from(u16::from_be_bytes([record[4], record[5]]));
+    if layers == 0
+        || layers > MAX_COLOUR_LAYERS
+        || first.checked_add(layers)? > usize::from(read16(12)?)
+    {
+        return None;
+    }
+    let mut painter = SolidCollector {
+        layers: Vec::with_capacity(layers),
+        pending: None,
+        invalid: false,
+    };
+    face.paint_color_glyph(glyph, 0, foreground, &mut painter)?;
+    (!painter.invalid
+        && painter.pending.is_none()
+        && painter.layers.len() == layers
+        && painter
+            .layers
+            .iter()
+            .all(|(glyph, _)| has_outline(face, *glyph)))
+    .then_some(painter.layers)
+}
+
+fn solid_for(
+    face: &ttf_parser::Face<'_>,
+    ch: char,
+) -> Option<Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>> {
+    solid_layers(
+        face,
+        face.glyph_index(ch)?,
+        ttf_parser::RgbaColor::new(0, 0, 0, 255),
+    )
+}
+
+/// Defensively reject operations beyond an ordered solid layer list.
+/// Unsupported COLR v1 operations are never silently approximated.
+struct SolidCollector {
+    layers: Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>,
+    pending: Option<ttf_parser::GlyphId>,
+    invalid: bool,
+}
+
+impl<'a> ttf_parser::colr::Painter<'a> for SolidCollector {
+    fn outline_glyph(&mut self, glyph: ttf_parser::GlyphId) {
+        if self.pending.replace(glyph).is_some() {
+            self.invalid = true;
+        }
+    }
+    fn paint(&mut self, paint: ttf_parser::colr::Paint<'a>) {
+        match (paint, self.pending.take()) {
+            (ttf_parser::colr::Paint::Solid(colour), Some(glyph))
+                if self.layers.len() < MAX_COLOUR_LAYERS =>
+            {
+                self.layers.push((glyph, colour))
+            }
+            _ => self.invalid = true,
+        }
+    }
+    fn push_clip(&mut self) {
+        self.invalid = true;
+    }
+    fn push_clip_box(&mut self, _: ttf_parser::colr::ClipBox) {
+        self.invalid = true;
+    }
+    fn pop_clip(&mut self) {
+        self.invalid = true;
+    }
+    fn push_layer(&mut self, _: ttf_parser::colr::CompositeMode) {
+        self.invalid = true;
+    }
+    fn pop_layer(&mut self) {
+        self.invalid = true;
+    }
+    fn push_transform(&mut self, _: ttf_parser::Transform) {
+        self.invalid = true;
+    }
+    fn pop_transform(&mut self) {
+        self.invalid = true;
+    }
+}
+
+/// Colours are kept separate from the title fill/outline/shadow.
+enum ColourMark {
+    Bitmap(BitmapMark),
+    Layers(Vec<(Path, Color)>),
+}
+
+impl ColourMark {
+    fn draw(&self, canvas: &mut Pixmap, dx: f32, dy: f32) {
+        match self {
+            Self::Bitmap(bitmap) => bitmap.draw(canvas, dx, dy),
+            Self::Layers(layers) => {
+                let mut paint = Paint {
+                    anti_alias: true,
+                    ..Paint::default()
+                };
+                for (path, colour) in layers {
+                    paint.set_color(*colour);
+                    canvas.fill_path(
+                        path,
+                        &paint,
+                        FillRule::Winding,
+                        Transform::from_translate(dx, dy),
+                        None,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn place_solid_layers(
+    face: &ttf_parser::Face<'_>,
+    glyph: ttf_parser::GlyphId,
+    foreground: ttf_parser::RgbaColor,
+    scale: f32,
+    x: f32,
+    y: f32,
+) -> Option<ColourMark> {
+    let layers = solid_layers(face, glyph, foreground)?;
+    let mut placed = Vec::with_capacity(layers.len());
+    for (glyph, colour) in layers {
+        let mut builder = PathBuilder::new();
+        face.outline_glyph(
+            glyph,
+            &mut Outliner {
+                builder: &mut builder,
+                scale,
+                x,
+                y,
+            },
+        )?;
+        // A valid empty outline (e.g. a space) paints nothing.
+        if let Some(path) = builder.finish() {
+            placed.push((
+                path,
+                Color::from_rgba8(colour.red, colour.green, colour.blue, colour.alpha),
+            ));
+        }
+    }
+    (!placed.is_empty()).then_some(ColourMark::Layers(placed))
+}
+
 /// A character that belongs with the one before it and is set in its face:
 /// a combining mark, a joiner or variation selector, an emoji's skin tone
 /// or tag.
@@ -709,7 +903,7 @@ fn joins(ch: char) -> bool {
 /// pen space, left to right.
 struct Line {
     path: Option<Path>,
-    marks: Vec<BitmapMark>,
+    marks: Vec<ColourMark>,
     width: f32,
     words: Vec<(f32, f32)>,
 }
@@ -772,6 +966,7 @@ struct Setter<'a> {
     faces: &'a [rustybuzz::Face<'a>],
     em: f32,
     tracking: f32,
+    foreground: ttf_parser::RgbaColor,
 }
 
 /// One line of the content, ready to be set: its text, its directions,
@@ -898,6 +1093,10 @@ impl Setter<'_> {
                             })
                         });
                         if let Some(mark) = mark {
+                            marks.push(ColourMark::Bitmap(mark));
+                        } else if let Some(mark) =
+                            place_solid_layers(face, glyph, self.foreground, scale, x, y)
+                        {
                             marks.push(mark);
                         } else {
                             face.outline_glyph(
@@ -1149,6 +1348,15 @@ fn paint(
         faces: &faces,
         em,
         tracking,
+        foreground: {
+            let fill = colour(&style.color).unwrap_or(Color::WHITE);
+            ttf_parser::RgbaColor::new(
+                (fill.red() * 255.0).round() as u8,
+                (fill.green() * 255.0).round() as u8,
+                (fill.blue() * 255.0).round() as u8,
+                (fill.alpha() * 255.0).round() as u8,
+            )
+        },
     };
     let lines: Vec<Line> = style
         .content
@@ -1708,6 +1916,11 @@ mod tests {
         sbix.extend_from_slice(&0i16.to_be_bytes());
         sbix.extend_from_slice(b"png ");
         sbix.extend_from_slice(&png);
+        test_face_with_tables(vec![(*b"sbix", sbix)])
+    }
+
+    fn test_face_with_tables(additions: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
+        let base = BUNDLED[0];
         let old_count = u16::from_be_bytes(base[4..6].try_into().unwrap());
         let mut tables: Vec<([u8; 4], Vec<u8>)> = (0..old_count)
             .map(|index| {
@@ -1722,7 +1935,8 @@ mod tests {
                 )
             })
             .collect();
-        tables.push((*b"sbix", sbix));
+        tables.retain(|(tag, _)| !additions.iter().any(|(replacement, _)| replacement == tag));
+        tables.extend(additions);
         tables.sort_by_key(|(tag, _)| *tag);
         let mut result = vec![0; 12 + tables.len() * 16];
         result[..12].copy_from_slice(&base[..12]);
@@ -1739,6 +1953,288 @@ mod tests {
             }
         }
         result
+    }
+
+    /// One glyph A made from ordered, overlapping A layers. Palette zero
+    /// has opaque red and half-transparent blue; 0xffff uses the title fill.
+    fn colr_test_face(entries: &[u16], version: u16) -> Vec<u8> {
+        colr_test_face_with_layer(entries, version, None)
+    }
+
+    fn colr_test_face_with_layer(entries: &[u16], version: u16, layer: Option<u16>) -> Vec<u8> {
+        let face = ttf_parser::Face::parse(BUNDLED[0], 0).unwrap();
+        let glyph = face.glyph_index('A').unwrap().0;
+        let header = if version == 0 { 14u32 } else { 34u32 };
+        let mut colr = Vec::new();
+        colr.extend_from_slice(&version.to_be_bytes());
+        colr.extend_from_slice(&1u16.to_be_bytes());
+        colr.extend_from_slice(&header.to_be_bytes());
+        colr.extend_from_slice(&(header + 6).to_be_bytes());
+        colr.extend_from_slice(&(entries.len() as u16).to_be_bytes());
+        if version == 1 {
+            colr.extend_from_slice(&[0; 20]);
+        }
+        colr.extend_from_slice(&glyph.to_be_bytes());
+        colr.extend_from_slice(&0u16.to_be_bytes());
+        colr.extend_from_slice(&(entries.len() as u16).to_be_bytes());
+        for palette in entries {
+            colr.extend_from_slice(&layer.unwrap_or(glyph).to_be_bytes());
+            colr.extend_from_slice(&palette.to_be_bytes());
+        }
+        let mut cpal = Vec::new();
+        cpal.extend_from_slice(&0u16.to_be_bytes());
+        cpal.extend_from_slice(&2u16.to_be_bytes()); // entries per palette
+        cpal.extend_from_slice(&1u16.to_be_bytes()); // palettes
+        cpal.extend_from_slice(&2u16.to_be_bytes()); // colour records
+        cpal.extend_from_slice(&14u32.to_be_bytes());
+        cpal.extend_from_slice(&0u16.to_be_bytes());
+        cpal.extend_from_slice(&[0, 0, 255, 255]); // red BGRA
+        cpal.extend_from_slice(&[255, 0, 0, 128]); // half-transparent blue
+        test_face_with_tables(vec![(*b"COLR", colr), (*b"CPAL", cpal)])
+    }
+
+    fn fonts_from_test_face(bytes: Vec<u8>) -> Fonts {
+        let mut db = fontdb::Database::new();
+        db.load_font_data(bytes);
+        Fonts {
+            db,
+            cache: Mutex::default(),
+        }
+    }
+
+    #[test]
+    fn colr_layers_preserve_palette_order_alpha_and_foreground() {
+        let bytes = colr_test_face(&[0, 1], 0);
+        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+        let glyph = face.glyph_index('A').unwrap();
+        let foreground = ttf_parser::RgbaColor::new(0, 255, 0, 128);
+        let layers = solid_layers(&face, glyph, foreground).unwrap();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].1, ttf_parser::RgbaColor::new(255, 0, 0, 255));
+        assert_eq!(layers[1].1, ttf_parser::RgbaColor::new(0, 0, 255, 128));
+        let mut title = style("A");
+        title.font_family = BUNDLED_FAMILY.into();
+        title.font_weight = 400.0;
+        title.font_size = 0.2;
+        title.color = "#00ff0080".into();
+        title.shadow = false;
+        title.stroke_width = 0.0;
+        let fonts = fonts_from_test_face(bytes);
+        let forward = render(&fonts, &title, 640, 360).unwrap();
+        let forward = Pixmap::decode_png(&forward.png).unwrap();
+        let purple = forward
+            .pixels()
+            .iter()
+            .filter(|p| {
+                p.alpha() == 255
+                    && p.red() > 120
+                    && p.red() < 135
+                    && p.blue() > 120
+                    && p.blue() < 135
+                    && p.green() == 0
+            })
+            .count();
+        assert!(
+            purple > 50,
+            "red underneath half-transparent blue gives purple"
+        );
+        let reverse = fonts_from_test_face(colr_test_face(&[1, 0], 0));
+        let reverse = render(&reverse, &title, 640, 360).unwrap();
+        let reverse = Pixmap::decode_png(&reverse.png).unwrap();
+        assert!(
+            reverse
+                .pixels()
+                .iter()
+                .filter(|p| { p.red() == 255 && p.blue() == 0 && p.green() == 0 })
+                .count()
+                > 50,
+            "the last opaque red layer replaces blue"
+        );
+
+        let bytes = colr_test_face(&[0xffff], 0);
+        let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+        assert_eq!(
+            solid_layers(&face, glyph, foreground).unwrap()[0].1,
+            foreground
+        );
+        let foreground_fonts = fonts_from_test_face(bytes);
+        let out = render(&foreground_fonts, &title, 640, 360).unwrap();
+        let out = Pixmap::decode_png(&out.png).unwrap();
+        assert!(
+            out.pixels()
+                .iter()
+                .filter(|p| {
+                    p.green() > 120
+                        && p.green() < 135
+                        && p.alpha() > 120
+                        && p.alpha() < 135
+                        && p.red() == 0
+                        && p.blue() == 0
+                })
+                .count()
+                > 50,
+            "foreground palette entries keep title fill and alpha"
+        );
+    }
+
+    #[test]
+    fn colr_only_lines_preserve_placement_background_and_highlights() {
+        let fonts = fonts_from_test_face(colr_test_face(&[0, 1], 0));
+        let mut title = style(
+            "A A
+A",
+        );
+        title.font_family = BUNDLED_FAMILY.into();
+        title.font_weight = 400.0;
+        title.font_size = 0.12;
+        title.color = "#00ff00".into();
+        title.background = "#000000".into();
+        title.shadow = false;
+        title.stroke_width = 0.0;
+        for align in [Align::Left, Align::Center, Align::Right] {
+            title.align = align;
+            let out = render(&fonts, &title, 640, 360).unwrap();
+            let pixmap = Pixmap::decode_png(&out.png).unwrap();
+            assert_eq!(out.words.len(), 3);
+            assert!(
+                out.words[2].y > out.words[0].y,
+                "second line has a separate baseline"
+            );
+            let mut coloured = 0;
+            let mut plate = 0;
+            for (index, pixel) in pixmap.pixels().iter().enumerate() {
+                if pixel.red() > 100 && pixel.blue() > 100 && pixel.green() < 10 {
+                    coloured += 1;
+                    let x = (index % 640) as i32;
+                    let y = (index / 640) as i32;
+                    assert!(
+                        out.words.iter().any(|word| {
+                            x >= word.x
+                                && x < word.x + word.width as i32
+                                && y >= word.y
+                                && y < word.y + word.height as i32
+                        }),
+                        "layer at ({x}, {y}) is inside a reveal/highlight box"
+                    );
+                }
+                if pixel.alpha() == 255
+                    && pixel.red() == 0
+                    && pixel.green() == 0
+                    && pixel.blue() == 0
+                {
+                    plate += 1;
+                }
+            }
+            assert!(coloured > 100 && plate > 100);
+            assert!(out.block_width > 0 && out.block_height > 0);
+        }
+    }
+
+    #[test]
+    fn unsupported_or_excessive_colr_layers_fall_back_to_existing_outlines() {
+        let foreground = ttf_parser::RgbaColor::new(255, 255, 255, 255);
+        let boundary = colr_test_face(&vec![0; MAX_COLOUR_LAYERS], 0);
+        let face = ttf_parser::Face::parse(&boundary, 0).unwrap();
+        assert_eq!(
+            solid_layers(&face, face.glyph_index('A').unwrap(), foreground)
+                .unwrap()
+                .len(),
+            MAX_COLOUR_LAYERS,
+            "the inclusive layer cap is supported",
+        );
+        for bytes in [
+            colr_test_face(&[0, 1], 1),
+            colr_test_face(&vec![0; MAX_COLOUR_LAYERS + 1], 0),
+            colr_test_face(&[9], 0), // palette index does not exist
+        ] {
+            let face = ttf_parser::Face::parse(&bytes, 0).unwrap();
+            let glyph = face.glyph_index('A').unwrap();
+            assert!(solid_layers(&face, glyph, foreground).is_none());
+            assert!(draws(&face, 'A'), "the original outline is still usable");
+            let fonts = fonts_from_test_face(bytes);
+            let mut title = style("A");
+            title.font_family = BUNDLED_FAMILY.into();
+            title.font_weight = 400.0;
+            title.shadow = false;
+            title.stroke_width = 0.0;
+            let out = render(&fonts, &title, 640, 360).unwrap();
+            let pixmap = Pixmap::decode_png(&out.png).unwrap();
+            assert!(
+                pixmap
+                    .pixels()
+                    .iter()
+                    .any(|p| { p.alpha() > 0 && p.red() == p.green() && p.green() == p.blue() }),
+                "fallback paints the ordinary white outline"
+            );
+        }
+        let mut collector = SolidCollector {
+            layers: vec![],
+            pending: None,
+            invalid: false,
+        };
+        ttf_parser::colr::Painter::push_clip(&mut collector);
+        assert!(collector.invalid);
+    }
+
+    #[test]
+    fn unusable_colr_layer_glyphs_do_not_steal_outline_fallback() {
+        let space = ttf_parser::Face::parse(BUNDLED[0], 0)
+            .unwrap()
+            .glyph_index(' ')
+            .unwrap()
+            .0;
+        for layer in [u16::MAX, space] {
+            let broken = colr_test_face_with_layer(&[0], 0, Some(layer));
+            let face = ttf_parser::Face::parse(&broken, 0).unwrap();
+            assert!(
+                solid_for(&face, 'A').is_none(),
+                "missing/empty layer has no colour coverage"
+            );
+            assert!(
+                has_outline(&face, face.glyph_index('A').unwrap()),
+                "the base glyph's ordinary outline can still be borrowed"
+            );
+            let mut db = fontdb::Database::new();
+            db.load_font_data(broken);
+            db.load_font_data(BUNDLED[3].to_vec());
+            let fonts = Fonts {
+                db,
+                cache: Mutex::default(),
+            };
+            let regular = fonts
+                .db
+                .faces()
+                .find(|face| face.weight.0 == 400)
+                .unwrap()
+                .id;
+            let bold = fonts
+                .db
+                .faces()
+                .find(|face| face.weight.0 == 700)
+                .unwrap()
+                .id;
+            let mut cache = Cache::default();
+            fonts.learn(&mut cache, &['A']);
+            let coverage = cache.covers.get(&'A').unwrap();
+            assert!(
+                coverage.layered.is_empty(),
+                "learn must not register an unusable colour face"
+            );
+            let want = Want {
+                weight: 700,
+                italic: false,
+            };
+            assert_eq!(fonts.nearest(Some(coverage), want), Some(bold));
+
+            // Actual assignment with an own face lacking A must borrow
+            // the usable matching outline, rather than the broken layer.
+            let empty_cmap = test_face_with_tables(vec![(*b"cmap", vec![0, 0, 0, 0])]);
+            let own = ttf_parser::Face::parse(&empty_cmap, 0).unwrap();
+            assert!(own.glyph_index('A').is_none());
+            let mut ids = vec![regular];
+            assert_eq!(fonts.assign("A", &own, &cache, want, &mut ids), vec![1]);
+            assert_eq!(ids[1], bold);
+        }
     }
 
     #[test]
@@ -1821,6 +2317,7 @@ mod tests {
             .id;
         let coverage = Coverage {
             bitmap: vec![regular],
+            layered: vec![],
             outline: vec![bold],
         };
         let want = Want {
@@ -1828,8 +2325,23 @@ mod tests {
             italic: false,
         };
         assert_eq!(fonts.nearest(Some(&coverage), want), Some(regular));
+        let layered = Coverage {
+            bitmap: vec![],
+            layered: vec![regular],
+            outline: vec![bold],
+        };
+        assert_eq!(fonts.nearest(Some(&layered), want), Some(regular));
+        assert!(layered.has(regular) && !layered.has(bold));
+        let bitmap_first = Coverage {
+            bitmap: vec![bold],
+            layered: vec![regular],
+            outline: vec![],
+        };
+        assert_eq!(fonts.nearest(Some(&bitmap_first), want), Some(bold));
+        assert!(bitmap_first.has(bold) && !bitmap_first.has(regular));
         let plain = Coverage {
             bitmap: vec![],
+            layered: vec![],
             outline: vec![bold],
         };
         assert_eq!(fonts.nearest(Some(&plain), want), Some(bold));
