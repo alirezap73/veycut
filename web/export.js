@@ -13,11 +13,12 @@ window.VeyCutExporter = (() => {
   function check(signal) {if(signal.aborted)throw signal.reason instanceof Error?signal.reason:cancelled();if(document.hidden)throw new Error('Keep this tab visible during real-time export.');}
   function event(target,name,signal,trigger,timeout=15000) {
     return new Promise((resolve,reject) => {
-      const timer=setTimeout(()=>finish(new Error('Media preparation timed out.')),timeout);
+      const diagnostics=()=>target instanceof HTMLMediaElement?`readyState=${target.readyState}, networkState=${target.networkState}, currentTime=${target.currentTime.toFixed(3)}, paused=${target.paused}, seeking=${target.seeking}, mediaError=${target.error?target.error.code+': '+target.error.message:'none'}, hidden=${document.hidden}`:`state=${target.state||'unknown'}, hidden=${document.hidden}`;
+      const timer=setTimeout(()=>finish(new Error(`Media preparation timed out waiting for ${name} (${diagnostics()}).`)),timeout);
       function finish(error){clearTimeout(timer);target.removeEventListener(name,ready);target.removeEventListener('error',fail);signal.removeEventListener('abort',abort);error?reject(error):resolve();}
-      const ready=()=>finish(), fail=()=>finish(new Error('Media could not be decoded.')), abort=()=>finish(signal.reason instanceof Error?signal.reason:cancelled());
+      const ready=()=>finish(), fail=()=>finish(new Error(`Media failed waiting for ${name} (${diagnostics()}).`)), abort=()=>finish(signal.reason instanceof Error?signal.reason:cancelled());
       target.addEventListener(name,ready,{once:true});target.addEventListener('error',fail,{once:true});signal.addEventListener('abort',abort,{once:true});
-      try{check(signal);trigger();}catch(error){finish(error);}
+      try{check(signal);const result=trigger();if(result&&typeof result.catch==='function')result.catch(error=>finish(new Error(`Media ${name}: ${error.message} (${diagnostics()}).`)));}catch(error){finish(error);}
     });
   }
   function validate(spec) {
@@ -57,7 +58,24 @@ window.VeyCutExporter = (() => {
     const checkRun=()=>{check(signal);if(failure)throw failure;};
     function draw(time,showVideo){ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);if(showVideo&&video.readyState>=2){const scale=Math.min(canvas.width/video.videoWidth,canvas.height/video.videoHeight),w=video.videoWidth*scale,h=video.videoHeight*scale;ctx.drawImage(video,(canvas.width-w)/2,(canvas.height-h)/2,w,h);}captions(ctx,spec.cues,time,canvas.width,canvas.height);}
     async function recording(active){checkRun();if(active&&recorder.state==='paused')await event(recorder,'resume',signal,()=>recorder.resume(),3000);else if(!active&&recorder.state==='recording')await event(recorder,'pause',signal,()=>recorder.pause(),3000);}
-    async function prepare(clip){onState('preparing');video.pause();if(currentURL!==clip.url){currentURL=clip.url;await event(video,'loadeddata',signal,()=>{video.src=clip.url;video.load();});}if(clip.out>video.duration+.01)throw new Error('The selected source does not cover the saved clip range.');if(Math.abs(video.currentTime-clip.in)>.001)await event(video,'seeked',signal,()=>{video.currentTime=clip.in;});checkRun();}
+    async function prepare(clip){
+      onState('preparing');video.pause();
+      if(currentURL!==clip.url){
+        currentURL=clip.url;
+        await event(video,'loadedmetadata',signal,()=>{video.src=clip.url;video.load();});
+        // Metadata is not a decoded frame. Prime actual playback while the
+        // recorder is paused, then rewind to the exact requested source in.
+        // Audio remains routed only into the paused recording destination.
+        await event(video,'playing',signal,()=>video.play());
+        video.pause();
+      }
+      if(clip.out>video.duration+.01)throw new Error('The selected source does not cover the saved clip range.');
+      if(Math.abs(video.currentTime-clip.in)>.001)await event(video,'seeked',signal,()=>{video.currentTime=clip.in;});
+      if(video.readyState<HTMLMediaElement.HAVE_CURRENT_DATA||video.videoWidth<=0||video.videoHeight<=0){
+        throw new Error(`No decoded source frame after preparation (readyState=${video.readyState}, networkState=${video.networkState}, currentTime=${video.currentTime.toFixed(3)}, mediaError=${video.error?.code||'none'}).`);
+      }
+      checkRun();
+    }
     function segment(begin,seconds,clip){return new Promise((resolve,reject)=>{let begun=performance.now(),lastMediaTime=video.currentTime,lastAdvance=begun;
       function stop(error){signal.removeEventListener('abort',abortSegment);cancelAnimationFrame(animation);error?reject(error):resolve();}
       const abortSegment=()=>stop(signal.reason instanceof Error?signal.reason:cancelled());signal.addEventListener('abort',abortSegment,{once:true});
