@@ -193,6 +193,34 @@ pub struct DockLayout {
     pub extents: Vec<f32>,
 }
 
+/// Width needed by a subtree containing meters, including its column
+/// gutters and a reachable sibling. Other subtrees retain their saved ratios.
+fn meter_min_width(node: &Dock) -> Option<f32> {
+    match node {
+        Dock::Leaf(PaneKind::Meters) => Some(METERS_MIN_W),
+        Dock::Leaf(_) => None,
+        Dock::Split {
+            columns,
+            first,
+            second,
+            ..
+        } => {
+            let first = meter_min_width(first);
+            let second = meter_min_width(second);
+            if first.is_none() && second.is_none() {
+                return None;
+            }
+            let first = first.unwrap_or(SEAT_MIN_GRAB);
+            let second = second.unwrap_or(SEAT_MIN_GRAB);
+            Some(if *columns {
+                first + SEAT_GAP + second
+            } else {
+                first.max(second)
+            })
+        }
+    }
+}
+
 pub fn lay_out(node: &Dock, (x, y, w, h): (f32, f32, f32, f32), out: &mut DockLayout) {
     match node {
         Dock::Leaf(kind) => out.seats.push(SeatBox {
@@ -217,8 +245,26 @@ pub fn lay_out(node: &Dock, (x, y, w, h): (f32, f32, f32, f32), out: &mut DockLa
             out.extents.push(0.0);
 
             let along = if *columns { w } else { h };
-            let usable = (along - SEAT_GAP).max(0.0);
-            let head = (usable * ratio).clamp(0.0, usable);
+            // A tiny window cannot hold a full gutter, either.
+            let gap = SEAT_GAP.min(along.max(0.0));
+            let usable = (along - gap).max(0.0);
+            let mut head = (usable * ratio).clamp(0.0, usable);
+            if *columns {
+                let first_min = meter_min_width(first);
+                let second_min = meter_min_width(second);
+                if first_min.is_some() || second_min.is_some() {
+                    let first_min = first_min.unwrap_or(SEAT_MIN_GRAB);
+                    let second_min = second_min.unwrap_or(SEAT_MIN_GRAB);
+                    let minimum = first_min + second_min;
+                    head = if usable >= minimum {
+                        head.clamp(first_min, usable - second_min)
+                    } else {
+                        // Neither minimum fits: shrink both sides together,
+                        // keeping all seats inside the available rectangle.
+                        usable * first_min / minimum
+                    };
+                }
+            }
             out.extents[index] = usable;
             out.dividers[index] = if *columns {
                 DockDivider {
@@ -226,7 +272,7 @@ pub fn lay_out(node: &Dock, (x, y, w, h): (f32, f32, f32, f32), out: &mut DockLa
                     columns: true,
                     x: x + head,
                     y,
-                    width: SEAT_GAP,
+                    width: gap,
                     height: h.max(0.0),
                 }
             } else {
@@ -236,16 +282,16 @@ pub fn lay_out(node: &Dock, (x, y, w, h): (f32, f32, f32, f32), out: &mut DockLa
                     x,
                     y: y + head,
                     width: w.max(0.0),
-                    height: SEAT_GAP,
+                    height: gap,
                 }
             };
 
             if *columns {
                 lay_out(first, (x, y, head, h), out);
-                lay_out(second, (x + head + SEAT_GAP, y, usable - head, h), out);
+                lay_out(second, (x + head + gap, y, usable - head, h), out);
             } else {
                 lay_out(first, (x, y, w, head), out);
-                lay_out(second, (x, y + head + SEAT_GAP, w, usable - head), out);
+                lay_out(second, (x, y + head + gap, w, usable - head), out);
             }
         }
     }
@@ -327,4 +373,114 @@ pub fn nearest_row(heights: &[f32], y: f32) -> i32 {
         top += height;
     }
     best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_inside_and_disjoint(layout: &DockLayout, width: f32, height: f32) {
+        let epsilon = 0.001;
+        let bounds: Vec<(f32, f32, f32, f32)> = layout
+            .seats
+            .iter()
+            .map(|seat| (seat.x, seat.y, seat.width, seat.height))
+            .chain(
+                layout
+                    .dividers
+                    .iter()
+                    .map(|gutter| (gutter.x, gutter.y, gutter.width, gutter.height)),
+            )
+            .collect();
+        for &(x, y, w, h) in &bounds {
+            assert!(w >= 0.0 && h >= 0.0);
+            assert!(x >= -epsilon && y >= -epsilon);
+            assert!(x + w <= width + epsilon && y + h <= height + epsilon);
+        }
+        for (index, &(x, y, w, h)) in bounds.iter().enumerate() {
+            for &(other_x, other_y, other_w, other_h) in &bounds[index + 1..] {
+                let overlap_x = (x + w).min(other_x + other_w) - x.max(other_x);
+                let overlap_y = (y + h).min(other_y + other_h) - y.max(other_y);
+                assert!(
+                    overlap_x <= epsilon || overlap_y <= epsilon,
+                    "overlapping dock rectangles"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_meter_stereo_fits_at_initial_and_resized_widths() {
+        // 1008px is the usable workspace in the observed 1024px window.
+        for width in [240.0, 640.0, 1008.0, 1584.0] {
+            let mut layout = DockLayout::default();
+            lay_out(&default_dock(), (0.0, 0.0, width, 665.0), &mut layout);
+            let meters = layout
+                .seats
+                .iter()
+                .find(|seat| matches!(seat.kind, PaneKind::Meters))
+                .unwrap();
+            assert!(
+                meters.width >= METERS_MIN_W - 0.001,
+                "meters clipped at workspace width {width}"
+            );
+            assert_inside_and_disjoint(&layout, width, 665.0);
+        }
+    }
+
+    #[test]
+    fn meter_minimum_survives_nested_columns_on_either_side() {
+        for meter_first in [false, true] {
+            let (first, second) = if meter_first {
+                (Dock::leaf(PaneKind::Meters), Dock::leaf(PaneKind::Timeline))
+            } else {
+                (Dock::leaf(PaneKind::Timeline), Dock::leaf(PaneKind::Meters))
+            };
+            let nested = Dock::Split {
+                columns: true,
+                ratio: 0.99,
+                first,
+                second,
+            };
+            let dock = Dock::Split {
+                columns: true,
+                ratio: 0.01,
+                first: Box::new(nested),
+                second: Dock::leaf(PaneKind::Preview),
+            };
+            let mut layout = DockLayout::default();
+            lay_out(&dock, (0.0, 0.0, 400.0, 200.0), &mut layout);
+            assert!(
+                layout
+                    .seats
+                    .iter()
+                    .all(|seat| seat.width >= SEAT_MIN_GRAB - 0.001)
+            );
+            assert_inside_and_disjoint(&layout, 400.0, 200.0);
+        }
+    }
+
+    #[test]
+    fn squeezed_workspace_has_no_negative_or_overlapping_rectangles() {
+        for width in [0.0, 1.0, 4.0, 8.0, 24.0, 72.0, 128.0] {
+            for height in [0.0, 1.0, 4.0, 8.0, 24.0, 140.0] {
+                let mut layout = DockLayout::default();
+                lay_out(&default_dock(), (0.0, 0.0, width, height), &mut layout);
+                assert_inside_and_disjoint(&layout, width, height);
+            }
+        }
+    }
+
+    #[test]
+    fn columns_without_meters_keep_their_saved_ratio() {
+        let dock = Dock::Split {
+            columns: true,
+            ratio: 0.2,
+            first: Dock::leaf(PaneKind::Media),
+            second: Dock::leaf(PaneKind::Preview),
+        };
+        let mut layout = DockLayout::default();
+        lay_out(&dock, (0.0, 0.0, 400.0, 200.0), &mut layout);
+        assert!((layout.seats[0].width - 392.0 * 0.2).abs() < 0.001);
+    }
 }
