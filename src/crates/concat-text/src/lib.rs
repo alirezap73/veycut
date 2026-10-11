@@ -1734,7 +1734,7 @@ mod tests {
             result[record + 8..record + 12].copy_from_slice(&offset.to_be_bytes());
             result[record + 12..record + 16].copy_from_slice(&(bytes.len() as u32).to_be_bytes());
             result.extend_from_slice(&bytes);
-            while result.len() % 4 != 0 {
+            while !result.len().is_multiple_of(4) {
                 result.push(0);
             }
         }

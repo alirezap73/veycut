@@ -903,10 +903,26 @@ fn insert_snapshots(
                 reason: "Clip positions must be nonnegative and lengths positive.".into(),
             });
         }
-        let copy = snapshot.tidy();
-        if !(copy.start + copy.duration).is_finite() {
+        if !(snapshot.start + snapshot.duration).is_finite() {
             return Err(CommandError::NotANumber);
         }
+        // Loaded documents may repair extreme times; a clipboard operation
+        // must refuse them instead of changing the copied group's layout.
+        if [
+            snapshot.start,
+            snapshot.duration,
+            snapshot.source_start,
+            snapshot.fade_in,
+            snapshot.fade_out,
+        ]
+        .iter()
+        .any(|time| *time > crate::model::ranges::MAX_TIME)
+        {
+            return Err(CommandError::CannotPaste {
+                reason: "Copied clip times exceed the supported range.".into(),
+            });
+        }
+        let copy = snapshot.tidy();
         if !project
             .active()
             .is_free(&copy.track_id, copy.start, copy.duration, &[])

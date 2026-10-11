@@ -611,7 +611,7 @@ mod tests {
         let empty = editor.apply(Command::PasteClips { clips: vec![] }).unwrap();
         assert!(!empty.applied);
         assert!(empty.created_id.is_none());
-        for case in 0..10 {
+        for case in 0..11 {
             let mut clips = snapshots.clone();
             match case {
                 0 => {
@@ -648,10 +648,11 @@ mod tests {
                 8 => {
                     clips[1].duration = 0.0;
                 }
-                _ => {
+                9 => {
                     clips[1].start = f64::MAX;
                     clips[1].duration = f64::MAX;
                 }
+                _ => clips[1].start = crate::model::ranges::MAX_TIME + 1.0,
             }
             let error = editor.apply(Command::PasteClips { clips }).unwrap_err();
             match case {
