@@ -88,6 +88,9 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity-check.log; do
+                if [ -f "$log" ]; then tail -c 18000 "$log"; fi
+              done
               timeout 20s playwright-cli snapshot --filename=output/playwright/failure-snapshot.yml > output/playwright/failure-snapshot.log 2>&1 || true
               timeout 20s playwright-cli console > output/playwright/failure-console.log 2>&1 || true
             fi

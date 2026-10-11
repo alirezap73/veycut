@@ -50,8 +50,8 @@ for item in [report['webm'], report['mp4']]:
     assert amplitude > .005, ('880 Hz imported audio missing', amplitude)
     pixels = run(['ffmpeg', '-v', 'error', '-ss', '1.5', '-i', str(path), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
     assert len(pixels) == 360 * 640 * 3
-    # Video clips have ended by this point. The separate transformed/cropped,
-    # animated still layer must remain visible over black, beneath native text.
+    # The separate transformed/cropped, animated still layer must remain
+    # visible above the lower video track and beneath native text.
     red = sum(pixels[(y*360+x)*3] >= 80 and pixels[(y*360+x)*3] > 2*max(pixels[(y*360+x)*3+1:(y*360+x)*3+3])+10
               for y in range(90,390) for x in range(30,345))
     assert red > 15000, ('Transformed still layer absent from recorded pixels', red)
