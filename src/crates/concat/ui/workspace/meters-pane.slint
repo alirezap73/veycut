@@ -101,7 +101,7 @@ export component MetersPane inherits Pane {
                         x: parent.width - self.width;
                         y: (1 - (db - root.floor-db) / (0 - root.floor-db)) * parent.height
                             - self.height / 2;
-                        text: "\{-db}";
+                        text: "\{db}";
                         color: Theme.fg-dim;
                         font-family: Theme.font-technical;
                         font-size: Theme.fs-xs;

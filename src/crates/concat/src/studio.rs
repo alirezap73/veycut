@@ -363,6 +363,35 @@ pub struct MoveOrigin {
     pub row: i32,
 }
 
+/// A drag carries only the selected clips. A detached-source link is for
+/// reattaching sound, not an implicit movement selection.
+fn drag_origins(timeline: &Timeline, selection: &[String], primary: &str) -> Vec<MoveOrigin> {
+    let moving = if selection.iter().any(|held| held == primary) {
+        selection.to_vec()
+    } else {
+        vec![primary.to_owned()]
+    };
+    moving
+        .iter()
+        .filter_map(|id| {
+            let clip = timeline.clip(id)?;
+            // Lane rows display the stored track stack in reverse order,
+            // matching Studio::row_of.
+            let row = timeline
+                .tracks
+                .iter()
+                .position(|track| track.id == clip.track_id)
+                .map(|index| timeline.tracks.len() as i32 - 1 - index as i32)
+                .unwrap_or(0);
+            Some(MoveOrigin {
+                clip: clip.id.clone(),
+                start: clip.start as f32,
+                row,
+            })
+        })
+        .collect()
+}
+
 /// A pointer gesture in flight, previewed on the echo.
 pub enum Gesture {
     None,
@@ -4153,42 +4182,7 @@ impl Studio {
             };
             return;
         }
-        let mut moving = if self.selection.iter().any(|held| held == id) {
-            self.selection.clone()
-        } else {
-            vec![id.to_owned()]
-        };
-        // A detached sound travels with its picture and the picture with
-        // its sound: the pair stays in step unless one of them is moved
-        // on its own lane by a lock (#105).
-        let partners: Vec<String> = moving
-            .iter()
-            .filter_map(|clip_id| self.clip(clip_id))
-            .flat_map(|clip| {
-                let mut found: Vec<String> = clip.detached_from.iter().cloned().collect();
-                found.extend(
-                    self.timeline()
-                        .clips
-                        .iter()
-                        .filter(|other| other.detached_from.as_deref() == Some(clip.id.as_str()))
-                        .map(|other| other.id.clone()),
-                );
-                found
-            })
-            .filter(|partner| !moving.contains(partner))
-            .collect();
-        moving.extend(partners);
-        let origins = moving
-            .iter()
-            .filter_map(|clip_id| {
-                let clip = self.clip(clip_id)?;
-                Some(MoveOrigin {
-                    clip: clip.id.clone(),
-                    start: clip.start as f32,
-                    row: self.row_of(&clip.track_id),
-                })
-            })
-            .collect();
+        let origins = drag_origins(self.timeline(), &self.selection, id);
         self.gesture = Gesture::Move {
             primary: id.to_owned(),
             origins,
@@ -10196,6 +10190,93 @@ mod tests {
         custom_rate, fps_of, grading_rows, home_folder, key_commands, packed, place_in, shown,
         wheel_partners, write_keyable,
     };
+
+    /// Dragging either half of detached media leaves the other half in
+    /// place; explicitly selecting both still moves them as one undo step.
+    #[test]
+    fn detached_media_moves_only_when_selected() {
+        use concat_project::commands::ClipMove;
+        use concat_project::doc::{DocumentSettings, to_document};
+        use concat_project::model::{Clip, ClipKind, MediaItem, MediaKind, Project};
+        use std::sync::Arc;
+
+        let mut project = Project::new();
+        project.media.push(MediaItem {
+            id: "m1".to_owned(),
+            path: "/synthetic-detached.mp4".to_owned(),
+            name: "Synthetic detached media".to_owned(),
+            kind: MediaKind::Video,
+            duration: Some(2.0),
+            has_audio: true,
+            ..MediaItem::default()
+        });
+        let mut picture = Clip::blank("picture", "T1", ClipKind::Video, "picture", 0.0, 2.0);
+        picture.media_id = "m1".to_owned();
+        picture.muted = Some(true);
+        let mut sound = Clip::blank("sound", "T2", ClipKind::Audio, "sound", 0.0, 2.0);
+        sound.media_id = picture.media_id.clone();
+        sound.detached_from = Some(picture.id.clone());
+        project.active_mut().clips = vec![Arc::new(picture), Arc::new(sound)];
+        let settings = DocumentSettings {
+            name: "Detached movement".to_owned(),
+            width: 320,
+            height: 180,
+            rate_num: 30,
+            rate_den: 1,
+        };
+        assert!(project.active().tracks.iter().any(|track| track.id == "T2"));
+        let before = to_document(&settings, &project);
+        for (primary, selection) in [
+            ("sound", vec!["sound".to_owned()]),
+            ("picture", vec!["picture".to_owned()]),
+            ("sound", vec!["picture".to_owned(), "sound".to_owned()]),
+        ] {
+            let mut editor = concat_project::Editor::from_document(&before).expect("fixture");
+            let moves = super::drag_origins(editor.project().active(), &selection, primary)
+                .iter()
+                .map(|origin| ClipMove {
+                    clip_id: origin.clip.clone(),
+                    track_id: editor.project().active().tracks
+                        [editor.project().active().tracks.len() - 1 - origin.row as usize]
+                        .id
+                        .clone(),
+                    start: f64::from(origin.start) + 3.0,
+                })
+                .collect();
+            editor.apply(Command::MoveClips { moves }).expect("moves");
+            for id in ["picture", "sound"] {
+                let clip = editor.project().active().clip(id).expect("clip retained");
+                assert_eq!(clip.track_id, if id == "picture" { "T1" } else { "T2" });
+                assert_eq!(
+                    clip.start,
+                    if selection.iter().any(|held| held == id) {
+                        3.0
+                    } else {
+                        0.0
+                    }
+                );
+            }
+            assert_eq!(
+                editor
+                    .project()
+                    .active()
+                    .clip("sound")
+                    .unwrap()
+                    .detached_from
+                    .as_deref(),
+                Some("picture")
+            );
+            assert_eq!(
+                editor.project().active().clip("picture").unwrap().muted,
+                Some(true)
+            );
+            let moved = to_document(&settings, editor.project());
+            assert!(editor.undo(), "undo gesture");
+            assert_eq!(to_document(&settings, editor.project()), before);
+            assert!(editor.redo(), "redo gesture");
+            assert_eq!(to_document(&settings, editor.project()), moved);
+        }
+    }
 
     /// A wheel is keyed as one knob: named by itself or by any of its own
     /// keys, it keys its puck and master; its master's key takes the puck's

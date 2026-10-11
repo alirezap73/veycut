@@ -2,7 +2,7 @@
 
 The target is a reliable beta for Apple silicon macOS with the main editing path: import media, arrange/trim/split clips, add text and sound, save/reopen, and export. Feature parity with other products and a completion percentage have not been established.
 
-The public preview stays at 0.2.0-preview.1. The existing 0.3.0 build is an unpublished development candidate, not a new public milestone. Keep its version fixed while this beta work continues. Raise the version only for a documented, tested milestone, rather than for each feature or commit.
+The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. Keep 0.3.1 fixed while it is validated; more commits do not require another version increase or create a public beta.
 
 ## Version numbering
 

@@ -1,5 +1,14 @@
 # VeyCut changelog
 
+## 0.3.1 — development patch (2026-10-11, unpublished)
+
+- Detached sound and picture move independently unless explicitly selected together; the reattachment link is retained.
+- The track-add menu exposes top and bottom placement as directly clickable rows.
+- Audio meter labels display their actual negative dB values.
+- A packaged-editor scenario now exercises clip movement, both edge trims, undo/redo and a 32-second repeated-media export on a Mac runner.
+
+Native validation and a matching installer inspection are required for these source changes. The previously verified 0.3.0 package does not contain them. This patch increment does not create a public beta release.
+
 ## 0.2.0 — source upgrade (2026-10-10)
 
 - Caption Create/Files/Edit workspace, WebVTT import/export and selected/all-text scope.
