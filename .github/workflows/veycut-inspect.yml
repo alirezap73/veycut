@@ -295,7 +295,9 @@ jobs:
               key(36)
               Thread.sleep(forTimeInterval: 2)
               guard let open = find(element, role: "AXButton", title: "Open"), AXUIElementPerformAction(open, "AXPress" as CFString) == .success else { exit(9) }
-              Thread.sleep(forTimeInterval: 8)
+              // The held-panel scenario polls persisted import below; pause
+              // promptly so slow AX reads cannot run the 32-second cut out.
+              Thread.sleep(forTimeInterval: action == "import-held" ? 1 : 8)
               print(String(data: try JSONSerialization.data(withJSONObject: snapshot(element), options: [.prettyPrinted]), encoding: .utf8)!)
               print("native_picker_observed")
           } else if action == "drag" {
@@ -624,7 +626,7 @@ jobs:
                                           playing = re.findall(r'playback: playing from ([0-9.]+)s', received)
                                           paused = re.findall(r'playback: paused at ([0-9.]+)s', received)
                                           assert len(playing) == 1 and float(playing[0]) < 0.01, 'Playback did not start at the timeline head'
-                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback timers did not advance through the held native panel'
+                                          assert len(paused) == 1 and 4 <= float(paused[0]) < 32, 'Playback did not survive and advance across the native panel test'
                                           assert not any(term in received for term in ('panicked at', 'BorrowMutError', 'already borrowed')), 'Native dialog borrowed Studio across playback timers'
                                           playback_positions[mode] = float(paused[0])
                                           for _ in range(6):
@@ -643,7 +645,7 @@ jobs:
                                               assert len(additions) == 1 and additions[0]['path'] == str(accepted_sample)
                                               assert [m for m in dialog_after['media'] if m['id'] in {old['id'] for old in dialog_before['media']}] == dialog_before['media'], 'Accepted import changed existing media'
                                               assert additions[0]['width'] == 720 and additions[0]['height'] == 1280 and additions[0]['hasAudio']
-                                      core['native_dialog_playback_verified'] = {'hold_seconds': 4, 'paused_positions_seconds': playback_positions, 'cancel_preserved_media_and_clips': True, 'accepted_new_media_without_timeline_changes': True}
+                                      core['native_dialog_playback_verified'] = {'hold_seconds': 4, 'paused_positions_seconds': playback_positions, 'playback_survived_and_advanced_across_native_panel': True, 'ui_timer_updates_during_panel_hold_independently_verified': False, 'evidence_caveat': 'Paused positions show playback advancement across the panel test; UI timer updates during the held panel were not independently observed.', 'cancel_preserved_media_and_clips': True, 'accepted_new_media_without_timeline_changes': True}
                                   elif action == 'track-baseline':
                                       track_baseline = json.loads(manifest.read_text())
                                       track_added_snapshot = None

@@ -17,12 +17,18 @@ borrows before opening media/LUT import and frame/audio/subtitle save panels;
 media/font picker answers are tied to their original project.
 
 [Native validation](https://github.com/alirezap73/veycut/actions/runs/38105343165)
-is pending for this exact source. The prior colour-layer revision compiled on
-macOS and WebAssembly, but Linux lints stopped on an obsolete unused import
-before native tests. That import is removed in this revision.
-[Development checks](https://github.com/alirezap73/veycut/actions/runs/38103967208)
-passed 231 invocations (218 Rust and 13 Python) for the prior revision; native
-colour-layer tests have not yet established a pass.
+passed for this exact runtime: **793 successful Rust test invocations**, Linux
+workspace/transport lints, the quick performance check, macOS all-target
+compilation and WebAssembly checks. The Mac job compiles targets; it does not
+execute the native test suite. All four COLR regressions passed.
+[Development checks](https://github.com/alirezap73/veycut/actions/runs/38105963558)
+passed **263 invocations** (249 Rust and 14 Python), including 31 title tests.
+Counts describe test executions, not a feature-completion percentage.
+
+The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38106368671)
+is being built from source `57337d63761060124cdf0acd8b80be8d92eaeb41`.
+Commits after runtime `32acd2f` change validation infrastructure only; candidate
+policy checks confirmed runtime identity. Packaged GUI results are pending.
 The committed extended GUI scenario now has 97 steps, including observed
 native import panels held for four seconds during playback, cancellation and
 acceptance; the scenario itself is not passing evidence until run against a

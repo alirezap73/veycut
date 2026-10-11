@@ -5,12 +5,12 @@ packaged GUI evidence and independent installation are distinct milestones.
 
 | Area | Development source | Verification needed for this revision |
 | --- | --- | --- |
-| Timeline groups | Grouped copy/paste preserves timing, track layout and properties; multi-clip duplicate and detached-audio movement | Native regressions and packaged movement/trim/clipboard undo/redo |
-| Titles and captions | English/Persian caption files, group timing/style and replacement; supported PNG/BGRA strikes and COLR v0 solid-layer colour glyph rendering | Existing Persian tests plus deterministic colour/alpha/fallback tests; packaged rendering |
-| Sound metering | dB ruler, stereo bars, held peak and clipping reset in the compact dock | UI compilation and screenshots; real playback/clip-reset checks |
-| Mixed media | Fitted still-image decoding and arithmetic-checked frame rates | Reader/probe regressions and portrait-photo GUI/export checks |
-| Native dialogs | Media/menu and LUT imports, frame/audio/subtitle saves, export, relink and project folder selection release the editor borrow before native dialogs process timers; stale project replies are discarded | macOS compilation and playing-video folder-picker checks |
-| Export reliability | Per-job scratch files, no-replace publication, cancellation guards, dimension bounds and explicit errors for unreadable sought frames | Native export tests and independently decoded packaged GUI output |
+| Timeline groups | Grouped copy/paste preserves timing, track layout and properties; multi-clip duplicate and detached-audio movement | Native regressions passed; packaged movement/trim/clipboard undo/redo pending |
+| Titles and captions | English/Persian caption files, group timing/style and replacement; supported PNG/BGRA strikes and COLR v0 solid-layer colour glyph rendering | 31 title tests passed, including colour/alpha/fallback; packaged rendering pending |
+| Sound metering | dB ruler, stereo bars, held peak and clipping reset in the compact dock | UI compilation passed; new screenshots and real playback/clip-reset checks pending |
+| Mixed media | Fitted still-image decoding and arithmetic-checked frame rates | Reader/probe regressions passed; portrait-photo GUI/export checks pending |
+| Native dialogs | Media/menu and LUT imports, frame/audio/subtitle saves, export, relink and project folder selection release the editor borrow before native dialogs process timers; stale project replies are discarded | macOS compilation passed; native picker during playback pending |
+| Export reliability | Per-job scratch files, no-replace publication, cancellation guards, dimension bounds and explicit errors for unreadable sought frames | Native export tests passed; independently decoded matching packaged output pending |
 | Distribution | Public Apple silicon preview remains separate from development candidates | New exact-source package, signature/checksum inspection, independent Mac installation and longer user footage |
 
 Supported colour glyphs depend on an available font carrying PNG or
