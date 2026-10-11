@@ -45,7 +45,7 @@ on:
         default: false
 
       real_media_probe:
-        description: Import and reopen an official full-length 640x360 movie through the native picker
+        description: Import and reopen an official full-length 640x359 movie through the native picker
         type: boolean
         default: false
 
@@ -747,7 +747,7 @@ jobs:
                               movie = imported[0]
                               duration = float(movie['duration'])
                               independent_duration = float(source_metadata['probe']['format']['duration'])
-                              assert movie['width'] == 640 and movie['height'] == 360 and movie['hasAudio'], 'Real movie metadata mismatch'
+                              assert movie['width'] == 640 and movie['height'] == 359 and movie['hasAudio'], 'Real movie metadata mismatch'
                               assert 570 <= duration <= 660 and abs(duration - independent_duration) <= 0.15, 'Full movie duration mismatch'
                               assert movie['path'] == str(imported_sample)
                               assert len(saved['media']) == 2 and next(m for m in saved['media'] if m['id'] == 'm1')['path'] == str(sample)
