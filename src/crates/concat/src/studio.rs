@@ -5878,29 +5878,34 @@ impl Studio {
         let name = clip.name.clone();
         let title = t("lib.exportAudio");
         let family = t("lib.wavAudio");
-        crate::host::on_ui(move |studio, _, _| {
-            let file = if cfg!(any(target_os = "android", target_os = "ios")) {
-                out_dir.join(&suggested)
-            } else {
-                let Some(chosen) = crate::platform::save_file(
-                    &title,
-                    &out_dir,
-                    &suggested,
-                    (family.as_str(), &["wav"]),
-                ) else {
-                    return;
-                };
-                if chosen
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
-                {
-                    chosen
+        let dialog_dir = out_dir.clone();
+        // The native panel pumps timers; do not borrow Studio until it answers.
+        crate::host::after_dialog(
+            move || {
+                let file = if cfg!(any(target_os = "android", target_os = "ios")) {
+                    dialog_dir.join(&suggested)
                 } else {
-                    chosen.with_extension("wav")
-                }
-            };
-            studio.write_clip_audio(&name, pieces, duration, file, out_dir);
-        });
+                    let chosen = crate::platform::save_file(
+                        &title,
+                        &dialog_dir,
+                        &suggested,
+                        (family.as_str(), &["wav"]),
+                    )?;
+                    if chosen
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+                    {
+                        chosen
+                    } else {
+                        chosen.with_extension("wav")
+                    }
+                };
+                Some(file)
+            },
+            move |studio, _, _, file| {
+                studio.write_clip_audio(&name, pieces, duration, file, out_dir);
+            },
+        );
     }
 
     /// Mixes `pieces` - one clip's sound, `duration` seconds of it - into
@@ -6474,69 +6479,73 @@ impl Studio {
         );
         let title = t("lib.saveFrame");
         let family = t("lib.pngImage");
-        crate::host::on_ui(move |studio, _, _| {
-            let file = if cfg!(any(target_os = "android", target_os = "ios")) {
-                out_dir.join(&suggested)
-            } else {
-                let Some(chosen) = crate::platform::save_file(
-                    &title,
-                    &out_dir,
-                    &suggested,
-                    (family.as_str(), &["png"]),
-                ) else {
-                    return;
-                };
-                if chosen
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
-                {
-                    chosen
+        // The native panel pumps timers; do not borrow Studio until it answers.
+        crate::host::after_dialog(
+            move || {
+                let file = if cfg!(any(target_os = "android", target_os = "ios")) {
+                    out_dir.join(&suggested)
                 } else {
-                    chosen.with_extension("png")
-                }
-            };
-            let written = file.to_string_lossy().into_owned();
-            studio.notify(&t("studio.savingFrame"), false);
-            spawn_in_project(
-                move || -> Result<concat_host::media::MediaSummary, String> {
-                    let pixels = monitor.frame(clips, &settings, spec)?;
-                    let image = image::RgbaImage::from_raw(width, height, pixels)
-                        .ok_or_else(|| "the frame came back the wrong size".to_owned())?;
-                    if let Some(parent) = file.parent() {
-                        std::fs::create_dir_all(parent).map_err(|error| {
-                            format!("could not create {}: {error}", parent.display())
-                        })?;
+                    let chosen = crate::platform::save_file(
+                        &title,
+                        &out_dir,
+                        &suggested,
+                        (family.as_str(), &["png"]),
+                    )?;
+                    if chosen
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+                    {
+                        chosen
+                    } else {
+                        chosen.with_extension("png")
                     }
-                    image.save(&file).map_err(|error| error.to_string())?;
-                    concat_host::media::probe(&file.to_string_lossy())
-                },
-                move |studio, _, _, result| match result {
-                    Ok(summary) => {
-                        let item = summary.to_new_media();
-                        let path = item.path.clone();
-                        let minted = studio.apply(Command::AddMedia { item }).or_else(|| {
-                            studio
-                                .project()
-                                .media
-                                .iter()
-                                .find(|item| item.path == path)
-                                .map(|item| item.id.clone())
-                        });
-                        studio.media.filter = MediaFilter::All;
-                        studio.media.selected.clear();
-                        if let Some(id) = minted {
-                            studio.media.selected.insert(id);
+                };
+                Some(file)
+            },
+            move |studio, _, _, file| {
+                let written = file.to_string_lossy().into_owned();
+                studio.notify(&t("studio.savingFrame"), false);
+                spawn_in_project(
+                    move || -> Result<concat_host::media::MediaSummary, String> {
+                        let pixels = monitor.frame(clips, &settings, spec)?;
+                        let image = image::RgbaImage::from_raw(width, height, pixels)
+                            .ok_or_else(|| "the frame came back the wrong size".to_owned())?;
+                        if let Some(parent) = file.parent() {
+                            std::fs::create_dir_all(parent).map_err(|error| {
+                                format!("could not create {}: {error}", parent.display())
+                            })?;
                         }
-                        studio.media_jump += 1;
-                        studio.notify(&tf("studio.frameSaved", &[&written]), false);
-                    }
-                    Err(error) => {
-                        log::warn!("save frame: {error}");
-                        studio.notify(&tf("studio.couldNotSaveFrame", &[&error]), true);
-                    }
-                },
-            );
-        });
+                        image.save(&file).map_err(|error| error.to_string())?;
+                        concat_host::media::probe(&file.to_string_lossy())
+                    },
+                    move |studio, _, _, result| match result {
+                        Ok(summary) => {
+                            let item = summary.to_new_media();
+                            let path = item.path.clone();
+                            let minted = studio.apply(Command::AddMedia { item }).or_else(|| {
+                                studio
+                                    .project()
+                                    .media
+                                    .iter()
+                                    .find(|item| item.path == path)
+                                    .map(|item| item.id.clone())
+                            });
+                            studio.media.filter = MediaFilter::All;
+                            studio.media.selected.clear();
+                            if let Some(id) = minted {
+                                studio.media.selected.insert(id);
+                            }
+                            studio.media_jump += 1;
+                            studio.notify(&tf("studio.frameSaved", &[&written]), false);
+                        }
+                        Err(error) => {
+                            log::warn!("save frame: {error}");
+                            studio.notify(&tf("studio.couldNotSaveFrame", &[&error]), true);
+                        }
+                    },
+                );
+            },
+        );
     }
 
     /// The volume line on clip `id` dragged to `gain`: written the way the
@@ -7483,12 +7492,18 @@ impl Studio {
     /// catalogue is rebuilt so the Filters page shows them, their cards
     /// drawn by their own shaders.
     pub fn import_lut(&mut self) {
-        let Some(paths) = crate::platform::pick_files(
-            &t("studio.importLut"),
-            Some((t("studio.lut").as_str(), &["cube"])),
-        ) else {
-            return;
-        };
+        let title = t("studio.importLut");
+        let family = t("studio.lut");
+        crate::host::after_dialog(
+            move || crate::platform::pick_files(&title, Some((family.as_str(), &["cube"]))),
+            move |studio, _, _, paths| {
+                studio.import_lut_paths(paths);
+            },
+        );
+    }
+
+    /// Apply a picker answer after the native panel has released the event loop.
+    fn import_lut_paths(&mut self, paths: Vec<std::path::PathBuf>) {
         let dir = Self::looks_dir(&self.host.dirs);
         let mut imported = 0;
         for path in paths {

@@ -21,7 +21,7 @@ use concat_project::subtitles::{
 };
 use concat_speech::transcribe::Segment;
 
-use crate::host::{on_ui_in_project, spawn_in_project};
+use crate::host::{after_dialog, on_ui_in_project, spawn_in_project};
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::panes::settings::installed;
@@ -401,45 +401,50 @@ impl CaptionsPane {
         let extension = if self.export_vtt { "vtt" } else { "srt" };
         let format = if self.export_vtt { "WebVTT" } else { "SubRip" };
         let title = t("captions.exportSrt");
-        // Defer the native dialog out of Slint's current callback, as the
-        // frame/audio exporters do: macOS dialogs pump the event loop.
-        on_ui_in_project(epoch, move |_, _, _| {
-            let file = if cfg!(any(target_os = "android", target_os = "ios")) {
-                let stamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                directory.join(format!("captions-{stamp}.{extension}"))
-            } else {
-                let Some(file) = crate::platform::save_file(
-                    &title,
-                    &directory,
-                    &format!("captions.{extension}"),
-                    (format, &[extension]),
-                ) else {
-                    return;
-                };
-                if file
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
-                {
-                    file
+        // Native panels pump playback timers on macOS. Ask without a
+        // Studio borrow, then handle the answer only in the same project.
+        after_dialog(
+            move || {
+                let file = if cfg!(any(target_os = "android", target_os = "ios")) {
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    directory.join(format!("captions-{stamp}.{extension}"))
                 } else {
-                    file.with_extension(extension)
+                    let file = crate::platform::save_file(
+                        &title,
+                        &directory,
+                        &format!("captions.{extension}"),
+                        (format, &[extension]),
+                    )?;
+                    if file
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
+                    {
+                        file
+                    } else {
+                        file.with_extension(extension)
+                    }
+                };
+                Some(file)
+            },
+            move |_, _, _, file| {
+                if crate::host::project_epoch() != epoch {
+                    return;
                 }
-            };
-            if crate::host::project_epoch() != epoch {
-                return;
-            }
-            spawn_in_project(
-                move || {
-                    concat_host::subtitle_files::write_atomic(&file, &output)
-                        .map(|()| file)
-                        .map_err(|error| error.to_string())
-                },
-                |studio, _, _, result| studio.handle(Msg::Captions(CaptionsMsg::SrtSaved(result))),
-            );
-        });
+                spawn_in_project(
+                    move || {
+                        concat_host::subtitle_files::write_atomic(&file, &output)
+                            .map(|()| file)
+                            .map_err(|error| error.to_string())
+                    },
+                    |studio, _, _, result| {
+                        studio.handle(Msg::Captions(CaptionsMsg::SrtSaved(result)))
+                    },
+                );
+            },
+        );
     }
 
     /// A caption's look, by the sheet's rows: where it sits and its size.

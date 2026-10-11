@@ -1694,15 +1694,26 @@ pub fn run() -> Result<(), slint::PlatformError> {
                         // folder is.
                         "open" => state.handle(Msg::Start(StartMsg::Open)),
                         "import" => {
-                            platform::pick_files_async(
-                                &i18n::t("lib.importMedia"),
-                                None,
-                                |paths| {
-                                    on_ui(move |studio, _, _| {
-                                        studio.handle(Msg::Media(MediaMsg::Import(paths)))
-                                    })
-                                },
-                            );
+                            // Desktop pickers pump timers even though this API
+                            // is async on phones. Release the menu's Studio
+                            // borrow before opening one on the next loop turn.
+                            if state.session.is_some() {
+                                let epoch = host::project_epoch();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if host::project_epoch() != epoch {
+                                        return;
+                                    }
+                                    platform::pick_files_async(
+                                        &i18n::t("lib.importMedia"),
+                                        None,
+                                        move |paths| {
+                                            host::on_ui_in_project(epoch, move |studio, _, _| {
+                                                studio.handle(Msg::Media(MediaMsg::Import(paths)))
+                                            });
+                                        },
+                                    );
+                                });
+                            }
                         }
                         "export" => state.handle(Msg::Export(ExportMsg::Open)),
                         "template" => state.save_template(),
