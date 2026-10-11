@@ -8,8 +8,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import time
-import urllib.request
 import zipfile
 
 URL = "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip"
@@ -61,27 +59,27 @@ def file_digest(path):
 def prepare(temp, evidence):
     archive = temp / "official-movie.zip"
     source = temp / "BigBuckBunny-full.mp4"
-    head = urllib.request.urlopen(urllib.request.Request(URL, method="HEAD"), timeout=30)
-    with head:
-        assert head.status == 200
-        assert int(head.headers["Content-Length"]) == EXPECTED_ARCHIVE_BYTES
-        headers = {key: head.headers.get(key) for key in
-                   ("Content-Length", "Content-Type", "ETag", "Last-Modified")}
-    size = 0
-    digest = hashlib.sha256()
-    deadline = time.monotonic() + 240
-    with urllib.request.urlopen(URL, timeout=30) as response, archive.open("wb") as output:
-        assert response.status == 200
-        while True:
-            assert time.monotonic() < deadline, "Bounded movie download exceeded 240 seconds"
-            chunk = response.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            assert size <= MAX_ARCHIVE_BYTES, "Movie archive exceeds allowed size"
-            output.write(chunk)
-            digest.update(chunk)
-    assert size == EXPECTED_ARCHIVE_BYTES
+    # The official host rejects Python-urllib requests with HTTP 403.
+    # Use the runner's actual curl client without masquerading its user agent.
+    curl = ["curl", "--fail", "--silent", "--show-error", "--location",
+            "--proto", "=https", "--proto-redir", "=https"]
+    head = run(curl + ["--head", "--max-time", "30", URL], 40).decode("utf-8", errors="replace")
+    assert len(head) <= 65536
+    status_lines = [line for line in head.splitlines() if line.startswith("HTTP/")]
+    assert status_lines and status_lines[-1].split()[1] == "200"
+    observed = {}
+    for line in head.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            observed[key.lower()] = value.strip()
+    assert int(observed["content-length"]) == EXPECTED_ARCHIVE_BYTES
+    headers = {key: observed.get(key.lower()) for key in
+               ("Content-Length", "Content-Type", "ETag", "Last-Modified")}
+    run(curl + ["--max-time", "240", "--max-filesize", str(MAX_ARCHIVE_BYTES),
+                "--output", str(archive), URL], 250)
+    size = archive.stat().st_size
+    assert size == EXPECTED_ARCHIVE_BYTES and size <= MAX_ARCHIVE_BYTES
+    archive_digest = file_digest(archive)
     with zipfile.ZipFile(archive) as bundle:
         entries = bundle.infolist()
         assert len(entries) <= 32
@@ -104,7 +102,7 @@ def prepare(temp, evidence):
     decode_all(source, 360)
     evidence.joinpath("REAL-MEDIA-SOURCE.json").write_text(json.dumps({
         "url": URL, "head_headers": headers, "archive_bytes": size,
-        "archive_sha256_observed_on_runner": digest.hexdigest(),
+        "archive_sha256_observed_on_runner": archive_digest,
         "source_sha256_observed_on_runner": file_digest(source),
         "probe": info, "full_source_decode_passed": True,
         "checksum_is_observed_not_preexisting_trusted_digest": True,
@@ -171,7 +169,7 @@ def main():
     temp.mkdir(exist_ok=True)
     args.evidence.mkdir(parents=True, exist_ok=True)
     args.evidence.joinpath("REAL-MEDIA-CREDITS.md").write_text(CREDITS)
-    assert shutil.which("ffmpeg") and shutil.which("ffprobe")
+    assert shutil.which("ffmpeg") and shutil.which("ffprobe") and shutil.which("curl")
     if args.mode == "prepare":
         prepare(temp, args.evidence)
     else:
