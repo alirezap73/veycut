@@ -8,17 +8,21 @@ The public preview stays at 0.2.0-preview.1. Development source is 0.3.1 after o
 
 Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
 
-## Current development source at 5711667
+## Current development source at 32acd2f
 
-Development source `5711667` adds COLR v0 solid colour layers, bounded to 128
+Development source `32acd2f` adds COLR v0 solid colour layers, bounded to 128
 layers with palette alpha/title foreground and rejection of unusable layer
 outlines before font selection. The new native-dialog paths release editor
 borrows before opening media/LUT import and frame/audio/subtitle save panels;
 media/font picker answers are tied to their original project.
 
-[Native validation](https://github.com/alirezap73/veycut/actions/runs/38103959060)
-and [development checks](https://github.com/alirezap73/veycut/actions/runs/38103967208)
-are pending for this exact source. New tests have not yet established a pass.
+[Native validation](https://github.com/alirezap73/veycut/actions/runs/38105343165)
+is pending for this exact source. The prior colour-layer revision compiled on
+macOS and WebAssembly, but Linux lints stopped on an obsolete unused import
+before native tests. That import is removed in this revision.
+[Development checks](https://github.com/alirezap73/veycut/actions/runs/38103967208)
+passed 231 invocations (218 Rust and 13 Python) for the prior revision; native
+colour-layer tests have not yet established a pass.
 The committed extended GUI scenario now has 97 steps, including observed
 native import panels held for four seconds during playback, cancellation and
 acceptance; the scenario itself is not passing evidence until run against a
@@ -31,7 +35,7 @@ Development source `9a7b5e7` passed [native validation](https://github.com/alire
 
 New passing regressions cover PNG/BGRA colour strikes and alpha composition, bitmap-only backgrounds/word highlights and fallback, fitted still-image reader dimensions, unusable frame-rate fallback, oversized export rejection before output/GPU work, loaded extreme-time repair and atomic clipboard rejection. Source also adds compact stereo meter readouts and moves native folder dialogs outside editor borrows, with stale-project answer guards. See [the editing milestone](FEATURE-PROGRESS.md) for explicit scope and remaining GUI checks.
 
-The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38102915695) is being built separately. The earlier 0.3.0 package below does not contain these changes. Native tests and compilation do not establish packaged gesture/dialog behaviour or independent installation. Public downloads and development version **0.3.1** remain unchanged.
+The [Mac candidate for that earlier source](https://github.com/alirezap73/veycut/actions/runs/38102915695) built successfully. It does not contain the later COLR/native-file-dialog changes. The earlier 0.3.0 package below does not contain these changes. Native tests and compilation do not establish packaged gesture/dialog behaviour or independent installation. Public downloads and development version **0.3.1** remain unchanged.
 
 ## Previous source validation at e46372a
 
