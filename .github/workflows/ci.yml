@@ -213,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]' || inputs.mac_beta && '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2022","sherpa":"win-x64","verb":"Tests"}]') }}
+        include: ${{ fromJSON(inputs.windows_only && '[{"os":"windows-2025","sherpa":"win-x64","verb":"Tests"}]' || inputs.mac_beta && '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"}]' || '[{"os":"macos-15","sherpa":"osx-arm64","verb":"Compiles"},{"os":"windows-2025","sherpa":"win-x64","verb":"Tests"}]') }}
     runs-on: ${{ matrix.os }}
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
