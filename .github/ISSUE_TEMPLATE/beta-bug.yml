@@ -5,7 +5,7 @@ labels: []
 body:
   - type: markdown
     attributes:
-      value: "Follow docs/BETA-TEST.md when possible. Report the first failed step and the actual build version. The candidate and public preview can have different versions."
+      value: "Start with the [quick start](https://github.com/alirezap73/veycut/blob/main/docs/QUICK-START.md) or [Mac beta test](https://github.com/alirezap73/veycut/blob/main/docs/BETA-TEST.md). Report the first failed step, package/release and exact build; Mac and Web package revisions can differ."
   - type: input
     id: build
     attributes:
@@ -17,7 +17,7 @@ body:
     id: system
     attributes:
       label: Operating system and chip
-      description: Exact macOS version and Apple silicon chip for the current beta target; identify other platforms explicitly.
+      description: Exact OS and chip. For Web, include browser name/version and whether you used the release ZIP or source.
     validations:
       required: true
   - type: dropdown

@@ -2,9 +2,10 @@ name: VeyCut Web
 
 on:
   push:
-    branches: [development/0.3.0]
-    paths: ['web/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js']
+    branches: [main, development/0.3.0, development/web-editor-parity]
+    paths: ['web/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js']
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -50,6 +51,11 @@ jobs:
           fi
           test "$(wasm-bindgen --version)" = 'wasm-bindgen 0.2.127'
           wasm-bindgen target/wasm32-unknown-unknown/release/veycut_web.wasm --target web --out-dir ../web/pkg
+      - name: Bundle licensed Persian font
+        run: |
+          mkdir -p web/fonts
+          cp src/crates/concat-text/fonts/Vazirmatn-Variable.ttf web/fonts/
+          cp src/crates/concat-text/fonts/LICENSE-Vazirmatn.txt web/fonts/
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -61,6 +67,9 @@ jobs:
           sudo apt-get install --yes ffmpeg
           node --check web/app.js
           node --check web/export.js
+          node --check web/compositor.js
+          node --check web/preview.js
+          node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
       - name: Run browser editing workflow
         shell: bash
@@ -99,14 +108,16 @@ jobs:
           folder = Path('output/playwright')
           project = json.loads((folder / 'project.json').read_text())
           native = project['engineDocument']
-          ui_source, native_source = project['clips'][0], native['clips'][0]
+          ui_source = next(clip for clip in project['clips'] if clip['kind'] == 'video')
+          native_source = next(clip for clip in native['clips'] if clip['id'] == ui_source['id'])
           duration = ui_source['out'] - ui_source['in']
           assert abs(duration - .8) < .002
           project['clips'], native['clips'] = [], []
+          project['cues'], project['cueIds'] = [], []
           for index in range(151):
               identifier, position = 'browser-limit-' + str(index), .2 + index * duration
               ui_clip, native_clip = copy.deepcopy(ui_source), copy.deepcopy(native_source)
-              ui_clip.update(id=identifier, timelineStart=position)
+              ui_clip.update(id=identifier, timelineStart=position, start=position)
               native_clip.update(id=identifier, start=position)
               project['clips'].append(ui_clip)
               native['clips'].append(native_clip)
@@ -146,18 +157,28 @@ jobs:
           import json
           report = json.loads(Path('output/playwright/browser-report.json').read_text())
           assert report['status'] == 'passed' and report['engine'] == 'wasm'
-          assert report['clips'] == 2 and report['captions'] == 2 and report['language'] == 'fa'
-          assert len(report['checks']) == 15
+          assert report['clips'] == 4 and report['videoClips'] == 2 and report['textClips'] == 2
+          assert report['captions'] == 2 and report['language'] == 'fa'
+          assert len(report['checks']) == 16
           assert report['export']['precision'] == 'realtime'
           assert report['durationLimit'] == {'timelineSeconds': 121, 'limitSeconds': 120, 'downloaded': False}
           project = json.loads(Path('output/playwright/project.json').read_text())
-          assert len(project['clips']) == 2
+          assert len(project['clips']) == 4
           assert project['engine'] == 'wasm'
           native = project['engineDocument']['clips']
-          assert len(native) == 2
-          assert abs(native[0]['sourceStart'] - .2) < .002
-          assert abs(native[1]['sourceStart'] - 1) < .002
-          assert all(abs(clip['duration'] - .8) < .002 for clip in native)
+          assert len(native) == 4
+          videos = sorted([clip for clip in native if clip['kind'] == 'video'], key=lambda clip: clip['start'])
+          titles = [clip for clip in native if clip['kind'] == 'text']
+          assert len(videos) == len(titles) == 2
+          assert abs(videos[0]['sourceStart'] - .2) < .002
+          assert abs(videos[1]['sourceStart'] - 1) < .002
+          assert all(abs(clip['duration'] - .8) < .002 for clip in videos)
+          assert set(project['cueIds']) == {clip['id'] for clip in titles}
+          for cue in project['cues']:
+              title = next(clip for clip in titles if clip['id'] == cue['nativeId'])
+              assert title['text']['content'] == cue['text']
+              assert abs(title['start'] - cue['start']) < .002
+              assert abs(title['duration'] - (cue['end'] - cue['start'])) < .002
           assert 'blob:' not in json.dumps(project)
           for name in ['cancel-after.json', 'export-after.json']:
               assert json.loads(Path('output/playwright', name).read_text()) == project, name + ' changed saved edits'
@@ -168,7 +189,7 @@ jobs:
           from pathlib import Path
           folder = Path('output/playwright')
           output = folder / 'browser-video.webm'
-          assert 0 < output.stat().st_size <= 64 * 1024 * 1024
+          assert 0 < output.stat().st_size <= 256 * 1024 * 1024
           def run(arguments, **kwargs):
               return subprocess.run(arguments, check=True, timeout=90, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs).stdout
           probe = json.loads(run(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(output)]))

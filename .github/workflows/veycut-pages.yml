@@ -1,0 +1,54 @@
+name: Publish tested VeyCut Web
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/veycut-web.yml
+  deploy:
+    name: Publish verified browser package
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: veycut-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: VeyCut-web-prototype
+          path: site
+      - name: Package downloadable web edition
+        env:
+          VERIFIED_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          root = Path('site')
+          (root / 'build-info.json').write_text(json.dumps({'version': '0.3.1', 'channel': 'web-preview', 'sourceCommit': os.environ['VERIFIED_COMMIT'], 'validatedOn': 'GitHub Actions'}, indent=2))
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          folder = root / 'downloads'
+          folder.mkdir()
+          with zipfile.ZipFile(folder / 'VeyCut-web.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+              for path in files:
+                  archive.write(path, path.relative_to(root))
+          PY
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

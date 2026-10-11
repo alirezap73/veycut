@@ -1,6 +1,20 @@
 # VeyCut changelog
 
-## 0.3.1 — development patch (2026-10-11, unpublished)
+## Unreleased · Web editing work
+
+Development stays at **0.3.1**. The current branch expands the browser editor toward the Mac editing workflow. Interface and capability changes require new exact-source browser checks before inclusion in a downloadable release. The [roadmap](docs/ROADMAP.md) records targets; it does not mark them as shipped.
+
+## 0.3.1-beta.2 — public experimental release (2026-10-11)
+
+- Published the Apple silicon Mac DMG and a downloadable Web prototype. The app version remains 0.3.1.
+- Web adds bounded real-time WebM export with source audio, burned subtitles, progress and cancellation. Limits are 120 seconds, a 960-pixel long edge and 64 MiB. Project JSON and SRT downloads remain available.
+- Chromium checks passed import/edit/Undo/Redo, bilingual SRT, save/reopen/media reconnection and short decoded VP8/Opus output. Safari/Firefox and longer real footage remain unverified.
+- The unchanged Mac installer includes the native changes below. Packaged checks cover active-export cancellation, existing-output preservation and visible missing/corrupt-source errors with original-file restoration and decoded retry.
+- Mac installer source is `39cc82cebf1904c1b65f860d6fe674b0ca1aacd2`; Web export validation source is `8c21b937675745375bf72e7e310ab5d4ec4cdb00`. The release tag contains the newer Web work; it does not imply a native rebuild.
+
+[Downloads, checksums and full release scope](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2). This release has no hosted Web URL. The Mac app is ad-hoc signed and not Apple-notarized; independent installation and a 10–15-minute real-camera editing session remain outstanding.
+
+## 0.3.1 native changes included in beta.2
 
 - Detached sound and picture move independently unless explicitly selected together; the reattachment link is retained.
 - The track-add menu exposes top and bottom placement as directly clickable rows.
@@ -17,9 +31,9 @@
 - Invalid oversized project/export dimensions and extreme loaded clip times are bounded; unreadable sought video frames fail export instead of silently omitting a layer.
 - Packaged-editor scenarios exercise clip movement, both edge trims, grouped clipboard operations, track placement and a 32-second repeated-media export on a Mac runner. A failed run remains partial evidence until its corrected scenario passes.
 
-Native validation and a matching installer inspection are required for these source changes. The previously verified 0.3.0 package does not contain them. This patch increment does not create a public beta release.
+These changes are included in the validated Mac package shipped with the public experimental beta.2. Exact-source tests and matching packaged GUI checks passed. Independent clean installation and longer real-camera editing remain unverified; see [beta readiness](docs/BETA-READINESS.md).
 
-## 0.2.0 — source upgrade (2026-10-10)
+## 0.2.0 — historical source upgrade (2026-10-10)
 
 - Caption Create/Files/Edit workspace, WebVTT import/export and selected/all-text scope.
 - Reversible timing correction, group styling and Unicode find/replace.
@@ -31,7 +45,7 @@ Native validation and a matching installer inspection are required for these sou
 
 Native validation and installer verification are required before declaring this a stable release.
 
-## 0.1.0 — source candidate
+## 0.1.0 — historical source candidate
 
 This was the initial VeyCut source candidate.
 

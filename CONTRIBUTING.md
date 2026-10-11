@@ -1,128 +1,47 @@
-# Contributing to Concat
+# Contributing to VeyCut
 
-Thanks for being here. Concat is a video editor that runs entirely on the
-user's machine, and it gets better mostly through people using it hard and
-reporting what broke.
+Help us test real editing workflows, fix reproducible bugs and improve the English/Persian interface.
 
-## The most valuable thing you can do
+## Report a problem or propose a change
 
-Grab a build from the [Releases](https://github.com/jub0t/Concat/releases) page
-and edit a real video with it. Real footage finds what no reading of the
-source does. A good bug report — what you did, what happened, your
-OS, the media you used — is worth more than most patches.
+Download the experimental package from [VeyCut Releases](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2), follow the [quick start](docs/QUICK-START.md), and report the first failed step in [VeyCut Issues](https://github.com/alirezap73/veycut/issues/new/choose). Include your package/build, OS, browser for Web, steps and error text. Use a small sample you can share and review logs before posting.
 
-Longer-form discussion lives in
-[the contribution discussion](https://github.com/jub0t/Concat/discussions/3)
-and on [Discord](https://discord.gg/DVuPfpXfqP).
+Open an issue before a large change. The [roadmap](docs/ROADMAP.md) identifies current targets; [platform support](docs/PLATFORMS.md) separates shipped features from development work.
 
-## Before you write code
+## Work on the source
 
-Open an issue or drop into Discord first for anything beyond a small fix. Large
-areas are already in progress or intentionally deferred, and it is genuinely
-no fun to review a big PR that has to be turned down for reasons that were
-invisible from outside.
+Native code is in the Rust workspace under `src/`. Internal crate names retain their existing names for compatibility. [Engine setup](src/README.md) lists native dependencies; use the Rust version in `src/Cargo.toml`. FFmpeg development libraries, CMake and a C++ compiler are required for a native editor build.
 
-## Setting up
+The browser editor is in `web/`. Its shared project bridge lives in `src/crates/veycut-web/`; see [Web development and limits](web/README.md). A complete static package includes the generated Wasm module. Running the source directory without it uses the disclosed JavaScript fallback.
 
-You will need Rust (see `rust-version` in `src/Cargo.toml`), the FFmpeg
-7+ development libraries (`brew install ffmpeg`; see `src/README.md` for
-Windows and Linux), cmake and a C++ compiler. Then:
+For a bounded native check, choose the crate affected by your change. For example:
 
 ```sh
-cd src && cargo run -p concat
+cd src
+cargo fmt --all --check
+cargo test --locked -j 1 -p concat-core -p concat-project -- --test-threads=1
+cargo clippy --locked -j 1 -p concat-project --all-targets -- -D warnings
 ```
 
-That is the editor window. Everything - the engine, the host layer and the
-Slint UI - is one Cargo workspace under `src/`.
+Full native builds, GPU checks, packaging and browser exports can run through the repository's GitHub Actions. Successful checks apply to their exact source revision. Include relevant checks and limitations in your pull request; avoid declaring a platform verified from source inspection alone.
 
-## Layout
+When editing native UI strings, update the string inventory with `python3 scripts/locales.py` from the repository root. See [translation instructions](TRANSLATING.md). Model changes must keep `models/manifest.toml` and their engine tables consistent; use `python3 scripts/models.py --check`. Model mirroring and release publication are maintainer actions.
 
-| Path | What lives there |
-|---|---|
-| `src/crates/` | The engine (core, media, render, export, project), the host layer (`concat-host`, `concat-speech`), the CLI, and `concat`, the Slint editor window |
+Use the existing logging facade and surrounding code style. Preserve compatibility-sensitive internal names and file formats. Keep the app version fixed at **0.3.1** during current development; see [version and commit policy](docs/VERSIONING.md).
 
-[`src/README.md`](src/README.md) explains how the crates fit together and
-where the sharp edges are. Read it before touching the engine.
+## Copyright and licensing
 
-## Checks
+VeyCut's code is distributed under **AGPL-3.0-or-later**. Preserve existing copyright, SPDX headers, third-party font licenses and source notices. [LICENSE](LICENSE), [SOURCE-NOTICES.md](SOURCE-NOTICES.md), [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) and [TRADEMARK.md](TRADEMARK.md) retain the applicable terms and attribution.
 
-Follow [VeyCut's version and commit policy](docs/VERSIONING.md): describe the
-change in routine commit titles, keep the development version fixed during
-validation, and use patch increments for small releases. Publishing a release
-requires the separate beta and package checks.
-
-Run these before opening a PR:
-
-```sh
-cd src && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-```
-
-If you added or changed text the interface shows, also run
-`python3 scripts/locales.py` so the string inventory follows; CI checks it.
-Translations live in one JSON file per language — see
-[`TRANSLATING.md`](TRANSLATING.md).
-
-If you added or changed a downloadable model, put it in
-[`models/manifest.toml`](models/manifest.toml) as well as the engine table it
-belongs to, and run `python3 scripts/models.py --check`; CI checks that too.
-A maintainer then runs the *Mirror models* workflow, which fetches the model,
-records its digest in both places and publishes it to the mirror the app
-downloads from.
-
-Write what happens through the `log` facade — `log::info!`, `log::warn!`,
-`log::error!` — rather than to standard output or standard error. Every run
-writes `<app data>/logs/concat-<when>.log`, and a packaged build has no
-terminal for anything that goes anywhere else; `CONCAT_LOG=debug` turns the
-level up. See `src/crates/concat-host/src/logs.rs`.
-
-New source files need a licence header — see below. Match the style of the code
-around you; the engine avoids cleverness on purpose.
-
-## Licensing your contribution
-
-Concat is **AGPL-3.0-or-later** ([`LICENSE`](LICENSE)), with a plugin exception
-so that Concat API plugins can carry their own licence
-([`LICENSE-EXCEPTIONS.md`](LICENSE-EXCEPTIONS.md)).
-
-Contributions are accepted under the CLA in [`CLA.md`](CLA.md). **You keep the
-copyright in your work** — the CLA is a licence, not an assignment. It exists so
-that copyright in Concat stays centralised, which is what makes the AGPL
-enforceable against companies that take the code without honouring it.
-
-Sign off your commits to indicate agreement:
-
-```sh
-git commit -s -m "your message"
-```
-
-Typo and documentation fixes do not need a sign-off.
-
-### File headers
-
-Every source file starts with:
+Existing source headers include:
 
 ```rust
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 ```
 
-Keep your own copyright line if you want one — add it, don't replace what's
-there.
+Keep that attribution where it applies; add your copyright line for your original work rather than replacing existing lines. Identify third-party code and its license in the pull request.
 
-### Third-party code
+The retained [CLA.md](CLA.md) identifies the original project and its maintainers. This contribution guide does not change its parties or create a separate VeyCut copyright-assignment or relicensing agreement. Consult the existing license documents when preparing a contribution.
 
-If your patch brings in code you did not write, say so in the PR: what it is,
-where it came from, and its licence. Anything incompatible with
-AGPL-3.0-or-later cannot be merged, and licence problems are much cheaper to
-catch before a merge than after a release.
-
-## Trademarks
-
-The code is free to fork. The Concat name and logo are not covered by the AGPL
-grant — see [`TRADEMARK.md`](TRADEMARK.md). Forks are welcome; please ship them
-under your own name.
-
-## Conduct
-
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) applies to the repo, the Discussions
-and Discord.
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to participation in this repository.

@@ -32,6 +32,7 @@ use crate::model::{Clip, Project};
 const UNDO_DEPTH: usize = 200;
 
 /// The state before one recorded step, and the gesture it belonged to.
+#[derive(Clone)]
 struct Snapshot {
     before: Project,
     /// Set while the gesture that produced this step may still continue;
@@ -42,6 +43,7 @@ struct Snapshot {
 /// One editing session: the project, the id mint that keeps its ids unique,
 /// and the undo/redo stacks. This is the object a host holds per open
 /// project; everything else in the crate is reachable through it.
+#[derive(Clone)]
 pub struct Editor {
     project: Project,
     mint: IdMint,

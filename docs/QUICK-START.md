@@ -1,55 +1,54 @@
 # VeyCut quick start
 
-The public experimental [0.3.1-beta.2 release](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) includes the Apple silicon Mac DMG and a downloadable Web prototype. The app version remains 0.3.1. Independent clean installation and longer real-footage editing remain unverified. Use the release notes for the Web HTTP-server instructions and package limits.
+[0.3.1-beta.2](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) contains the Apple silicon Mac app and a Web prototype. Both are experimental; app version is 0.3.1. Check the release's SHA256SUMS before using a download. The [platform guide](PLATFORMS.md) explains their different capabilities.
 
-1. Download the macos-arm64 DMG from the VeyCut release and copy VeyCut into Applications. This experimental app is ad-hoc signed and not Apple-notarized. macOS may require explicit approval to open it.
-2. Open VeyCut and create a project. Choose a portrait, landscape or square frame and name the project.
-3. Import your own short video and audio files. Place clips on the timeline, trim their edges and preview the sequence. Save before trying a larger edit.
-4. Choose Settings → Language for English or Persian. For subtitles, use Captions → Files and the [bilingual sample](caption-examples/TRY-CAPTIONS.txt).
-5. Open Export. In 0.3.0, choose a resolution independently of the editing frame, a frame rate and an available codec. The image keeps its aspect ratio. A smaller export does not change the saved project.
-6. Choose an output folder and a new filename. Existing output files are preserved: rename the export or choose another folder. Cancellation stops that export and removes only its own temporary work files; completed output files are kept.
+## Mac
 
-## Moved or missing media in 0.3.0
+1. Download `VeyCut-0.3.1-macos-arm64.dmg` and copy VeyCut to Applications. The app is ad-hoc signed and not Apple-notarized. Independent browser-download/Gatekeeper installation remains unverified.
+2. Create a project with a portrait, landscape or square frame. Import a short video, place it on the timeline and save.
+3. Trim clip edges or split at the playhead. Undo/Redo can restore an edit. Select several clips to copy/paste or duplicate their timing, track layout and properties together.
+4. Choose **Settings → Language** for English or Persian. Open **Captions → Files** and import an SRT or plain-text WebVTT file. Try one [bilingual sample](caption-examples/TRY-CAPTIONS.txt).
+5. In **Captions → Edit**, choose selected text or all text. Shift timing, change appearance or use literal case-sensitive find/replace. The cue list has 50 rows per page; a row selects its text clip, seeks to its start and closes the sheet. A focused row accepts Enter or Space.
+6. Save and reopen the project. Keep the original media in place: project files describe edits and reference source files.
+7. Open **Export**, choose resolution, frame rate and an available codec, then select a new output filename. Output size can differ from the editing frame. Existing output files are preserved. Cancel stops that export and removes its own temporary work files.
 
-When a project opens with missing media, choose Relink All and select a folder containing the original files. The search runs in the background. Dismiss cancels it; opening another project invalidates the previous result. A successful batch can be undone through the editor.
+Packaged tests covered cue navigation, grouped edits and short exports. Use a copy of valuable media for beta testing; longer real-footage sessions still need validation.
 
-Only unique, exact filenames are linked automatically. If two copies have the same filename, select a narrower folder containing the intended copy. Symlink files and directories are not followed. Searches stop at 100,000 entries or 64 directory levels, or when a directory cannot be read. An incomplete search makes no edits; select a smaller, readable folder and try again. A blocked filesystem call cannot itself be interrupted.
+### Missing or moved Mac media
 
-## Caption navigation and clip groups in development 0.3.1
+If a source is missing or corrupt, export shows an error. Restoring the original bytes at the original path was verified to allow retry without changing the saved project.
 
-Open **Captions → Edit** to see text clips in chronological order. Each row shows
-its start/end time and a shortened preview. The list has 50 rows per page;
-use its page controls for longer timelines. Choose a row to select that text
-clip, seek to its start and close the caption sheet. A focused row also accepts
-Enter or Space. The selected/all-text scope also controls this list. This
-navigation is in development source; packaged interaction checks are pending.
+The Mac UI also provides **Relink All** when opening a project with missing media. Choose a folder containing the original files. This separate picker flow remains unverified in packaged GUI testing. Only unique exact filenames are linked; duplicate names remain offline. Symlinks are skipped. Incomplete or unreadable searches make no edits. Select a smaller folder and retry. Dismiss cancels the search; switching projects invalidates its result.
 
-Select multiple clips before Copy/Paste or Duplicate. Their timing, track layout
-and properties are kept together. Duplicate selects the new copies so the next
-move or deletion can act on that group. Undo reverses the whole duplication.
-Locked tracks are excluded from duplication. Save before trying these new
-group operations in a development candidate.
+## Web
 
-## Reporting a problem
+1. Download `VeyCut-0.3.1-beta.2-web.zip` and extract it.
+2. Serve its `veycut-web` folder over HTTP. For example, if Python 3 is installed, run this **inside that folder**:
 
-Open an [issue](https://github.com/alirezap73/veycut/issues) with the VeyCut version, macOS version, steps and actual result. Attach a small sample you can share if the issue concerns one format. Do not attach private media or unreviewed logs.
+   ```sh
+   python3 -m http.server 8080 --bind 127.0.0.1
+   ```
 
-# شروع سریع وی‌کات
+   Open `http://127.0.0.1:8080` in Chrome/Chromium. Direct file opening does not reliably load the WebAssembly engine. A public hosted editor URL is pending.
+3. Import a browser-decodable local video, select a clip, and set source in/out points or split. Preview is sequential and single-track.
+4. Import a UTF-8 SRT file, choose a cue and edit its text. Choose English or Persian using the language selector. Caption times stay fixed when video clips change.
+5. Save project JSON. After reopening, reconnect the original media files using their filename and size. Media bytes are not embedded. Desktop projects and Web projects have different formats.
+6. Reconnect every source, choose an output size and export WebM. Keep the tab visible. Export records in real time using your device and may drift under load. Cancel produces no video download.
 
-نسخهٔ عمومی ۰٫۲ برای مک با تراشهٔ Apple silicon فایل DMG دارد. سورس در حال توسعه ۰٫۳٫۱ است؛ بستهٔ آن تا تأیید مسیر اصلی بتا منتشر نمی‌شود. لینک معتبر دانلود در README همین مخزن قرار دارد.
+Web export includes source audio and burned subtitles. Limits are **120 seconds**, **960-pixel long edge**, requested **30 fps**, and **64 MiB**. Chromium was checked with short generated media. Safari/Firefox, longer real footage and frame-accurate output are unverified. See [Web implementation and limits](../web/README.md).
 
-۱. فایل macos-arm64 DMG را دانلود کنید و VeyCut را به Applications ببرید. نسخه آزمایشی است و تأیید Apple notarization ندارد؛ ممکن است macOS برای بازکردن آن تأیید شما را بخواهد.
+## Report a problem
 
-۲. پروژه‌ای با قاب عمودی، افقی یا مربع بسازید. یک ویدیوی کوتاه خودتان را وارد کنید، روی تایم‌لاین قرار دهید، ابتدا و انتهای کلیپ را کوتاه کنید و پیش‌نمایش بگیرید. پروژه را ذخیره کنید.
+Use the [issue form](https://github.com/alirezap73/veycut/issues/new/choose). Include release/build, operating system, browser for Web, first failed step and exact error. Attach reviewed screenshots/logs or a small sample you can share. Keep private media out of public reports.
 
-۳. زبان فارسی یا انگلیسی را از Settings → Language انتخاب کنید. زیرنویس را از Captions → Files وارد کنید؛ [نمونهٔ دوزبانه](caption-examples/TRY-CAPTIONS.txt) آماده است.
+## فارسی
 
-۴. در خروجی نسخهٔ ۰٫۳، اندازهٔ خروجی را مستقل از اندازهٔ پروژه انتخاب کنید. نسبت تصویر حفظ می‌شود. نامی تازه برای خروجی بگذارید؛ فایل‌های موجود جایگزین نمی‌شوند.
+انتشار عمومی **۰٫۳٫۱-beta.2** شامل نسخهٔ مک Apple silicon و بستهٔ آزمایشی وب است. شمارهٔ برنامه **۰٫۳٫۱** باقی مانده است. دانلودها و SHA256SUMS در [صفحهٔ انتشار](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) هستند.
 
-۵. اگر رسانه‌ها جابه‌جا شده‌اند، Relink All را بزنید و پوشهٔ فایل‌های اصلی را انتخاب کنید. جست‌وجو در پس‌زمینه انجام می‌شود و Dismiss آن را لغو می‌کند. فایل‌های هم‌نام خودکار انتخاب نمی‌شوند؛ پوشه‌ای کوچک‌تر انتخاب کنید که فقط نسخهٔ موردنظر در آن باشد. جست‌وجوی ناقص هیچ مسیری را تغییر نمی‌دهد.
+**مک:** فایل DMG را باز کنید و VeyCut را به Applications ببرید. برنامه امضای ad-hoc دارد و Apple notarization ندارد؛ نصب مستقل و مسیر Gatekeeper هنوز بررسی نشده‌اند. پروژه بسازید، ویدیویی کوتاه وارد کنید و روی تایم‌لاین بگذارید. برش و جابه‌جایی را امتحان کنید و ذخیره کنید. زبان را از Settings → Language تغییر دهید. از Captions → Files یکی از نمونه‌های زیرنویس را وارد کنید. در Edit زمان‌بندی، ظاهر و متن را تغییر دهید؛ فهرست زیرنویس صفحه‌های ۵۰ ردیفی دارد. پروژه را بازگشایی و با نامی تازه خروجی بگیرید.
 
-در سورس ۰٫۳٫۱، **Captions → Edit** فهرست زیرنویس‌ها را به ترتیب زمان، با زمان شروع و پایان و پیش‌نمایش متن نشان می‌دهد. هر صفحه ۵۰ ردیف دارد. با انتخاب ردیف، کلیپ متنی انتخاب می‌شود و پخش به شروع آن می‌رود؛ ردیفِ دارای فوکوس با Enter یا Space هم فعال می‌شود. محدودهٔ انتخاب‌شده یا همهٔ متن‌ها روی همین فهرست هم اثر دارد. آزمون این تعامل در بستهٔ نصبی هنوز باقی مانده است.
+برای فایل گمشده یا خراب، بازگرداندن فایل اصلی به مسیر قبلی و خروجی مجدد در آزمون بسته موفق بود. انتخاب پوشه با Relink All مسیر جداگانه‌ای است و هنوز در آزمون رابطِ بسته بررسی نشده است.
 
-برای کپی یا تکثیر گروهی، چند کلیپ را انتخاب کنید. زمان‌بندی، چیدمان ترک و ویژگی‌ها همراهشان حفظ می‌شود. پس از تکثیر، نسخه‌های تازه انتخاب می‌مانند تا جابه‌جایی یا حذف بعدی روی همان گروه انجام شود؛ Undo کل تکثیر را برمی‌گرداند. ترک‌های قفل‌شده از تکثیر کنار گذاشته می‌شوند. پیش از آزمایش این قابلیت‌ها پروژه را ذخیره کنید.
+**وب:** فایل ZIP را باز کنید و پوشهٔ veycut-web را با سرور محلی HTTP اجرا کنید؛ دستور بالا در همان پوشه اجرا می‌شود. سپس آدرس محلی را در Chrome باز کنید. فایل ویدئو و SRT را وارد و ویرایش کنید. پروژهٔ JSON رسانه را در خود ذخیره نمی‌کند؛ پس از بازگشایی باید فایل‌های اصلی را دوباره متصل کنید. خروجی WebM با صدا و زیرنویس روی دستگاه شما ضبط می‌شود. تب را باز و قابل‌مشاهده نگه دارید. سقف خروجی ۱۲۰ ثانیه، ضلع بلند ۹۶۰ پیکسل و حجم ۶۴ مگابایت است. لینک سایت عمومی هنوز اعلام نشده است.
 
-برای گزارش اشکال، نسخهٔ برنامه و macOS، مراحل و نتیجهٔ واقعی را در [Issues](https://github.com/alirezap73/veycut/issues) بنویسید. رسانهٔ خصوصی را ضمیمه نکنید.
+امکانات و قالب پروژهٔ مک و وب یکسان نیستند. آزمون مک مستقل و تدوین ۱۰ تا ۱۵ دقیقه با فیلم دوربین باقی است. گزارش اشکال را با مراحل، نسخه و پیام خطا در [Issues](https://github.com/alirezap73/veycut/issues) بنویسید.

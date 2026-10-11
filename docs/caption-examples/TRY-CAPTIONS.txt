@@ -1,4 +1,4 @@
-VeyCut 0.2.0 caption sample
+VeyCut Mac caption sample (0.3.1-beta.2)
 
 The editor includes an English interface. Choose English in Settings > Language when needed.
 
@@ -12,4 +12,4 @@ Use bilingual.vtt OR bilingual.srt, not both in the same timeline.
 6. Export the text clips as SRT or WebVTT and inspect their text and timing.
 7. Save the project and reopen it.
 
-Subtitle files carry text and timing; font, placement and appearance are project settings. These samples are prepared for manual checking. The packaged-app manual flow and clean-machine installation have not yet been verified.
+Subtitle files carry text and timing; font, placement and appearance are project settings. Matching packaged GUI checks verified bilingual caption editing, subtitle export and save/reopen with generated media. This manual sample remains useful for your own test. Independent clean installation and longer real-camera editing remain unverified.
