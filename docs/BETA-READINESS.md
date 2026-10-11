@@ -15,10 +15,11 @@ renderer, plus accessible icon-button roles and names. Common subset coverage
 and Simplified Chinese glyph-form limitations apply. The earlier CJK run
 [38116050056](https://github.com/alirezap73/veycut/actions/runs/38116050056)
 failed to compile a newly added array-iterator test; this was a test-compilation
-failure, not evidence of failed CJK rendering. That test is corrected, but
-[full validation](https://github.com/alirezap73/veycut/actions/runs/38117995463)
-is pending. There is no matching packaged GUI result for this latest runtime.
-Do not extend earlier passing results to these changes.
+failure, not evidence of failed CJK rendering. That test is corrected.
+
+[Full validation](https://github.com/alirezap73/veycut/actions/runs/38117995463) passed **806 Rust test invocations**, **0 failed**, with **1 ignored model/audio transcription test**. Quick checks passed **271 invocations** (**250 Rust + 21 Python**). All four CJK UI regressions and the mixed-script raster test passed, along with Linux lints/performance, gRPC checks, WebAssembly and macOS all-target compilation. The Mac job compiles targets rather than executing native tests.
+
+The [final candidate](https://github.com/alirezap73/veycut/actions/runs/38119080271) is building from package source `39cc82c`, which includes runtime `974c65e`. Matching packaged GUI evidence is not yet available. An independent Apple silicon Mac/tester is available; its actual installation and real-footage report await the final package. Earlier package results do not establish packaged CJK rendering or the new AX controls. Development remains 0.3.1 and no official beta is published.
 
 ## Stereo layout and GPU failure runtime at e6bce73
 

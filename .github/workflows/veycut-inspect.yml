@@ -79,6 +79,10 @@ jobs:
               manifest = subprocess.check_output(['git', 'show', revision + ':src/Cargo.toml'], text=True)
               version = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"', manifest, re.M).group(1)
               f.write('PACKAGE_VERSION=' + version + '\n')
+              panel = subprocess.check_output(['git', 'show', revision + ':src/crates/concat/ui/primitives/panel.slint'], text=True)
+              icon_button = panel.split('export component IconButton', 1)[1]
+              accessible_pause = 'accessible-role: button;' in icon_button and 'accessible-label: root.label;' in icon_button
+              f.write('EXPECT_ACCESSIBLE_PAUSE=' + ('true' if accessible_pause else 'false') + '\n')
           PYTHON
       - uses: actions/download-artifact@v8
         with:
@@ -485,6 +489,10 @@ jobs:
                   point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
                   route = "observed_AX_Pause"
               } else {
+                  guard ProcessInfo.processInfo.environment["EXPECT_ACCESSIBLE_PAUSE"] != "true" else {
+                      fputs("Package source exposes accessible buttons, but AX Pause is missing\n", stderr)
+                      exit(43)
+                  }
                   // Older packaged IconButton has no AX role/name. This point was
                   // observed in playback-meters-cancel.png, the complete 1024x681
                   // window capture: Pause at (612,392), including its titlebar.
