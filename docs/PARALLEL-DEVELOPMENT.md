@@ -4,6 +4,7 @@ Keep the public preview unchanged until the beta gates in
 [BETA-READINESS.md](BETA-READINESS.md) are met. The explicitly requested development
 patch increment is 0.3.1; keep it fixed while validating these changes. More
 commits are not another version increment or a new public milestone.
+Follow [the version and commit policy](VERSIONING.md) when integrating changes.
 
 ## Parallel work
 

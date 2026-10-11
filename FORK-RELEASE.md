@@ -1,5 +1,7 @@
 # Fork release checklist
 
+Use [the version and commit policy](docs/VERSIONING.md) for release numbering.
+
 ## Source candidate
 
 - [x] Preserve upstream source, copyright, licenses and dependency lockfile.
