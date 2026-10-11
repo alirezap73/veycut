@@ -1,5 +1,9 @@
 # VeyCut — وی‌کات
 
+> **Public experimental release: [VeyCut 0.3.1-beta.2](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2)** — download the Apple silicon Mac installer and the Web prototype from this page. The Web package includes WebM video export; it is not a hosted website. The Mac installer is ad-hoc signed, not Apple-notarized; independent installation and longer real-footage editing remain unverified.
+>
+> **Latest release source:** [v0.3.1-beta.2](https://github.com/alirezap73/veycut/tree/v0.3.1-beta.2). This `main` branch still contains the earlier source while [PR #1](https://github.com/alirezap73/veycut/pull/1) is under validation. The older version/status text below is historical and does not describe the current public download.
+
 <img src="assets/icons/veycut.svg" width="72" height="72" alt="VeyCut icon">
 
 VeyCut is a native video editor with timeline editing, video effects, transitions, titles, captions and local speech tools. Product repository: https://github.com/alirezap73/veycut.
