@@ -93,8 +93,10 @@ def prepare(temp, evidence):
             shutil.copyfileobj(member, output, 1024 * 1024)
         assert source.stat().st_size == movie.file_size
     info = probe(source)
+    evidence.joinpath("REAL-MEDIA-SOURCE-PROBE.json").write_text(json.dumps(info, indent=2) + "\n")
     video = next(stream for stream in info["streams"] if stream["codec_type"] == "video")
-    assert (video["width"], video["height"], video["codec_name"]) == (640, 360, "h264")
+    observed_video = (video["width"], video["height"], video["codec_name"])
+    assert observed_video == (640, 360, "h264"), f"Official source video metadata: {observed_video!r}"
     assert any(stream["codec_type"] == "audio" for stream in info["streams"])
     duration = float(info["format"]["duration"])
     assert 570 <= duration <= 660, "Fixture must be full-length, not a trailer or short loop"
