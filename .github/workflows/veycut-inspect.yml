@@ -616,6 +616,7 @@ jobs:
                                       for mode in ('cancel', 'accept'):
                                           log_offset = ui_log.stat().st_size
                                           ui(process, 'play-start')
+                                          ui(process, 'snapshot', pathlib.Path(f'evidence/playback-meters-{mode}.png').resolve())
                                           ui(process, 'import-cancel' if mode == 'cancel' else 'import-held', accepted_sample)
                                           assert process.poll() is None, 'Native dialog terminated editor during playback'
                                           ui(process, 'play-toggle')
