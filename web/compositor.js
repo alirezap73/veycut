@@ -91,16 +91,17 @@ window.VeyCutCompositor = (() => {
       const seconds=Math.min(d,duration(a),duration(b));if(seconds<frame)continue;
       const speed=number(b.speed,1),handle=b.kind==='image'?seconds:number(b.in,number(b.sourceStart,0))/speed;
       if(handle+frame/2>=seconds){
-        const oldDuration=duration(b),extended=oldDuration+seconds;
-        const remap=keys=>(keys||[]).map(key=>({...key,at:(key.at*oldDuration+seconds)/extended}));
-        b.keys=remap(b.keys);b.videoEffects=(b.videoEffects||[]).map(effect=>({...effect,keys:Object.fromEntries(Object.entries(effect.keys||{}).map(([name,keys])=>[name,remap(keys)]))}));
+        // Match export::pre_roll: keys keep their normalized fractions;
+        // extending the clip therefore changes their timeline positions.
+        const extended=duration(b)+seconds;
         b.start=start(b)-seconds;b.timelineStart=b.start;b.duration=extended;b.in=number(b.in,number(b.sourceStart,0));
         if(b.kind!=='image'){b.in=Math.max(0,number(b.in,number(b.sourceStart,0))-seconds*speed);b.sourceStart=b.in;}
         b.out=b.in+b.duration*(b.kind==='video'||b.kind==='audio'?speed:1);b.fadeIn=Math.max(number(b.fadeIn,0),seconds);b[lane]=a[lane]+1;b[fade]=seconds;
       }else{
         const overlay={...b,start:start(b)-seconds,timelineStart:start(b)-seconds,duration:seconds,speed:1,muted:true,volume:0,fadeIn:0,fadeOut:0,transitionIn:null,[hold]:true,[lane]:a[lane]+1,[fade]:seconds};
         overlay.in=number(b.in,number(b.sourceStart,0));overlay.out=overlay.in+seconds;overlay.keys=[];
-        overlay.videoEffects=(b.videoEffects||[]).map(effect=>({...effect,params:{...(effect.params||{}),...Object.fromEntries(Object.entries(effect.keys||{}).map(([name,keys])=>[name,sample(keys,0,number(effect.params?.[name],effectDefaults.get(effect.id)?.[name]||0))]))},keys:{}}));
+        // Native holds freeze decoded pixels and transform animation only.
+        // Effect keys still sample the hold's own normalized duration.
         for(const property of ['scale','offsetX','offsetY','rotation','opacity']){const head=(b.keys||[]).filter(k=>k.property===property).sort((x,y)=>x.at-y.at)[0];if(head)overlay[property]=head.value;}
         let suffix=0;overlay.id=b.id+':transition-hold';while(ids.has(overlay.id))overlay.id=b.id+':transition-hold-'+(++suffix);ids.add(overlay.id);clips.push(overlay);
       }

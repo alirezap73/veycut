@@ -66,10 +66,13 @@ const b={...a,id:'b',start:1,timelineStart:1,in:.5,out:1.5,transitionIn:{id:'cro
 const spec={width:100,height:100,fps:30,tracks:[{id:'v'}],clips:[a,b]},before=JSON.stringify(spec),joined=c.resolveTransitions(spec),incoming=joined.clips.find(x=>x.id==='b');
 assert.equal(JSON.stringify(spec),before,'Rendering never mutates native project');assert.equal(c.resolveTransitions(joined),joined,'Adapter is idempotent');
 close(c.start(incoming),.5);close(c.duration(incoming),1.5);close(c.sourceTime(incoming,.75),.25);close(c.opacityAt(incoming,.75),.5);close(c.audioGain(incoming,.75),.5);
-close(c.valueAt(incoming,'scale',1),2);close(c.valueAt(incoming,'scale',1.5),3);
-close(incoming.videoEffects[0].keys.stops[0].at,1/3);close(incoming.videoEffects[0].keys.stops[1].at,1);
+close(c.valueAt(incoming,'scale',1),2+2/3);close(c.valueAt(incoming,'scale',1.5),2+4/3);
+close(incoming.keys[0].at,0);close(incoming.keys[1].at,1);
+close(incoming.videoEffects[0].keys.stops[0].at,0);close(incoming.videoEffects[0].keys.stops[1].at,1);
 const noHandle=c.resolveTransitions({...spec,clips:[a,{...b,in:0,out:1}]}),held=noHandle.clips.find(c.isHold);
-assert.ok(held);assert.notEqual(held.id,b.id);close(c.sourceTime(held,.8),0);close(c.audioGain(held,.8),0);close(c.valueAt(held,'scale',.8),2);assert.equal(held.videoEffects[0].keys.stops,undefined);close(held.videoEffects[0].params.stops,0);
+assert.ok(held);assert.notEqual(held.id,b.id);close(c.sourceTime(held,.8),0);close(c.audioGain(held,.8),0);close(c.valueAt(held,'scale',.8),2);assert.equal(JSON.stringify(held.videoEffects),JSON.stringify(b.videoEffects));
+const heldEffectStart=new Uint8ClampedArray([80,80,80,29]),heldEffectEnd=new Uint8ClampedArray(heldEffectStart);
+c.filterPixels(heldEffectStart,held.videoEffects,0);c.filterPixels(heldEffectEnd,held.videoEffects,1);assert.ok(heldEffectEnd[0]>heldEffectStart[0],'Native holds retain effect-key animation despite frozen decoded source');assert.equal(heldEffectEnd[3],29);
 close(c.start(noHandle.clips.find(x=>x.id==='b')),1);
 const image=c.resolveTransitions({...spec,clips:[a,{...b,kind:'image',in:0,out:1}]}).clips.find(x=>x.id==='b');assert.ok(!c.isHold(image));close(c.start(image),.5);
 assert.equal(c.resolveTransitions({...spec,clips:[a,{...b,start:1.1,timelineStart:1.1}]}).clips.length,2);
