@@ -2,7 +2,7 @@ name: VeyCut Web
 
 on:
   push:
-    branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next]
+    branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
     paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js']
   workflow_dispatch:
   workflow_call:
@@ -187,7 +187,7 @@ jobs:
           report = json.loads(Path('output/playwright/browser-report.json').read_text())
           assert report['status'] == 'passed' and report['engine'] == 'wasm'
           assert report['clips'] == 4 and report['videoClips'] == 2 and report['textClips'] == 2
-          assert report['captions'] == 2 and report['language'] == 'fa'
+          assert report['captions'] == 2 and report['language'] == 'en' and report['persianContentRTL'] is True
           assert len(report['checks']) == 16
           assert report['export']['precision'] == 'realtime'
           assert report['durationLimit'] == {'timelineSeconds': 121, 'limitSeconds': 120, 'downloaded': False}

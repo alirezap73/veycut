@@ -171,18 +171,20 @@ async (page) => {
   assert(mime && mime.startsWith('video/webm'), 'Actual supported WebM MIME');
   await download('#save', 'output/playwright/export-after.json');
   await page.screenshot({path: 'output/playwright/export-done.png', fullPage: true});
-  await page.locator('#language').selectOption('fa');
-  assert(await page.locator('html').getAttribute('dir') === 'rtl', 'Persian direction');
+  assert(await page.locator('#language').count() === 0, 'English-only UI has no language selector');
+  assert(await page.locator('html').getAttribute('lang') === 'en', 'English UI language');
+  assert((await page.locator('html').getAttribute('dir') || 'ltr') === 'ltr', 'English UI direction');
+  await page.locator('#cue-text').fill('سلام؛ متن فارسی در رابط انگلیسی');
+  assert(await page.locator('#cue-text').getAttribute('dir') === 'auto' && await page.locator('#cue-text').evaluate(el => el.matches(':dir(rtl)')), 'Persian input keeps RTL content direction');
   await page.setViewportSize({width: 390, height: 844});
-  await page.screenshot({path: 'output/playwright/mobile-fa.png', fullPage: true});
+  await page.screenshot({path: 'output/playwright/mobile-en-persian-content.png', fullPage: true});
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'No horizontal overflow');
   const report = {status: 'passed', engine: await page.locator('.badge').getAttribute('data-engine'),
-    clips: 4, videoClips: 2, textClips: 2, captions: 2, language: await page.locator('html').getAttribute('lang'),
+    clips: 4, videoClips: 2, textClips: 2, captions: 2, persianContentRTL: true, language: await page.locator('html').getAttribute('lang'),
     export: {filename: 'VeyCut-video.webm', mime, width: 360, height: 640, expectedTimelineSeconds: 1.8, precision: 'realtime', cancellationDownloaded: false, disconnectedMediaDownloaded: false},
-    checks: ['import', 'trim', 'split', 'undo-redo', 'project-reopen', 'media-reconnect', 'bilingual-srt', 'native-caption-clips', 'invalid-project-preservation', 'mobile-rtl', 'disconnected-export-refusal', 'export-cancellation', 'export-edit-preservation', 'webm-download', 'offered-size-limit']};
+    checks: ['import', 'trim', 'split', 'undo-redo', 'project-reopen', 'media-reconnect', 'bilingual-srt', 'native-caption-clips', 'invalid-project-preservation', 'english-ui-persian-content-mobile', 'disconnected-export-refusal', 'export-cancellation', 'export-edit-preservation', 'webm-download', 'offered-size-limit']};
   await page.locator('body').evaluate((body, value) => { body.dataset.checkReport = JSON.stringify(value); body.dataset.checkStage = 'limit'; }, report);
   await page.setViewportSize({width: 1440, height: 1100});
-  await page.locator('#language').selectOption('en');
   phase = 'duration-limit-project-open';
   await page.locator('#project-input').setInputFiles('output/playwright/limit-project.json');
   await count(151);
