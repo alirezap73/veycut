@@ -29,6 +29,16 @@ async page => {
     assert(loaded.clips[0].futureClipField.preserve[0]==='one','Preserve native clip extension');
     assert(loaded.media[0].path===fixture.media[0].path,'Preserve original desktop path');
     assert(await page.locator('#project-format').inputValue()==='1920x1080','Importedframe reflected in project controls');assert(await page.locator('#project-fps').inputValue()==='native:30000/1001','Importedrational rate reflected without rounding');await page.locator('#apply-project-format').click();assert((await native()).video.rateNum===30000&&(await native()).video.rateDen===1001,'Applyingunchanged frame retains exact rational rate');checks.push('native-open-preserves-properties');
+    phase='unsupported-preview-preservation';const unsupported=JSON.parse(JSON.stringify(fixture));unsupported.name='Unsupported treatment preservation';unsupported.clips[0].transitionIn={id:'unavailable.transition',duration:.5};unsupported.timelines[0].clips[0].transitionIn=unsupported.clips[0].transitionIn;
+    await uploadJSON(unsupported);await page.waitForFunction(()=>window.VeyCutWeb.engineDocument()?.name==='Unsupported treatment preservation');
+    assert((await native()).clips[0].transitionIn.id==='unavailable.transition','Unsupported treatment is retained in the imported document');
+    assert((await page.locator('#status').textContent()).includes('not available'),'Unsupported preview limitation stays visible');
+    await download('#save-native','output/playwright/native-unsupported-backup.json');
+    await page.locator('#video-export').click();await page.waitForFunction(()=>document.querySelector('#export-status').dataset.state==='error');
+    assert((await page.locator('#export-status').textContent()).includes('not available'),'Unsupported treatment refuses actual video export');
+    await uploadJSON(fixture);await page.waitForFunction(()=>window.VeyCutWeb.engineDocument()?.name==='Native interchange UI check');loaded=await native();
+    assert(await page.locator('#preview-canvas').getAttribute('data-error')===null,'Supported project clears preview failure state');
+    checks.push('unsupported-preview-preserves-document-and-refuses-output');
     // Return before opening a native chooser: playwright-cli handles that modal
     // in separate click/upload invocations, then calls this script again.
     await saveStage('native-reconnect',{checks,fixture,loaded});return;

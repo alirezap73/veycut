@@ -152,8 +152,9 @@ $('project-input').onchange=async()=>{
    const normalized=validateProject({...document,engineDocument:native,clips:native.clips.map(canonical),tracks:native.tracks,video:native.video||prepared.state.video});prepared.state=normalized.state;
   }
   const previousEngine=engine;pause();preview.reset();for(const m of media.values())if(m.url)URL.revokeObjectURL(m.url);
-  media=prepared.sources;engine=candidate;engineDocument=native;state=prepared.state;committed=true;if(engine)sync();past=[];future=[];clipboard=[];reconnect=null;playhead=0;revision++;badge();render(true);notify(desktop?'nativeLoaded':'loaded');
+  media=prepared.sources;engine=candidate;engineDocument=native;state=prepared.state;committed=true;if(engine)sync();past=[];future=[];clipboard=[];reconnect=null;playhead=0;revision++;
   if(previousEngine&&previousEngine!==engine){try{previousEngine.free?.();}catch{}}
+  badge();render(true);if(preview.renderError)error(preview.renderError);else notify(desktop?'nativeLoaded':'loaded');
  }catch(e){error(e);}finally{if(candidate&&!committed){try{candidate.free?.();}catch{}}}
 };
 function parseSubtitles(text){const clean=text.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n').trim(),vtt=clean.startsWith('WEBVTT');let blocks=clean.split(/\n[ \t]*\n/);if(vtt)blocks=blocks.slice(1);if(blocks.length>512)throw Error('Import at most 512 cues per atomic subtitle operation.');const parse=value=>{const m=/^(?:(\d{2}):)?(\d{2}):(\d{2})[,.](\d{3})$/.exec(value);if(!m||Number(m[2])>=60||Number(m[3])>=60)throw Error(t('srtInvalid'));return Number(m[1]||0)*3600+Number(m[2])*60+Number(m[3])+Number(m[4])/1000;};return blocks.filter(Boolean).map(block=>{const lines=block.split('\n');if(!lines[0].includes(' --> '))lines.shift();const timing=lines.shift()?.split(' --> ');if(!timing||timing.length!==2||!lines.length)throw Error(t('srtInvalid'));const a=parse(timing[0]),b=parse(timing[1]);let content=lines.join('\n');if(vtt)content=content.replace(/&(amp|lt|gt);/g,(_,key)=>({amp:'&',lt:'<',gt:'>'}[key]));if(b-a<.05||content.length>10000)throw Error(t('srtInvalid'));return{id:id(),start:a,end:b,text:content};});}
