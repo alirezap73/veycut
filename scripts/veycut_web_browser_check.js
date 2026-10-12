@@ -71,6 +71,19 @@ async (page) => {
   phase = 'initial-media-import';
   await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');
   await count(1);
+  phase = 'media-library-reuse';
+  assert(await page.locator('#media-library .library-card').count() === 1, 'Imported source appears in the media library');
+  await page.locator('#media-library [data-action="append"]').click();
+  await count(2);
+  assert(Math.abs((await page.evaluate(() => window.VeyCutWeb.snapshot())).clips[1].start - 2) < .01, 'Library append uses timeline end');
+  await page.locator('#undo').click();
+  await count(1);
+  await page.locator('#playhead').evaluate(input => { input.value = '0.4'; input.dispatchEvent(new Event('input', {bubbles: true})); });
+  await page.locator('#media-library [data-action="place"]').click();
+  await count(2);
+  assert((await page.evaluate(() => window.VeyCutWeb.snapshot())).clips.some(clip => Math.abs(clip.start - .4) < .01), 'Library places source at playhead');
+  await page.locator('#undo').click();
+  await count(1);
   await page.locator('#trim-in').fill('0.2');
   await page.locator('#trim-out').fill('1.8');
   phase = 'trim';
@@ -106,12 +119,14 @@ async (page) => {
   await count(4);
   await page.locator('#reselect').waitFor({state: 'visible'});
   assert(await page.locator('#play').isDisabled(), 'Reopened project must request media');
+  assert(await page.locator('#media-library [data-action="place"]').isDisabled(), 'Offline library media cannot be placed');
   await rejectExport('Reconnect every original media file');
   await count(4);
   return; // The CLI handles the native file chooser before stage two.
   }
   phase = 'media-reconnect';
   await page.waitForFunction(() => !document.querySelector('#play').disabled);
+  assert(await page.locator('#media-library [data-action="place"]').isEnabled(), 'Reconnected source is reusable');
   await seek(.4);
   phase = 'caption-preview';
   await page.waitForFunction(() => {
