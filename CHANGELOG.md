@@ -1,5 +1,9 @@
 # VeyCut changelog
 
+## 0.3.1 English interface (2026-10-12)
+
+The current Web and native source use an English-only interface. Saved or custom native UI locales cannot override English labels. Persian titles, subtitles, right-to-left content, fonts and content-processing language choices remain supported. The app version stays 0.3.1. The existing beta.2 Mac installer is unchanged until a matching package is built and validated.
+
 ## 0.3.1 Web timelines and interoperability (2026-10-12)
 
 App version remains **0.3.1**; the Mac installer is unchanged. [PR #3](https://github.com/alirezap73/veycut/pull/3) adds separate timelines and subtitle-role persistence, native JSON manifest import with preservation checks, rational frame settings, one-operation bulk subtitles, stereo meters and frame navigation. Eight picture effects and dissolve/black/white transitions share preview and composed output. Native JSON export is a manifest backup only; original paths are retained and browser-added paths refused. Bulk subtitles require non-overlapping times, at most 512 total clips and a 1 MiB request. Full native effects/audio filters, HDR, models and offline frame-accurate output remain gaps. [Exact-source server validation](https://github.com/alirezap73/veycut/actions/runs/38201512547) passed 13 bridge tests and real browser scenarios, including fully decoded composed/dissolve output and unsupported-treatment recovery. The additions are merged into main; hosted publication runs the validation again. This heading does not declare a new numeric release.

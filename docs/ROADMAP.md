@@ -6,7 +6,7 @@ The next target is a browser workflow closer to the Mac editor while keeping the
 
 | Priority | Target | Evidence needed before shipping |
 |---|---|---|
-| 1 | A clearer media bin, preview, timeline and editing controls | Exact-source browser editing, keyboard/focus and English/Persian layout checks |
+| 1 | A clearer media bin, preview, timeline and editing controls | Exact-source browser editing, keyboard/focus and English UI and Persian-content layout checks |
 | 2 | More timeline and text controls with reversible edits | Shared-engine and browser regressions; save/reopen preserving all properties |
 | 3 | Closer caption, title and audio workflows | Actual UI editing and decoded output with the added text/audio properties |
 | 4 | More dependable browser video output | Cancellation/cleanup, gaps/audio/caption timing and longer real-footage decode checks |

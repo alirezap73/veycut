@@ -1,5 +1,7 @@
 # VeyCut Web editor
 
+The current interface update uses **English-only controls**. Persian/UTF-8 subtitle content, licensed Persian fonts and content-level RTL input/rendering remain supported. This UI revision awaits matching server validation/deployment; previous run results below remain scoped to their source.
+
 **Expanded Web editor: server-validated source, app version 0.3.1.** This working tree expands the browser editor with mixed media tracks, shared-engine text clips, grouped edits, keyframes and composited preview/export. The public [0.3.1-beta.2 Web ZIP](https://github.com/alirezap73/veycut/releases/download/v0.3.1-beta.2/VeyCut-0.3.1-beta.2-web.zip) contains the earlier single-track prototype. New controls and larger output limits below are not claims about that download.
 
 App version remains **0.3.1**. [Open the hosted editor](https://alirezap73.github.io/veycut/) or [download the static ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip). [Public deployment and Wasm smoke checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) passed on source `26220d429da2cadfd05ea45db981c70a80dfc341`. [Platform support](https://github.com/alirezap73/veycut/blob/main/docs/PLATFORMS.md) separates released and development capabilities.

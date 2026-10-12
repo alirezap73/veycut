@@ -31,7 +31,7 @@ The Mac UI also provides **Relink All** when opening a project with missing medi
 
    Open `http://127.0.0.1:8080` in Chrome/Chromium. Direct file opening does not reliably load the WebAssembly engine. The [hosted editor](https://alirezap73.github.io/veycut/) can be used without a local server.
 3. Import a browser-decodable local video, select a clip, and set source in/out points or split. Preview is sequential and single-track.
-4. Import a UTF-8 SRT file, choose a cue and edit its text. Choose English or Persian using the language selector. Caption times stay fixed when video clips change.
+4. Import a UTF-8 SRT file, choose a cue and edit its text. Current Web controls are English-only; Persian subtitle content and right-to-left text entry remain supported. The earlier beta.2 Web ZIP retains its historical interface. Caption times stay fixed when video clips change.
 5. Save project JSON. After reopening, reconnect the original media files using their filename and size. Media bytes are not embedded. Supported desktop JSON manifests can also be imported with preservation checks. Save desktop JSON is a manifest backup with original paths, not a complete media/font folder bundle; browser-added paths are refused. Native imports initially list all text clips as captions, while Web saves retain explicit caption roles for each timeline.
 6. Use the timeline selector to create or switch separate cuts. Each timeline keeps its caption roles and frame/rate settings. Frame buttons and stereo meters support preview navigation and audio monitoring. Reconnect every source, choose an output size and export WebM. Keep the tab visible. Export records in real time using your device and may drift under load. Cancel produces no video download.
 

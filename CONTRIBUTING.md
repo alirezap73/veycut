@@ -1,6 +1,6 @@
 # Contributing to VeyCut
 
-Help us test real editing workflows, fix reproducible bugs and improve the English/Persian interface.
+Help us test real editing workflows, fix reproducible bugs and improve the English Web interface and Persian subtitle workflows.
 
 ## Report a problem or propose a change
 

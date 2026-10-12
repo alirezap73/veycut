@@ -199,10 +199,9 @@ impl SettingsPane {
                 self.language = studio
                     .languages
                     .iter()
-                    .position(|language| {
-                        Some(language.code.as_str()) == studio.prefs.locale.as_deref()
-                    })
+                    .position(|language| language.code == i18n::ENGLISH)
                     .unwrap_or(0);
+                studio.prefs.locale = Some(i18n::ENGLISH.to_owned());
                 self.playhead_stops = studio.prefs.playhead_stops_at_end;
                 // Not a choice: the app decodes on whatever hardware the
                 // platform has, and a file the hardware will not take opens
@@ -241,15 +240,11 @@ impl SettingsPane {
                 }
             }
             SettingsMsg::LanguageChanged(index) => {
-                let index = index.max(0) as usize;
-                if let Some(language) = studio.languages.get(index).cloned() {
-                    self.language = index;
-                    studio.prefs.locale = Some(language.code.clone());
-                    // The words change on the publish that follows: Rust's
-                    // on their way through `t`, the tree's through
-                    // `I18n.lang`.
-                    i18n::select(&language.code, &studio.host.dirs);
-                }
+                // Old callbacks or stored choices cannot change interface labels.
+                log::debug!("Ignoring legacy interface language index {index}; using English");
+                self.language = 0;
+                studio.prefs.locale = Some(i18n::ENGLISH.to_owned());
+                i18n::select(i18n::ENGLISH, &studio.host.dirs);
                 studio.prefs.save(&studio.host.dirs);
             }
             SettingsMsg::LogLevelChanged(index) => {
