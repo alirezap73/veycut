@@ -370,9 +370,10 @@ jobs:
           ffmpeg -v error -xerror -i output/playwright/speed-curve.webm -f null -
           python3 - <<'PYSPEED'
           import json, subprocess
-          meta=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_format','-show_streams','-of','json','output/playwright/speed-curve.webm']))
-          duration=float(meta['format']['duration'])
-          assert 1.7 < duration < 2.5, f'Curved export duration {duration}'
+          meta=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json','output/playwright/speed-curve.webm']))
+          frames=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_frames','-show_entries','frame=media_type,best_effort_timestamp_time','-of','json','output/playwright/speed-curve.webm']))['frames']
+          video_times=[float(frame['best_effort_timestamp_time']) for frame in frames if frame['media_type']=='video' and 'best_effort_timestamp_time' in frame]
+          assert len(video_times)>20 and 1.7 < video_times[-1] < 2.5, f'Curved export video frames: {video_times[-1:]}'
           assert any(s['codec_type']=='video' for s in meta['streams'])
           assert any(s['codec_type']=='audio' for s in meta['streams'])
           PYSPEED
