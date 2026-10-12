@@ -29,4 +29,28 @@ async page => {
   await page.waitForFunction(()=>!window.VeyCutWeb.snapshot().clips[0].filters?.length);
   await page.locator('#undo').click();
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].filters?.some(f=>f.id==='concat.bass'));
+  await page.goto('http://127.0.0.1:4173/');
+  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await page.locator('#media-input').setInputFiles('output/playwright/tone-bass.wav');
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
+  await page.locator('#export-size').selectOption('360x640');
+  await page.locator('details:has(#audio-tone-select) summary').click();
+  await page.locator('#audio-tone-select').selectOption('concat.telephone');
+  await page.locator('#audio-tone-gain').fill('5');
+  await page.locator('#audio-tone-apply').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].filters?.some(f=>f.id==='concat.telephone'&&f.params.drive===5));
+  await exportAudio('tone-telephone.webm');
+  await page.goto('http://127.0.0.1:4173/');
+  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await page.locator('#media-input').setInputFiles('output/playwright/echo-pulse.wav');
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
+  await page.locator('#export-size').selectOption('360x640');
+  await exportAudio('echo-baseline.webm');
+  await page.locator('details:has(#audio-tone-select) summary').click();
+  await page.locator('#audio-tone-select').selectOption('concat.echo');
+  await page.locator('#audio-tone-delay').fill('0.25');
+  await page.locator('#audio-tone-decay').fill('0.7');
+  await page.locator('#audio-tone-apply').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].filters?.some(f=>f.id==='concat.echo'&&f.params.decay===.7));
+  await exportAudio('echo-filtered.webm');
 }

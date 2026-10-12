@@ -87,9 +87,19 @@ const each=fn=>selected().map(fn);
 $('apply-speed').onclick=guarded(()=>mutate(each(c=>({op:'setClipSpeed',clipId:c.id,speed:number('clip-speed',.0625,16)}))));
 $('apply-audio').onclick=guarded(()=>mutate(each(c=>({op:'updateClip',clipId:c.id,patch:{volume:number('clip-volume',0,8),fadeIn:number('clip-fade-in',0),fadeOut:number('clip-fade-out',0),muted:$('clip-muted').checked}}))));
 const audioToneCatalog=window.VeyCutAudioFilters.catalog;
-function audioToneFields(clip){const entry=audioToneCatalog.find(e=>(clip?.filters||[]).some(f=>f.id===e.id))||audioToneCatalog[0];$('audio-tone-select').value=entry.id;$('audio-tone-gain').value=clip?.filters?.find(f=>f.id===entry.id)?.params?.gain??entry.defaultGain;}
-$('audio-tone-select').onchange=()=>{const entry=audioToneCatalog.find(e=>e.id===$('audio-tone-select').value);$('audio-tone-gain').value=current()?.filters?.find(f=>f.id===entry.id)?.params?.gain??entry.defaultGain;};
-$('audio-tone-apply').onclick=guarded(()=>{const entry=audioToneCatalog.find(e=>e.id===$('audio-tone-select').value);if(!entry)throw Error('Choose a supported audio tone.');const gain=number('audio-tone-gain',0,12);mutate(each(c=>{const filters=(c.filters||[]).filter(f=>f.id!==entry.id);filters.push({id:entry.id,params:{gain},enabled:true,keys:{}});return{op:'updateClip',clipId:c.id,patch:{filters}};}));});
+function audioToneFields(clip){const entry=audioToneCatalog.find(e=>(clip?.filters||[]).some(f=>f.id===e.id))||audioToneCatalog[0];$('audio-tone-select').value=entry.id;selectedAudioFilterFields(clip);}
+function selectedAudioFilterFields(clip){const entry=audioToneCatalog.find(e=>e.id===$('audio-tone-select').value),params=clip?.filters?.find(f=>f.id===entry?.id)?.params||{};
+ const echo=entry?.type==='echo',telephone=entry?.type==='telephone';$('audio-tone-gain-label').hidden=echo;$('audio-tone-gain').hidden=echo;
+ $('audio-tone-delay-label').hidden=!echo;$('audio-tone-decay-label').hidden=!echo;
+ $('audio-tone-gain-label').textContent=telephone?'Drive':'Gain (dB)';$('audio-tone-gain').max=telephone?'10':'12';
+ $('audio-tone-gain').value=telephone?(params.drive??entry.defaultDrive):(params.gain??entry?.defaultGain??5);
+ $('audio-tone-delay').value=params.delay??entry?.defaultDelay??.25;$('audio-tone-decay').value=params.decay??entry?.defaultDecay??.4;
+}
+$('audio-tone-select').onchange=()=>selectedAudioFilterFields(current());
+$('audio-tone-apply').onclick=guarded(()=>{const entry=audioToneCatalog.find(e=>e.id===$('audio-tone-select').value);if(!entry)throw Error('Choose a supported audio filter.');
+ const params=entry.type==='echo'?{delay:number('audio-tone-delay',.05,1),decay:number('audio-tone-decay',.1,.9)}:
+   entry.type==='telephone'?{drive:number('audio-tone-gain',0,10)}:{gain:number('audio-tone-gain',0,12)};
+ mutate(each(c=>{const filters=(c.filters||[]).filter(f=>f.id!==entry.id);filters.push({id:entry.id,params,enabled:true,keys:{}});return{op:'updateClip',clipId:c.id,patch:{filters}};}));});
 $('audio-tone-remove').onclick=guarded(()=>{const filterId=$('audio-tone-select').value;mutate(each(c=>({op:'updateClip',clipId:c.id,patch:{filters:(c.filters||[]).filter(f=>f.id!==filterId)}})));});
 $('apply-transform').onclick=guarded(()=>{const commands=[];for(const c of selected()){commands.push({op:'setClipTransform',clipId:c.id,scale:number('clip-scale',.05,8),offsetX:number('clip-x',-3,3),offsetY:number('clip-y',-3,3),rotation:number('clip-rotation')},{op:'updateClip',clipId:c.id,patch:{opacity:number('clip-opacity',0,1),flipH:$('clip-flip-h').checked,flipV:$('clip-flip-v').checked}});}mutate(commands);});
 $('apply-crop').onclick=guarded(()=>{const crop={left:number('crop-left',0,.9),right:number('crop-right',0,.9),top:number('crop-top',0,.9),bottom:number('crop-bottom',0,.9)};if(crop.left+crop.right>.9||crop.top+crop.bottom>.9)throw Error('Crop must leave at least 10% of each source dimension.');mutate(each(c=>({op:'updateClip',clipId:c.id,patch:{crop}})));});
