@@ -1,6 +1,10 @@
 // Run with playwright-cli run-code on the GitHub runner; UI actions only.
 async page => {
-  let phase='start';const checks=[];
+  let phase='start';
+  const stage=await page.locator('body').getAttribute('data-native-check-stage');
+  const context=JSON.parse(await page.locator('body').getAttribute('data-native-check-context')||'{}');
+  const checks=context.checks||[];let fixture=context.fixture,loaded=context.loaded;
+  const saveStage=async(next,value)=>page.locator('body').evaluate((body,ctx)=>{body.dataset.nativeCheckStage=ctx.next;body.dataset.nativeCheckContext=JSON.stringify(ctx.value);},{next,value});
   const assert=(ok,message)=>{if(!ok)throw Error(message);};
   const snapshot=()=>page.evaluate(()=>window.VeyCutWeb.snapshot());
   const native=()=>page.evaluate(()=>window.VeyCutWeb.engineDocument());
@@ -9,10 +13,11 @@ async page => {
   const download=async(button,path)=>{const pending=page.waitForEvent('download');await page.locator(button).click();await(await pending).saveAs(path);};
   const waitClips=n=>page.waitForFunction(count=>window.VeyCutWeb.snapshot().clips.length===count,n);
   try {
+    if(!stage){
     await page.reload();await page.setViewportSize({width:1440,height:1100});
     await page.waitForFunction(()=>document.querySelector('.badge').dataset.engine==='wasm');
     phase='seed-media';await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');await waitClips(1);
-    const fixture=await native();fixture.name='Native interchange UI check';fixture.video={...fixture.video,width:1920,height:1080,rateNum:30000,rateDen:1001};fixture.timelines[0].video={...fixture.timelines[0].video,...fixture.video};
+    fixture=await native();fixture.name='Native interchange UI check';fixture.video={...fixture.video,width:1920,height:1080,rateNum:30000,rateDen:1001};fixture.timelines[0].video={...fixture.timelines[0].video,...fixture.video};
     fixture.media[0].path='/desktop/original/portrait-2s.mp4';
     fixture.media[0].futureMediaField={preserve:'metadata'};
     fixture.clips[0].futureClipField={preserve:['one',2]};
@@ -20,12 +25,16 @@ async page => {
     fixture.futureProjectField={preserve:true};
     phase='desktop-manifest-open';await uploadJSON(fixture);
     await page.waitForFunction(()=>window.VeyCutWeb.engineDocument()?.name==='Native interchange UI check');
-    const loaded=await native();assert(loaded.futureProjectField?.preserve===true,'Preserve native project extension');
+    loaded=await native();assert(loaded.futureProjectField?.preserve===true,'Preserve native project extension');
     assert(loaded.clips[0].futureClipField.preserve[0]==='one','Preserve native clip extension');
     assert(loaded.media[0].path===fixture.media[0].path,'Preserve original desktop path');
     assert(await page.locator('#project-format').inputValue()==='1920x1080','Importedframe reflected in project controls');assert(await page.locator('#project-fps').inputValue()==='native:30000/1001','Importedrational rate reflected without rounding');await page.locator('#apply-project-format').click();assert((await native()).video.rateNum===30000&&(await native()).video.rateDen===1001,'Applyingunchanged frame retains exact rational rate');checks.push('native-open-preserves-properties');
-    phase='desktop-reconnect';await page.locator('#reselect').click();
-    await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');
+    // Return before opening a native chooser: playwright-cli handles that modal
+    // in separate click/upload invocations, then calls this script again.
+    await saveStage('native-reconnect',{checks,fixture,loaded});return;
+    }
+    if(stage==='native-reconnect'){
+    phase='desktop-reconnect';
     await page.waitForFunction(()=>document.querySelector('#reselect').hidden);
     await download('#save-native','output/playwright/native-roundtrip.json');
     await download('#save','output/playwright/native-web-envelope.json');
@@ -58,8 +67,10 @@ async page => {
     assert(exact(await native())===exact(importedNative),'Rejectedoversized captions preserve native project');
     checks.push('over-cap-caption-preservation');
     await download('#save-native','output/playwright/native-bulk-captions.json');
-    phase='browser-path-export-refusal';await page.locator('#import').click();
-    await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');await waitClips(57);
+    await saveStage('browser-import',{checks,fixture,loaded});return;
+    }
+    assert(stage==='browser-import','Unexpected native UI driver stage: '+stage);
+    phase='browser-path-export-refusal';await waitClips(57);
     const downloads=[];const received=item=>downloads.push(item);page.on('download',received);
     try{await page.locator('#save-native').click();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('original desktop media paths'));await page.waitForTimeout(300);assert(!downloads.length,'Browser-added paths must refuse native download');}finally{page.off('download',received);}
     checks.push('browser-path-native-export-refusal');
@@ -67,7 +78,7 @@ async page => {
     const report={status:'passed',checks,bulkCueCount:55,atomicUndo:true,
       desktopExportScope:'JSON manifest only; original paths preserved. Media/font files and folder bundles are not packaged; browser-added paths refused.',
       reconnectScope:'Native source has unknown original byte size; filename/kind/dimensions/ranges checked and selected size pinned, not a cryptographic match.'};
-    const pending=page.waitForEvent('download');await page.evaluate(value=>{const a=document.createElement('a');const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));a.href=url;a.download='native-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},report);await(await pending).saveAs('output/playwright/native-report.json');
+    const pending=page.waitForEvent('download');await page.evaluate(value=>{const a=document.createElement('a');const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));a.href=url;a.download='native-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},report);await(await pending).saveAs('output/playwright/native-report.json');await saveStage('complete',{checks});
   } catch(error) {
     await page.screenshot({path:'output/playwright/native-failure.png',fullPage:true}).catch(()=>{});
     throw Error('Native UI check phase='+phase+': '+error.message);

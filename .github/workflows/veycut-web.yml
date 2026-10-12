@@ -96,7 +96,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-check.log output/playwright/transition-check.log output/playwright/timelines-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -321,6 +321,14 @@ jobs:
           PYTRANSITION
           playwright-cli run-code --filename=scripts/veycut_web_timelines_check.js > output/playwright/timelines-check.log
           playwright-cli run-code --filename=scripts/veycut_web_transport_check.js > output/playwright/transport-check.log
+          playwright-cli run-code --filename=scripts/veycut_web_native_check.js > output/playwright/native-open.log
+          playwright-cli snapshot --filename=output/playwright/native-reconnect.yml
+          playwright-cli run-code 'async page => { await page.locator("#reselect").click(); }'
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
+          playwright-cli run-code --filename=scripts/veycut_web_native_check.js > output/playwright/native-reconnect.log
+          playwright-cli snapshot --filename=output/playwright/native-browser-import.yml
+          playwright-cli run-code 'async page => { await page.locator("#import").click(); }'
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
           playwright-cli run-code --filename=scripts/veycut_web_native_check.js > output/playwright/native-check.log
           python3 - <<'PYINTEROP'
           import json
