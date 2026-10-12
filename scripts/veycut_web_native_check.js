@@ -12,7 +12,7 @@ async page => {
     await page.reload();await page.setViewportSize({width:1440,height:1100});
     await page.waitForFunction(()=>document.querySelector('.badge').dataset.engine==='wasm');
     phase='seed-media';await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');await waitClips(1);
-    const fixture=await native();fixture.name='Native interchange UI check';
+    const fixture=await native();fixture.name='Native interchange UI check';fixture.video={...fixture.video,width:1920,height:1080,rateNum:30000,rateDen:1001};fixture.timelines[0].video={...fixture.timelines[0].video,...fixture.video};
     fixture.media[0].path='/desktop/original/portrait-2s.mp4';
     fixture.media[0].futureMediaField={preserve:'metadata'};
     fixture.clips[0].futureClipField={preserve:['one',2]};
@@ -23,7 +23,7 @@ async page => {
     const loaded=await native();assert(loaded.futureProjectField?.preserve===true,'Preserve native project extension');
     assert(loaded.clips[0].futureClipField.preserve[0]==='one','Preserve native clip extension');
     assert(loaded.media[0].path===fixture.media[0].path,'Preserve original desktop path');
-    checks.push('native-open-preserves-properties');
+    assert(await page.locator('#project-format').inputValue()==='1920x1080','Importedframe reflected in project controls');assert(await page.locator('#project-fps').inputValue()==='native:30000/1001','Importedrational rate reflected without rounding');await page.locator('#apply-project-format').click();assert((await native()).video.rateNum===30000&&(await native()).video.rateDen===1001,'Applyingunchanged frame retains exact rational rate');checks.push('native-open-preserves-properties');
     phase='desktop-reconnect';await page.locator('#reselect').click();
     await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');
     await page.waitForFunction(()=>document.querySelector('#reselect').hidden);
