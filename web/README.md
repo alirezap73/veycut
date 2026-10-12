@@ -53,6 +53,6 @@ The [expanded editing checks](https://github.com/alirezap73/veycut/actions/runs/
 
 Safari/Firefox, longer real footage, high-resolution/many-layer performance and the enlarged byte cap remain unverified. All builds, browser runs and video decoding ran on GitHub; no local browser, video recording or native build was run.
 
-## Next parity candidate validation
+## Current parity validation
 
-The additions described above are in [PR #3](https://github.com/alirezap73/veycut/pull/3). Lightweight arithmetic, project-adapter, syntax and whitespace checks passed. GitHub validates actual native-manifest import/reconnect/download, 55 bilingual captions with one Undo/Redo, independent timeline caption roles, frame navigation, decoded stereo meters, and decoded red/blue dissolve output. Publication requires those scenarios to pass. App version and existing Mac installer remain unchanged.
+The additions above were merged in [PR #3](https://github.com/alirezap73/veycut/pull/3). [Exact-source checks](https://github.com/alirezap73/veycut/actions/runs/38201512547) passed on `221d7ca1e7b76ce56853ba12056240063cc6df31`: 13 Rust bridge tests, native/Wasm clippy, real native-manifest import/reconnect/download and unsupported-treatment recovery/refusal, 55 bilingual captions with one Undo/Redo, independent timeline caption roles, frame navigation, live stereo meters, and fully decoded red/blue dissolve output. Mixed WebM output also decoded 64 video frames with source audio and native text. Hosted publication runs those checks again; [build identity](https://alirezap73.github.io/veycut/build-info.json) identifies the live package. App version and existing Mac installer remain unchanged. Full native feature parity is not established.

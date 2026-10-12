@@ -17,30 +17,27 @@ This matrix describes the **public 0.3.1-beta.2 downloads**, published October 1
 | Video export | Native H.264/AAC path verified with generated fixtures | Real-time VP8/Opus WebM path verified in Chromium with short generated media |
 | Export limits | Configurable native output; long real-footage sessions unverified | 120 seconds; 960-pixel long edge; requested 30 fps; 64 MiB |
 | Failure protection | Existing-output refusal, active Cancel and missing/corrupt-source restoration retry verified | Cancellation, disconnected-source refusal and project preservation verified |
-| Installation | DMG, ad-hoc signed; Apple notarization and independent install unverified | Extract ZIP and serve over HTTP; hosted URL pending |
+| Installation | DMG, ad-hoc signed; Apple notarization and independent install unverified | Extract ZIP and serve over HTTP; original archive requires HTTP; current hosted preview is linked below |
 
 Both projects reference source media instead of embedding it. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
 
-## Expanded Web editor · server-validated source
+## Current expanded Web editor · server-validated source
 
-This second matrix describes the working tree after beta.2. It is **source validated in [GitHub checks](https://github.com/alirezap73/veycut/actions/runs/38192514807)**, not the downloaded beta.2 package. App version stays 0.3.1. The [hosted editor](https://alirezap73.github.io/veycut/) and [current Web ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) were published and verified in [deployment checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) on source `26220d4`.
+The [exact-source Web checks](https://github.com/alirezap73/veycut/actions/runs/38201512547) passed on `221d7ca`. These capabilities are merged into main at app version 0.3.1 and are separate from the older beta.2 Web archive. The [hosted editor](https://alirezap73.github.io/veycut/) and [current ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) identify their exact revision in [build-info.json](https://alirezap73.github.io/veycut/build-info.json); publication reruns the browser checks before deployment.
 
-| Area | Current development implementation | Remaining limitation or validation |
+| Area | Verified Web implementation | Remaining limitation or validation |
 |---|---|---|
-| Timeline and media | Video/audio/image/text on mixed tracks; visibility/mute; grouped placement/clipboard/duplicate, ripple removal and Undo/Redo | Requires shared-engine Wasm for advanced edits; short Chromium scenarios passed; other browsers and longer footage remain unverified |
-| Titles and captions | Shared-engine text clips, cue timing/appearance, SRT/plain-text WebVTT import/export and find/replace | Browser fonts differ from Mac; 31-cue atomic import and 32-command group limit; parser subset |
+| Timeline and media | Video/audio/image/text on mixed tracks; grouped placement/clipboard/duplicate, ripple removal, multiple timelines and Undo/Redo | Shared Wasm engine required for advanced edits; short Chromium scenarios passed; other browsers and longer footage unverified |
+| Titles and captions | Shared-engine text clips, timing/appearance, SRT/plain-text WebVTT, find/replace and per-timeline caption roles | Browser fonts differ from Mac; bulk import needs non-overlapping times, 512 total project clips and a 1 MiB request; ordinary group edits have a 32-command bound |
 | Transform and animation | Position/scale/rotation/opacity/crop and supported property keyframes | Keyed opacity and transformed still output passed the short mixed-layer check |
-| Picture effects | Exposure, contrast and saturation | Full native catalogue, transitions, HDR and model tools remain gaps |
-| Audio | Mixed active source audio, speed/volume/fades/mute | Browser/device timing; native audio filters and variable speed curves unsupported |
-| Composed output | Shared browser compositor for layered preview and real-time export | SDR Canvas, not native HDR or frame-accurate offline rendering |
-| Formats | WebM; H.264/AAC MP4 offered only if MediaRecorder reports explicit codec support | Codec/browser availability varies; MP4 was unavailable on tested Chromium; other recorder implementations remain unverified |
-| Bounds | 120 seconds, 1920-pixel long edge, 256 MiB output, 16 simultaneous non-text media layers | Short 360×640 output and duration rejection passed; higher-resolution/layer/byte stress remains unverified; preview also bounds active/selected sources |
+| Picture effects and transitions | Eight effects: exposure, contrast, saturation, warm/cool, vibrance, mono without grain and vignette; dissolve and black/white dips | Full native catalogue, grain, HDR and model tools remain gaps; source-handle preroll/frozen holds preserve original project data |
+| Sound and navigation | Mixed source audio, speed/volume/fades/mute, real stereo meters, held peak and frame navigation | Native audio filters and variable speed curves unsupported; browser/device timing varies |
+| Project interchange | Supported desktop JSON manifests import with native-property preservation checks; original media reconnects; native JSON backup preserves paths | Media/fonts and complete project folders are not bundled; browser-added paths cannot be exported as a desktop manifest; unknown-size native media is not cryptographically verified |
+| Composed output | Shared browser compositor for layered preview and real-time export; fully decoded mixed and dissolve WebM checks passed | SDR Canvas, not native HDR or frame-accurate offline rendering; unsupported treatments remain recoverable in the project and refuse video output |
+| Formats | WebM; H.264/AAC MP4 offered only with explicit MediaRecorder codec support | MP4 was unavailable in tested Chromium; other recorder implementations unverified |
+| Bounds | 120 seconds, 1920-pixel long edge, 256 MiB, 16 simultaneous non-text media layers | Short 360×640 output and duration rejection passed; higher-resolution/layer/byte stress unverified |
 
-## Next Web parity candidate
-
-[PR #3](https://github.com/alirezap73/veycut/pull/3) implements multiple timelines, native-manifest interchange with property-preservation guards, rational frame settings, atomic bulk captions, stereo meters/frame navigation, eight picture effects and dissolve/black/white dips. Exact browser validation is pending; these additions are not yet claims about the live hosted build above. Native JSON export preserves original paths but does not bundle media/fonts or produce a complete project folder. Caption imports require non-overlapping times and remain subject to 512 total project clips / 1 MiB per request. Full native render, audio-filter and model parity remain incomplete.
-
-See the [current Web source guide](../web/README.md) for exact limits and the older released evidence. Native/Web feature parity is not established.
+Native/Web feature parity is not established. See the [Web source guide](../web/README.md) for exact import/export and capacity rules. Earlier mixed-layer validation remains recorded in the changelog.
 
 ## Other platforms and remaining checks
 

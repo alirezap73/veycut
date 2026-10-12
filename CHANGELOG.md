@@ -1,8 +1,8 @@
 # VeyCut changelog
 
-## 0.3.1 Web parity candidate (2026-10-12)
+## 0.3.1 Web timelines and interoperability (2026-10-12)
 
-App version remains **0.3.1**; the Mac installer is unchanged. [PR #3](https://github.com/alirezap73/veycut/pull/3) adds separate timelines and subtitle-role persistence, native JSON manifest import with preservation checks, rational frame settings, one-operation bulk subtitles, stereo meters and frame navigation. Eight picture effects and dissolve/black/white transitions share preview and composed output. Native JSON export is a manifest backup only; original paths are retained and browser-added paths refused. Bulk subtitles require non-overlapping times, at most 512 total clips and a 1 MiB request. Full native effects/audio filters, HDR, models and offline frame-accurate output remain gaps. Exact server browser validation and publication are pending; this heading does not declare a new numeric release.
+App version remains **0.3.1**; the Mac installer is unchanged. [PR #3](https://github.com/alirezap73/veycut/pull/3) adds separate timelines and subtitle-role persistence, native JSON manifest import with preservation checks, rational frame settings, one-operation bulk subtitles, stereo meters and frame navigation. Eight picture effects and dissolve/black/white transitions share preview and composed output. Native JSON export is a manifest backup only; original paths are retained and browser-added paths refused. Bulk subtitles require non-overlapping times, at most 512 total clips and a 1 MiB request. Full native effects/audio filters, HDR, models and offline frame-accurate output remain gaps. [Exact-source server validation](https://github.com/alirezap73/veycut/actions/runs/38201512547) passed 13 bridge tests and real browser scenarios, including fully decoded composed/dissolve output and unsupported-treatment recovery. The additions are merged into main; hosted publication runs the validation again. This heading does not declare a new numeric release.
 
 ## 0.3.1 Web preview expansion (2026-10-12)
 
