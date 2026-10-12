@@ -6,13 +6,19 @@
 //! All methods return JSON envelopes; project documents retain native format.
 use concat_core::frame::MAX_SIDE;
 use concat_core::time::FrameRate;
+use concat_project::model::{
+    ClipKind, TextStyle,
+    ranges::{MAX_TIME, MIN_CLIP_DURATION},
+};
 use concat_project::{Command, DocumentSettings, Editor};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashSet;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+const MAX_CAPTION_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MEDIA: usize = 128;
 const MAX_CLIPS: usize = 512;
@@ -32,6 +38,27 @@ struct CreateOptions {
     rate_num: i64,
     #[serde(default = "default_den")]
     rate_den: i64,
+}
+/// A bounded import owns only the title IDs explicitly being replaced.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CaptionImport {
+    #[serde(default)]
+    replace_clip_ids: Vec<String>,
+    cues: Vec<CaptionCue>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CaptionCue {
+    #[serde(default, rename = "id")]
+    _id: Option<String>,
+    start: f64,
+    end: f64,
+    text: String,
+    #[serde(default)]
+    style: Option<TextStyle>,
+    #[serde(default)]
+    offset_y: Option<f64>,
 }
 fn default_name() -> String {
     "Untitled project".to_owned()
@@ -357,30 +384,151 @@ impl WebEditor {
                 "The edit would exceed the browser document limit.",
             );
         }
-        // Clone the exact session, including the monotonic ID mint and both
-        // history stacks. Rebuilding from JSON would resurrect retired IDs.
-        let mut staged = self.editor.clone();
-        match staged.apply(command) {
-            Ok(outcome) => {
-                if !within_capacity(&staged) {
-                    return error(
-                        "projectCapacity",
-                        "The staged edit exceeds browser project limits.",
-                    );
-                }
-                if encoded_len(&staged.to_document(&document_settings(&self.name, &staged)))
-                    > MAX_DOCUMENT_BYTES
-                {
-                    return error(
-                        "documentTooLarge",
-                        "The staged edit exceeds the browser document limit.",
-                    );
-                }
-                self.editor = staged;
-                self.response(outcome.applied, outcome.created_id)
-            }
-            Err(reason) => error("commandRejected", &reason.to_string()),
+        self.apply_staged(command)
+    }
+
+    /// Replaces an explicitly identified set of native captions in one Undo.
+    /// The dedicated 1 MiB import envelope accepts up to 512 timed cues while
+    /// ordinary command batches stay capped at 32. Native project limits still
+    /// apply, including clips on other timelines. Cues share one stable lane;
+    /// overlapping times are refused rather than silently retimed.
+    pub fn replace_captions(&mut self, import_json: &str) -> String {
+        if import_json.len() > MAX_CAPTION_REQUEST_BYTES {
+            return error(
+                "requestTooLarge",
+                "Caption import exceeds the 1 MiB request limit.",
+            );
         }
+        let Ok(mut import) = serde_json::from_str::<CaptionImport>(import_json) else {
+            return error(
+                "invalidCaptions",
+                "Caption import is not a valid timed-cue request.",
+            );
+        };
+        if import.cues.len() > MAX_CLIPS || import.replace_clip_ids.len() > MAX_CLIPS {
+            return error(
+                "projectCapacity",
+                "A caption import supports at most 512 cues and replaced clips.",
+            );
+        }
+        let mut replaced = HashSet::new();
+        for id in &import.replace_clip_ids {
+            if !replaced.insert(id.as_str())
+                || self
+                    .editor
+                    .project()
+                    .active()
+                    .clip(id)
+                    .is_none_or(|clip| clip.kind != ClipKind::Text)
+            {
+                return error(
+                    "invalidCaptions",
+                    "Replaced captions must name distinct text clips on the active timeline.",
+                );
+            }
+        }
+        if clip_count(&self.editor) - replaced.len() + import.cues.len() > MAX_CLIPS {
+            return error(
+                "projectCapacity",
+                "Captions and other project clips exceed the 512-clip limit.",
+            );
+        }
+        for cue in &import.cues {
+            if !cue.start.is_finite()
+                || !cue.end.is_finite()
+                || cue.start < 0.0
+                || cue.end > MAX_TIME
+                || cue.end - cue.start < MIN_CLIP_DURATION
+                || cue.text.trim().is_empty()
+                || cue.text.chars().count() > 10_000
+                || cue
+                    .offset_y
+                    .is_some_and(|offset| !offset.is_finite() || !(-3.0..=3.0).contains(&offset))
+            {
+                return error(
+                    "invalidCaptions",
+                    "Use nonempty captions up to 10000 characters with finite valid times and placement.",
+                );
+            }
+        }
+        import
+            .cues
+            .sort_by(|left, right| left.start.total_cmp(&right.start));
+        if import
+            .cues
+            .windows(2)
+            .any(|pair| pair[1].start < pair[0].end)
+        {
+            return error(
+                "invalidCaptions",
+                "Overlapping captions cannot share the browser caption lane; adjust their times before importing.",
+            );
+        }
+        let timeline = self.editor.project().active();
+        let reused = import
+            .replace_clip_ids
+            .first()
+            .and_then(|id| timeline.clip(id))
+            .map(|clip| clip.track_id.clone())
+            .filter(|track_id| {
+                import.replace_clip_ids.iter().all(|id| {
+                    timeline
+                        .clip(id)
+                        .is_some_and(|clip| clip.track_id == *track_id)
+                }) && timeline
+                    .clips
+                    .iter()
+                    .all(|clip| clip.track_id != *track_id || replaced.contains(clip.id.as_str()))
+            });
+        let reusable_top = timeline
+            .tracks
+            .last()
+            .filter(|track| {
+                track.visible && !timeline.clips.iter().any(|clip| clip.track_id == track.id)
+            })
+            .map(|track| track.id.clone());
+        let existing_track = reused.or(reusable_top);
+        let mut commands = Vec::with_capacity(import.cues.len() + 2);
+        if !import.replace_clip_ids.is_empty() {
+            commands.push(Command::RemoveClips {
+                clip_ids: import.replace_clip_ids,
+                ripple: false,
+            });
+        }
+        let track_id = if import.cues.is_empty() {
+            None
+        } else if let Some(track) = existing_track {
+            Some(track)
+        } else {
+            if track_count(&self.editor) >= MAX_TRACKS {
+                return error(
+                    "projectCapacity",
+                    "No reusable caption lane remains within the 64-track limit.",
+                );
+            }
+            // Reserve a native ID on an exact probe clone. The committed Batch
+            // replays AddTrack first with the same mint, so this ID stays exact.
+            let mut probe = self.editor.clone();
+            let track = match probe.apply(Command::AddTrack { bottom: false }) {
+                Ok(outcome) => outcome.created_id,
+                Err(reason) => return error("commandRejected", &reason.to_string()),
+            };
+            commands.push(Command::AddTrack { bottom: false });
+            track
+        };
+        for cue in import.cues {
+            let mut style = cue.style.unwrap_or_default();
+            style.content = cue.text;
+            commands.push(Command::AddTextClip {
+                track_id: track_id.clone(),
+                above: true,
+                start: cue.start,
+                duration: Some(cue.end - cue.start),
+                style: Some(style),
+                offset_y: cue.offset_y.or(Some(0.35)),
+            });
+        }
+        self.apply_staged(Command::Batch { commands })
     }
 
     /// Undoes the latest real shared-engine edit.
@@ -408,6 +556,32 @@ impl WebEditor {
 }
 
 impl WebEditor {
+    fn apply_staged(&mut self, command: Command) -> String {
+        // Clone the exact session, including the monotonic ID mint and both
+        // history stacks. Rebuilding from JSON would resurrect retired IDs.
+        let mut staged = self.editor.clone();
+        match staged.apply(command) {
+            Ok(outcome) => {
+                if !within_capacity(&staged) {
+                    return error(
+                        "projectCapacity",
+                        "The staged edit exceeds browser project limits.",
+                    );
+                }
+                if encoded_len(&staged.to_document(&document_settings(&self.name, &staged)))
+                    > MAX_DOCUMENT_BYTES
+                {
+                    return error(
+                        "documentTooLarge",
+                        "The staged edit exceeds the browser document limit.",
+                    );
+                }
+                self.editor = staged;
+                self.response(outcome.applied, outcome.created_id)
+            }
+            Err(reason) => error("commandRejected", &reason.to_string()),
+        }
+    }
     fn document(&self) -> Value {
         self.editor
             .to_document(&document_settings(&self.name, &self.editor))
@@ -896,5 +1070,258 @@ mod tests {
         assert_eq!(first_id, control_first_id);
         assert_eq!(response(editor.undo()), response(control.undo()));
         assert_eq!(response(editor.redo()), response(control.redo()));
+    }
+
+    fn caption_import(
+        editor: &mut WebEditor,
+        replace: Vec<String>,
+        count: usize,
+        label: &str,
+    ) -> Value {
+        let cues = (0..count).map(|index| json!({
+            "start": index as f64, "end": index as f64 + 0.8,
+            "text": format!("{label} {index} سلام"),
+            "style": {"fontFamily":"Vazirmatn","fontSize":0.06,"fontWeight":600,"color":"#fff"},
+            "offsetY":0.35
+        })).collect::<Vec<_>>();
+        let result = response(
+            editor.replace_captions(&json!({"replaceClipIds":replace,"cues":cues}).to_string()),
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        result
+    }
+
+    #[test]
+    fn browser_large_caption_replace_at_clip_capacity_is_one_native_undo() {
+        let mut editor = WebEditor::new();
+        let media = imported(&mut editor);
+        let video = apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+        );
+        let baseline = video["document"].clone();
+        let imported = caption_import(&mut editor, vec![], MAX_CLIPS - 1, "Original");
+        let captions = imported["document"]["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|clip| clip["kind"] == "text")
+            .collect::<Vec<_>>();
+        assert_eq!(captions.len(), 511);
+        assert_eq!(
+            captions.first().unwrap()["text"]["content"],
+            "Original 0 سلام"
+        );
+        assert_eq!(captions.last().unwrap()["start"], 510.0);
+        let old_ids = captions
+            .iter()
+            .map(|clip| clip["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(old_ids.iter().collect::<HashSet<_>>().len(), 511);
+        assert_eq!(response(editor.undo())["document"], baseline);
+        assert_eq!(response(editor.redo())["document"], imported["document"]);
+
+        let replaced = caption_import(&mut editor, old_ids.clone(), MAX_CLIPS - 1, "Replacement");
+        assert_eq!(
+            replaced["document"]["clips"].as_array().unwrap().len(),
+            MAX_CLIPS
+        );
+        assert!(
+            replaced["document"]["clips"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|clip| clip["kind"] == "text")
+                .all(|clip| !old_ids.contains(&clip["id"].as_str().unwrap().to_owned()))
+        );
+        assert_eq!(response(editor.undo())["document"], imported["document"]);
+        assert_eq!(response(editor.redo())["document"], replaced["document"]);
+        let mut reopened = WebEditor::new();
+        assert_eq!(
+            response(reopened.open_project(&replaced["document"].to_string()))["document"],
+            replaced["document"]
+        );
+    }
+
+    #[test]
+    fn browser_caption_import_failures_preserve_complete_session_and_next_ids() {
+        let mut editor = WebEditor::new();
+        let media = imported(&mut editor);
+        let video = apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+        );
+        let before = response(editor.snapshot());
+        let mut control = WebEditor {
+            editor: editor.editor.clone(),
+            name: editor.name.clone(),
+        };
+        for request in [
+            json!({"replaceClipIds":[video["createdId"]],"cues":[]}),
+            json!({"replaceClipIds":["missing"],"cues":[]}),
+            json!({"cues":[{"start":0,"end":1,"text":"Good"},{"start":1,"end":0.5,"text":"Invalid"}]}),
+            json!({"cues":[{"start":0,"end":1,"text":" "}]}),
+            json!({"cues":[{"start":0,"end":360001,"text":"Too late"}]}),
+            json!({"cues":[{"start":0,"end":1,"text":"Bad placement","offsetY":4}]}),
+            json!({"cues":(0..MAX_CLIPS).map(|index| json!({"start":index,"end":index+1,"text":"Capacity"})).collect::<Vec<_>>()}),
+        ] {
+            assert_eq!(
+                response(editor.replace_captions(&request.to_string()))["ok"],
+                false
+            );
+            assert_eq!(response(editor.snapshot()), before);
+        }
+        assert_eq!(
+            response(editor.replace_captions(&" ".repeat(MAX_CAPTION_REQUEST_BYTES + 1)))["error"]
+                ["code"],
+            "requestTooLarge"
+        );
+        assert_eq!(response(editor.snapshot()), before);
+        // A single caption lane must reject overlaps, never silently move
+        // requested cue boundaries through the nearest-gap placement policy.
+        let overlap = json!({"cues":vec![json!({"start":0,"end":1,"text":"Overlap"});65]});
+        assert_eq!(
+            response(editor.replace_captions(&overlap.to_string()))["error"]["code"],
+            "invalidCaptions"
+        );
+        assert_eq!(response(editor.snapshot()), before);
+        let actual = caption_import(&mut editor, vec![], 40, "After refusals");
+        let expected = caption_import(&mut control, vec![], 40, "After refusals");
+        assert_eq!(
+            actual, expected,
+            "staged capacity failure consumes no live IDs or history"
+        );
+        assert_eq!(response(editor.undo())["document"], before["document"]);
+    }
+
+    #[test]
+    fn browser_caption_import_accepts_bounded_unicode_above_scalar_request_limit() {
+        let mut editor = WebEditor::new();
+        let text = "سلام جهان ".repeat(250);
+        let request = json!({"cues":(0..40).map(|index| json!({
+            "start":index,"end":index as f64 + 0.8,"text":text
+        })).collect::<Vec<_>>()})
+        .to_string();
+        assert!(request.len() > MAX_REQUEST_BYTES && request.len() <= MAX_CAPTION_REQUEST_BYTES);
+        let result = response(editor.replace_captions(&request));
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["document"]["clips"].as_array().unwrap().len(), 40);
+        assert_eq!(result["document"]["clips"][0]["text"]["content"], text);
+        assert_eq!(response(editor.undo())["document"]["clips"], json!([]));
+    }
+
+    #[test]
+    fn browser_two_hundred_captions_allocate_one_lane_and_replace_at_track_capacity() {
+        let mut editor = WebEditor::new();
+        let media = imported(&mut editor);
+        apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":"T4","start":0}),
+        );
+        let original = response(editor.snapshot())["document"].clone();
+        let imported = caption_import(&mut editor, vec![], 200, "New lane");
+        let titles = imported["document"]["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|clip| clip["kind"] == "text")
+            .collect::<Vec<_>>();
+        let lane = titles[0]["trackId"].as_str().unwrap().to_owned();
+        assert_eq!(
+            titles
+                .iter()
+                .map(|clip| clip["trackId"].as_str().unwrap())
+                .collect::<HashSet<_>>()
+                .len(),
+            1
+        );
+        assert_eq!(imported["document"]["tracks"].as_array().unwrap().len(), 5);
+        assert_eq!(titles[199]["start"], 199.0);
+        assert_eq!(
+            response(editor.undo())["document"],
+            original,
+            "new lane and all captions undo together"
+        );
+        assert_eq!(response(editor.redo())["document"], imported["document"]);
+        let ids = titles
+            .iter()
+            .map(|clip| clip["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        while track_count(&editor.editor) < MAX_TRACKS {
+            apply(&mut editor, json!({"op":"addTrack"}));
+        }
+        let top = editor
+            .editor
+            .project()
+            .active()
+            .tracks
+            .last()
+            .unwrap()
+            .id
+            .clone();
+        apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":top,"start":0}),
+        );
+        let before_replace = response(editor.snapshot());
+        let replacement = caption_import(&mut editor, ids, 200, "Same lane");
+        assert_eq!(
+            replacement["document"]["tracks"].as_array().unwrap().len(),
+            MAX_TRACKS
+        );
+        assert!(
+            replacement["document"]["clips"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|clip| clip["kind"] == "text")
+                .all(|clip| clip["trackId"] == lane)
+        );
+        assert_eq!(
+            response(editor.undo())["document"],
+            before_replace["document"]
+        );
+        assert_eq!(response(editor.redo())["document"], replacement["document"]);
+        let before_failure = response(editor.snapshot());
+        let refusal = response(editor.replace_captions(
+            r#"{"cues":[{"id":"local-cue","start":0,"end":1,"text":"No lane"}]}"#,
+        ));
+        assert_eq!(refusal["error"]["code"], "projectCapacity");
+        assert_eq!(response(editor.snapshot()), before_failure);
+    }
+
+    #[test]
+    fn browser_caption_document_budget_failure_discards_staged_ids_and_history() {
+        let mut editor = WebEditor::new();
+        let mut document = response(editor.snapshot())["document"].clone();
+        // An unknown native field must be preserved; leave room for small
+        // edits but not this bounded, multilingual caption import.
+        document["fixtureReserve"] = json!("x".repeat(MAX_DOCUMENT_BYTES - 512 * 1024));
+        assert_eq!(
+            response(editor.open_project(&document.to_string()))["ok"],
+            true
+        );
+        let before = response(editor.snapshot());
+        let mut control = WebEditor {
+            editor: editor.editor.clone(),
+            name: editor.name.clone(),
+        };
+        let text = "سلام ".repeat(1500);
+        let request = json!({"cues":(0..50).map(|index| json!({
+            "id":format!("local{index}"),"start":index,"end":index as f64+0.8,"text":text
+        })).collect::<Vec<_>>()})
+        .to_string();
+        assert!(request.len() <= MAX_CAPTION_REQUEST_BYTES);
+        assert_eq!(
+            response(editor.replace_captions(&request))["error"]["code"],
+            "documentTooLarge"
+        );
+        assert_eq!(response(editor.snapshot()), before);
+        let actual = caption_import(&mut editor, vec![], 40, "Small");
+        let expected = caption_import(&mut control, vec![], 40, "Small");
+        assert_eq!(
+            actual, expected,
+            "discarded successful native staging must not consume live caption IDs"
+        );
     }
 }

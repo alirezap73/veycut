@@ -37,7 +37,7 @@ window.VeyCutExporter = (() => {
       const begin=compositor.start(c), seconds=compositor.duration(c);
       if(!Number.isFinite(begin)||!Number.isFinite(seconds)||begin<0||seconds<1/60)throw new Error('Invalid timeline range.');
       if(c.kind!=='text' && (!c.url||!c.url.startsWith('blob:')))throw new Error('Reconnect every original media file before exporting.');
-      if(c.kind!=='text' && c.kind!=='image' && (!Number.isFinite(c.in)||!Number.isFinite(c.out)||c.in<0||c.out-c.in<.05))throw new Error('Invalid source range.');
+      if(c.kind!=='text' && c.kind!=='image' && !compositor.isHold(c) && (!Number.isFinite(c.in)||!Number.isFinite(c.out)||c.in<0||c.out-c.in<.05))throw new Error('Invalid source range.');
       end=Math.max(end,begin+seconds);
     }
     if(end<=0||end>LIMITS.seconds)throw new Error('Export supports timelines up to 120 seconds.');
@@ -51,7 +51,7 @@ window.VeyCutExporter = (() => {
   async function exportTimeline(spec,{signal:userSignal,onProgress=()=>{},onState=()=>{}}) {
     const controller=new AbortController(),signal=controller.signal;const userAbort=()=>controller.abort(cancelled());
     if(userSignal.aborted)throw cancelled();
-    const duration=validate(spec),supported=capability(spec.format);if(!supported)throw new Error('This browser cannot record the selected format with canvas and source audio.');check(signal);
+    spec=window.VeyCutCompositor.resolveTransitions(spec);const duration=validate(spec),supported=capability(spec.format);if(!supported)throw new Error('This browser cannot record the selected format with canvas and source audio.');check(signal);
     // Resume starts synchronously in the export button's gesture. Audio is routed
     // only to the recording destination, never to speakers (no echo/monitoring).
     const audio=new supported.Audio({sampleRate:48000});const resumeAudio=audio.resume();
@@ -104,8 +104,8 @@ window.VeyCutExporter = (() => {
           }
         }
         if(clip.kind==='video'||clip.kind==='audio'||!clip.kind){
-          const at=clip.in+(time-compositor.start(clip))*(clip.speed||1);
-          if(clip.out>item.element.duration+.01)throw new Error('The selected source does not cover the saved clip range.');
+          const at=compositor.sourceTime(clip,time);
+          if((!compositor.isHold(clip)&&clip.out>item.element.duration+.01)||at>item.element.duration-.001)throw new Error('The selected source does not cover the saved clip range.');
           if(Math.abs(item.element.currentTime-at)>.001)await event(item.element,'seeked',signal,()=>{item.element.currentTime=at;});
           if(item.element.readyState<HTMLMediaElement.HAVE_CURRENT_DATA)throw new Error('No decoded source after preparation.');
         }
@@ -114,7 +114,7 @@ window.VeyCutExporter = (() => {
       return active;
     }
     async function play(active){
-      for(const clip of active){const item=prepared.get(clip.id);if(item?.element.play)await item.element.play();}
+      for(const clip of active){const item=prepared.get(clip.id);if(item?.element.play&&!compositor.isHold(clip))await item.element.play();}
     }
     function segment(begin,seconds){return new Promise((resolve,reject)=>{
       const begun=audio.currentTime;
@@ -126,7 +126,7 @@ window.VeyCutExporter = (() => {
           const clip=spec.clips.find(c=>c.id===id);
           if(item.element.play && item.element.error)throw new Error('Source decoding failed: '+clip.id);
           if(item.element.play){
-            const expected=clip.in+(at-compositor.start(clip))*(clip.speed||1);
+            const expected=compositor.sourceTime(clip,at);
             if(item.element.ended && expected<clip.out-.06)
               throw new Error('Source ended before the saved clip range; export was cancelled.');
             if(item.element.seeking || item.element.readyState<HTMLMediaElement.HAVE_CURRENT_DATA){

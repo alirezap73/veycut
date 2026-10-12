@@ -2,8 +2,8 @@ name: VeyCut Web
 
 on:
   push:
-    branches: [main, development/0.3.0, development/web-editor-parity]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js']
+    branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next]
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js']
   workflow_dispatch:
   workflow_call:
 
@@ -70,6 +70,12 @@ jobs:
           node --check web/export.js
           node --check web/compositor.js
           node --check web/preview.js
+          node --check web/project-interop.js
+          node scripts/veycut_web_interop_check.js
+          node --check scripts/veycut_web_transport_check.js
+          node --check scripts/veycut_web_native_check.js
+          node --check scripts/veycut_web_timelines_check.js
+          node --check scripts/veycut_web_transition_check.js
           node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
@@ -90,7 +96,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -136,6 +142,7 @@ jobs:
           assert abs(duration - .8) < .002
           project['clips'], native['clips'] = [], []
           project['cues'], project['cueIds'] = [], []
+          project['timelineCueIds'] = {timeline['id']: [] for timeline in native['timelines']}
           for index in range(151):
               identifier, position = 'browser-limit-' + str(index), .2 + index * duration
               ui_clip, native_clip = copy.deepcopy(ui_source), copy.deepcopy(native_source)
@@ -272,6 +279,7 @@ jobs:
           (folder / 'webm-decoder-report.json').write_text(json.dumps(evidence, indent=2))
           PY
           ffmpeg -v error -f lavfi -i color=c=red:s=256x256 -frames:v 1 -threads 1 -y output/playwright/layer.png
+          ffmpeg -v error -f lavfi -i color=c=blue:s=256x256 -frames:v 1 -threads 1 -y output/playwright/blue.png
           ffmpeg -v error -f lavfi -i sine=frequency=880:duration=2:sample_rate=48000 -c:a pcm_s16le -y output/playwright/tone.wav
           playwright-cli run-code --filename=scripts/veycut_web_parity_check.js > output/playwright/parity-check.log
           for kind in video image audio; do
@@ -294,6 +302,50 @@ jobs:
           report = json.loads(Path('output/playwright/legacy-report.json').read_text())
           assert report['status'] == 'passed' and len(report['checks']) == 4, report
           PY
+          playwright-cli run-code --filename=scripts/veycut_web_transition_check.js > output/playwright/transition-check.log
+          ffmpeg -v error -i output/playwright/transition-video.webm -f null -
+          python3 - <<'PYTRANSITION'
+          import json, subprocess
+          from pathlib import Path
+          root = Path('output/playwright')
+          samples = []
+          for at in [.2, .75, 1.5]:
+              pixel = subprocess.check_output(['ffmpeg', '-v', 'error', '-ss', str(at), '-i', str(root / 'transition-video.webm'), '-frames:v', '1', '-vf', 'crop=2:2:180:320', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
+              assert len(pixel) == 12
+              samples.append(list(pixel[:3]))
+          red, mixed, blue = samples
+          assert red[0] > 200 and red[2] < 40, samples
+          assert mixed[0] > 45 and mixed[2] > 45, samples
+          assert blue[2] > 200 and blue[0] < 40, samples
+          (root / 'transition-decoder-report.json').write_text(json.dumps({'status':'passed', 'centerPixelsAtSeconds':[.2,.75,1.5], 'pixels':samples, 'precision':'Short real-time image dissolve, not long-footage frame-accuracy proof.'}, indent=2))
+          PYTRANSITION
+          playwright-cli run-code --filename=scripts/veycut_web_timelines_check.js > output/playwright/timelines-check.log
+          playwright-cli run-code --filename=scripts/veycut_web_transport_check.js > output/playwright/transport-check.log
+          playwright-cli run-code --filename=scripts/veycut_web_native_check.js > output/playwright/native-open.log
+          playwright-cli snapshot --filename=output/playwright/native-reconnect.yml
+          playwright-cli run-code 'async page => { await page.locator("#reselect").click(); }'
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
+          playwright-cli run-code --filename=scripts/veycut_web_native_check.js > output/playwright/native-reconnect.log
+          playwright-cli snapshot --filename=output/playwright/native-browser-import.yml
+          playwright-cli run-code 'async page => { await page.locator("#import").click(); }'
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
+          playwright-cli run-code --filename=scripts/veycut_web_native_check.js > output/playwright/native-check.log
+          python3 - <<'PYINTEROP'
+          import json
+          from pathlib import Path
+          root = Path('output/playwright')
+          report = json.loads((root / 'native-report.json').read_text())
+          assert report['status'] == 'passed' and report['bulkCueCount'] == 55, report
+          native = json.loads((root / 'native-roundtrip.json').read_text())
+          assert native['futureProjectField']['preserve'] is True
+          assert native['media'][0]['path'] == '/desktop/original/portrait-2s.mp4'
+          assert native['media'][0]['futureMediaField']['preserve'] == 'metadata'
+          assert native['clips'][0]['futureClipField']['preserve'] == ['one', 2]
+          bulk = json.loads((root / 'native-bulk-captions.json').read_text())
+          captions = [clip for clip in bulk['clips'] if clip['kind'] == 'text']
+          assert len(captions) == 55 and len(set(clip['trackId'] for clip in captions)) == 1
+          assert captions[1]['text']['content'] == 'سلام 1'
+          PYINTEROP
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Retain browser evidence

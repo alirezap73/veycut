@@ -12,7 +12,7 @@ The next target is a browser workflow closer to the Mac editor while keeping the
 | 4 | More dependable browser video output | Cancellation/cleanup, gaps/audio/caption timing and longer real-footage decode checks |
 | 5 | Hosted editor access — published | [Public URL and Wasm verification](https://github.com/alirezap73/veycut/actions/runs/38196479596) passed; [open the editor](https://alirezap73.github.io/veycut/) |
 
-Mixed-track compositing, titles/captions, separate audio mixing and grouped edits passed [short Chromium workflows and decoded output checks](https://github.com/alirezap73/veycut/actions/runs/38192514807). Full native effects/transitions, HDR, model tools, desktop/Web project interchange and frame-accurate offline output remain gaps. Browser breadth, longer footage and performance determine the next milestones.
+Mixed-track compositing, titles/captions, separate audio mixing and grouped edits passed [short Chromium workflows and decoded output checks](https://github.com/alirezap73/veycut/actions/runs/38192514807). The next candidate adds native-manifest interchange, multiple timelines, bulk captions, stereo meters, eight effects and dissolve/black/white transitions. Full native effects/audio filters, HDR, model tools, complete desktop project-folder interchange and frame-accurate offline output remain gaps. Browser breadth, longer footage and performance determine the next milestones.
 
 ## Mac beta validation
 
