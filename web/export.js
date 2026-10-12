@@ -5,7 +5,7 @@ window.VeyCutExporter = (() => {
   function capability(format='webm') {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
-    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
+    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1.420028,mp4a.40.2'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
     const mime = types
       .find(type => MediaRecorder.isTypeSupported(type));
     return mime ? {Audio,mime} : null;

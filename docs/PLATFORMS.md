@@ -33,7 +33,7 @@ This second matrix describes the working tree after beta.2. It is **implementati
 | Picture effects | Exposure, contrast and saturation | Full native catalogue, transitions, HDR and model tools remain gaps |
 | Audio | Mixed active source audio, speed/volume/fades/mute | Browser/device timing; native audio filters and variable speed curves unsupported |
 | Composed output | Shared browser compositor for layered preview and real-time export | SDR Canvas, not native HDR or frame-accurate offline rendering |
-| Formats | WebM; MP4 offered only if MediaRecorder reports support | Codec/browser availability varies; current MP4 path unverified |
+| Formats | WebM; H.264/AAC MP4 offered only if MediaRecorder reports explicit codec support | Codec/browser availability varies; current MP4 path unverified |
 | Bounds | 120 seconds, 1920-pixel long edge, 256 MiB output, 16 simultaneous non-text media layers | Enlarged limits await CI/stress/performance checks; preview also bounds active/selected sources |
 
 See the [current Web source guide](../web/README.md) for exact limits and the older released evidence. Native/Web feature parity is not established.

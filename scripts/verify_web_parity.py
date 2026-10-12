@@ -30,6 +30,7 @@ for item in [report['webm'], report['mp4']]:
     videos = [s for s in probe['streams'] if s['codec_type'] == 'video']
     audios = [s for s in probe['streams'] if s['codec_type'] == 'audio']
     assert len(videos) == len(audios) == 1, probe
+    print(json.dumps({'format':item['format'],'videoCodec':videos[0]['codec_name'],'audioCodec':audios[0]['codec_name']}),flush=True)
     assert (videos[0]['width'], videos[0]['height']) == (360, 640)
     if item['format'] == 'webm':
         assert videos[0]['codec_name'] in ['vp8', 'vp9'] and audios[0]['codec_name'] == 'opus'
