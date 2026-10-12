@@ -36,3 +36,24 @@ centre = subprocess.check_output([
 assert len(centre) == 12
 blue = list(centre[:3])
 assert blue[2] > 180 and blue[0] < 50 and blue[1] < 50, blue
+
+def frame(path):
+    result = subprocess.check_output([
+        'ffmpeg', '-v', 'error', '-ss', '0.6', '-i', str(folder / path), '-frames:v', '1',
+        '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'
+    ])
+    assert len(result) == 360 * 640 * 3
+    return result
+
+def edge_energy(data):
+    total = 0
+    for y in range(185, 440, 3):
+        for x in range(40, 320, 3):
+            at = (y * 360 + x) * 3
+            right = at + 3
+            total += sum(abs(data[at + c] - data[right + c]) for c in range(3))
+    return total
+
+baseline_energy = edge_energy(frame('blur-baseline.webm'))
+blurred_energy = edge_energy(frame('blur-filtered.webm'))
+assert blurred_energy < baseline_energy * .8, (baseline_energy, blurred_energy)

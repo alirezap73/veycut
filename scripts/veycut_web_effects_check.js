@@ -47,4 +47,24 @@ async page => {
   await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
   assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
   await (await keyed).saveAs('output/playwright/chroma-video.webm');
+  await page.goto('http://127.0.0.1:4173/');
+  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await page.locator('#media-input').setInputFiles('output/playwright/effects-source.png');
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
+  await page.locator('#trim-out').fill('2');await page.locator('#trim').click();
+  await page.locator('#export-size').selectOption('360x640');
+  const saveVideo=async name=>{
+    const event=page.waitForEvent('download',{timeout:45000});
+    await page.locator('#video-export').click();
+    await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
+    assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
+    await (await event).saveAs('output/playwright/'+name);
+  };
+  await saveVideo('blur-baseline.webm');
+  await page.locator('details:has(#effect-select) summary').click();
+  await page.locator('#effect-select').selectOption('concat.gaussian-blur');
+  await page.locator('#effect-amount').fill('12');
+  await page.locator('#apply-effect').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects?.some(e=>e.id==='concat.gaussian-blur'&&e.params.radius===12));
+  await saveVideo('blur-filtered.webm');
 }
