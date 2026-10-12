@@ -11,7 +11,7 @@ probe = json.loads(subprocess.check_output([
 stream = next(s for s in probe['streams'] if s['codec_type'] == 'video')
 assert (stream['width'], stream['height']) == (360, 640), stream
 rgb = subprocess.check_output([
-    'ffmpeg', '-v', 'error', '-ss', '.6', '-i', str(video), '-frames:v', '1',
+    'ffmpeg', '-v', 'error', '-ss', '0.6', '-i', str(video), '-frames:v', '1',
     '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'
 ])
 assert len(rgb) == 360 * 640 * 3
