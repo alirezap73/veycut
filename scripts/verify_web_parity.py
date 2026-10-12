@@ -38,7 +38,9 @@ for item in [report['webm'], report['mp4']]:
     run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(path), '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'])
     frames = json.loads(run(['ffprobe', '-v', 'error', '-show_frames', '-show_entries', 'frame=media_type,best_effort_timestamp_time,pkt_duration_time', '-of', 'json', str(path)]))['frames']
     times = [float(f['best_effort_timestamp_time']) for f in frames if f['media_type'] == 'video']
-    assert times == sorted(times) and len(times) >= 35
+    metrics={"format":item["format"],"frameCount":len(times),"firstPts":times[:3],"lastPts":times[-3:],"ordered":times==sorted(times)}
+    print(json.dumps(metrics),flush=True)
+    assert times == sorted(times) and len(times) >= 35, metrics
     assert 1.75 <= max(times) <= 2.4, max(times)
     pcm = array.array('h')
     pcm.frombytes(run(['ffmpeg', '-v', 'error', '-i', str(path), '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-']))

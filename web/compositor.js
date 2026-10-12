@@ -12,6 +12,7 @@ window.VeyCutCompositor = (() => {
     screen:'screen', add:'lighter', lighten:'lighten', darken:'darken'};
   const effects = new Set(['concat.exposure', 'concat.contrast', 'concat.saturation']);
   const cache = new WeakMap();
+  const stillCache = new WeakMap();
 
   function ease(progress, control) {
     const named = {linear:[0,0,1,1], in:[.42,0,1,1], out:[0,0,.58,1], inOut:[.42,0,.58,1]};
@@ -103,7 +104,16 @@ window.VeyCutCompositor = (() => {
     if (!(sw>0 && sh>0)) throw new Error('Crop removes the whole source picture.');
     const fit=Math.min(spec.width/sw,spec.height/sh);
     const w=Math.max(1,Math.round(sw*fit)), h=Math.max(1,Math.round(sh*fit));
-    let canvas=cache.get(ctx);
+    // A still with constant color treatments has identical source pixels on
+    // every frame. Transform/opacity keys remain applied outside this buffer.
+    const constant=clip.kind==='image' && !(clip.videoEffects || []).some(effect=>
+      Object.values(effect.keys || {}).some(keys=>Array.isArray(keys)&&keys.length));
+    const signature=constant?JSON.stringify([w,h,crop,clip.videoEffects || [],source.currentSrc || source.src]):null;
+    let stored=stillCache.get(ctx);
+    if (!stored) {stored=new Map();stillCache.set(ctx,stored);}
+    const previous=stored.get(clip.id);
+    if (constant && previous?.source===source && previous.signature===signature) return previous.canvas;
+    let canvas=constant?document.createElement('canvas'):cache.get(ctx);
     if (!canvas) {canvas=document.createElement('canvas');cache.set(ctx,canvas);}
     canvas.width=w;canvas.height=h;
     const paint=canvas.getContext('2d',{willReadFrequently:true});
@@ -113,6 +123,7 @@ window.VeyCutCompositor = (() => {
       filterPixels(image.data,clip.videoEffects,fraction(clip,time));
       paint.putImageData(image,0,0);
     }
+    if (constant) stored.set(clip.id,{canvas,source,signature});
     return canvas;
   }
   function text(ctx, clip, spec, time) {
@@ -169,6 +180,8 @@ window.VeyCutCompositor = (() => {
     const tracks=spec.tracks || [];
     const clips=spec.clips.filter(clip=>clip.kind!=='audio' && time>=start(clip) && time<start(clip)+duration(clip))
       .slice().sort((a,b)=>tracks.findIndex(track=>track.id===a.trackId)-tracks.findIndex(track=>track.id===b.trackId));
+    const retained=stillCache.get(ctx), active=new Set(clips.map(clip=>clip.id));
+    if(retained)for(const id of retained.keys())if(!active.has(id))retained.delete(id);
     for (const clip of clips) {
       const track=tracks.find(track=>track.id===clip.trackId);
       if (track?.visible===false || clip.hidden) continue;
