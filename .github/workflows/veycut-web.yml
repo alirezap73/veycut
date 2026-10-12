@@ -56,7 +56,7 @@ jobs:
           mkdir -p web/fonts
           cp src/crates/concat-text/fonts/Vazirmatn-Variable.ttf web/fonts/
           cp src/crates/concat-text/fonts/LICENSE-Vazirmatn.txt web/fonts/
-          cp LICENSE SOURCE-NOTICES.md LICENSE-EXCEPTIONS.md web/
+          cp LICENSE SOURCE-NOTICES.md LICENSE-EXCEPTIONS.md THIRD_PARTY_NOTICES.md TRADEMARK.md web/
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
