@@ -5,7 +5,7 @@ window.VeyCutExporter = (() => {
   function capability(format='webm') {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
-    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1.420028,mp4a.40.2'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
+    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc3.42001f,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1.420028,mp4a.40.2'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
     const mime = types
       .find(type => MediaRecorder.isTypeSupported(type));
     return mime ? {Audio,mime} : null;
@@ -77,7 +77,7 @@ window.VeyCutExporter = (() => {
     async function recording(active){checkRun();if(active&&recorder.state==='paused')await event(recorder,'resume',signal,()=>recorder.resume(),3000);else if(!active&&recorder.state==='recording')await event(recorder,'pause',signal,()=>recorder.pause(),3000);}
     function dispose(id){
       const item=prepared.get(id);if(!item)return;
-      item.element.pause?.();item.node?.disconnect();item.gain?.disconnect();
+      item.element.pause?.();item.node?.disconnect();for(const filter of item.filterNodes||[])filter.disconnect();item.gain?.disconnect();
       item.element.removeAttribute('src');item.element.load?.();item.element.remove();
       prepared.delete(id);sources.delete(id);
     }
@@ -99,7 +99,7 @@ window.VeyCutExporter = (() => {
             element.preservesPitch=clip.preservePitch!==false;
             await event(element,'loadedmetadata',signal,()=>{element.src=clip.url;element.load();});
             item.node=audio.createMediaElementSource(element);item.gain=audio.createGain();item.gain.gain.value=0;
-            item.node.connect(item.gain);item.gain.connect(destination);
+            item.gain.connect(destination);item.source=item.node;window.VeyCutAudioFilters.rewire(audio,item,clip.filters);
             await event(element,'playing',signal,()=>element.play());element.pause();
           }
         }

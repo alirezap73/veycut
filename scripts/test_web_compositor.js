@@ -5,6 +5,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const scope={window:{},console};
+vm.runInNewContext(fs.readFileSync('web/audio-filters.js','utf8'),scope);
 vm.runInNewContext(fs.readFileSync('web/compositor.js','utf8'),scope);
 const c=scope.window.VeyCutCompositor;
 const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<.00001,`${actual} != ${expected}`);
@@ -31,6 +32,8 @@ assert.throws(()=>c.validateClip({...clip,videoEffects:[{id:'unported-native-eff
 assert.throws(()=>c.validateClip({...clip,blend:'unknown'}),/blend/);
 assert.throws(()=>c.validateClip({...clip,speedCurve:[{at:0,speed:2}]}),/native treatment/);
 assert.throws(()=>c.validateClip({...clip,audioStream:1}),/audio stream/);
+assert.doesNotThrow(()=>c.validateClip({...clip,filters:[{id:'concat.bass',params:{gain:5}}]}));
+assert.throws(()=>c.validateClip({...clip,filters:[{id:'concat.echo'}]}),/audio filter/);
 assert.throws(()=>c.validateClip({...clip,kind:'text',text:{tracking:.1}}),/letter spacing/);
 let depth=0;
 const ctx={save(){depth++;},restore(){depth--;},setTransform(){},fillRect(){},translate(){},rotate(){},scale(){}};
