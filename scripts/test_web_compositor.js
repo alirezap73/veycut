@@ -48,7 +48,7 @@ c.render(ctx,{width:100,height:100,tracks:[{id:'bottom'},{id:'top'}],clips:[
 assert.deepEqual(painted,['bottom','top'],'Native tracks composite bottom-first');
 assert.equal(depth,0);
 // Native display-space packages keep alpha and use the same parameter defaults.
-assert.equal(c.effectCatalog.length,8);
+assert.equal(c.effectCatalog.length,11);
 const pixel=(id,params,rgb=[180,120,70,31],geometry)=>{const p=new Uint8ClampedArray(rgb);c.filterPixels(p,[{id,params}],0,geometry);return [...p];};
 assert.deepEqual(pixel('concat.mono',{}),pixel('concat.mono',{colour:40,contrast:40,grain:0}));
 const mono=pixel('concat.mono',{colour:0,contrast:0});assert.equal(mono[0],mono[1]);assert.equal(mono[1],mono[2]);assert.equal(mono[3],31);
@@ -56,6 +56,19 @@ const warm=pixel('concat.warm',{},[128,128,128,53]),cool=pixel('concat.cool',{},
 assert.ok(warm[0]>warm[2]);assert.ok(cool[2]>cool[0]);assert.equal(warm[3],53);
 assert.deepEqual(pixel('concat.vibrance',{amount:2},[100,100,100,22]),[100,100,100,22]);
 assert.deepEqual(pixel('concat.vibrance',{amount:2},[255,0,0,22]),[255,0,0,22]);
+assert.deepEqual(pixel('concat.posterize',{levels:2},[180,120,70,31]),[255,0,0,31]);
+const blocks=new Uint8ClampedArray([
+  0,0,0,255, 100,0,0,255, 200,0,0,255, 100,0,0,255,
+  0,0,0,255, 100,0,0,255, 200,0,0,255, 100,0,0,255
+]);
+c.filterPixels(blocks,[{id:'concat.pixelate',params:{size:2}}],0,{width:4,height:2});
+assert.deepEqual([blocks[0],blocks[4],blocks[8],blocks[12]],[50,50,150,150]);
+const edge=new Uint8ClampedArray(5*5*4);
+for(let i=0;i<25;i++){edge[i*4]=i%5>=2?180:70;edge[i*4+3]=199;}
+c.filterPixels(edge,[{id:'concat.sharpen',params:{amount:1}}],0,{width:5,height:5});
+assert.ok(edge[(2*5+1)*4]<70&&edge[(2*5+2)*4]>180,'Sharpen increases contrast at a real edge');
+assert.equal(edge[(2*5+2)*4+3],199);
+assert.throws(()=>pixel('concat.pixelate',{}),/dimensions/);
 assert.throws(()=>pixel('concat.mono',{grain:1}),/grain/);
 assert.throws(()=>c.validateClip({...clip,videoEffects:[{id:'concat.mono',keys:{grain:[{at:1,value:2}]}}]}),/grain/);
 assert.throws(()=>pixel('concat.warm',{unexpected:3}),/parameter/);
