@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity]
-    paths: ['web/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py']
+    paths: ['web/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js']
   workflow_dispatch:
   workflow_call:
 
@@ -56,6 +56,7 @@ jobs:
           mkdir -p web/fonts
           cp src/crates/concat-text/fonts/Vazirmatn-Variable.ttf web/fonts/
           cp src/crates/concat-text/fonts/LICENSE-Vazirmatn.txt web/fonts/
+          cp LICENSE SOURCE-NOTICES.md LICENSE-EXCEPTIONS.md web/
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -72,6 +73,7 @@ jobs:
           node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
+          node --check scripts/veycut_web_legacy_check.js
       - name: Run browser editing workflow
         shell: bash
         run: |
@@ -88,7 +90,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               timeout 20s playwright-cli snapshot --filename=output/playwright/failure-snapshot.yml > output/playwright/failure-snapshot.log 2>&1 || true
@@ -112,6 +114,14 @@ jobs:
           folder = Path('output/playwright')
           project = json.loads((folder / 'project.json').read_text())
           native = project['engineDocument']
+          legacy = {'format': 'veycut-web', 'schema': 1, 'engine': 'javascript',
+              'media': [{key: value for key, value in item.items() if key != 'kind'} for item in project['media']],
+              'clips': [{key: clip[key] for key in ['id', 'mediaId', 'in', 'out', 'timelineStart']} for clip in project['clips'] if clip['kind'] == 'video'],
+              'cues': [{key: cue[key] for key in ['id', 'start', 'end', 'text']} for cue in project['cues']]}
+          (folder / 'legacy-project.json').write_text(json.dumps(legacy))
+          broken = copy.deepcopy(legacy)
+          broken['clips'][0]['timelineStart'] = 'invalid'
+          (folder / 'legacy-invalid.json').write_text(json.dumps(broken))
           ui_source = next(clip for clip in project['clips'] if clip['kind'] == 'video')
           native_source = next(clip for clip in native['clips'] if clip['id'] == ui_source['id'])
           duration = ui_source['out'] - ui_source['in']
@@ -256,7 +266,44 @@ jobs:
           ffmpeg -v error -f lavfi -i color=c=red:s=256x256 -frames:v 1 -threads 1 -y output/playwright/layer.png
           ffmpeg -v error -f lavfi -i sine=frequency=880:duration=2:sample_rate=48000 -c:a pcm_s16le -y output/playwright/tone.wav
           playwright-cli run-code --filename=scripts/veycut_web_parity_check.js > output/playwright/parity-check.log
+          for kind in video image audio; do
+            playwright-cli snapshot --filename=output/playwright/parity-reconnect.yml
+            parity_ref=$(python3 - <<'PYREF'
+          import re
+          from pathlib import Path
+          refs = re.findall(r'button "Reconnect selected media" \[ref=(e\d+)\]', Path('output/playwright/parity-reconnect.yml').read_text())
+          assert len(refs) == 1, refs
+          print(refs[0])
+          PYREF
+            )
+            playwright-cli click "$parity_ref"
+            case "$kind" in
+              video) playwright-cli upload docs/beta-samples/portrait-2s.mp4 ;;
+              image) playwright-cli upload output/playwright/layer.png ;;
+              audio) playwright-cli upload output/playwright/tone.wav ;;
+            esac
+            playwright-cli run-code --filename=scripts/veycut_web_parity_check.js > "output/playwright/parity-${kind}.log"
+          done
           python3 scripts/verify_web_parity.py
+          playwright-cli run-code --filename=scripts/veycut_web_legacy_check.js > output/playwright/legacy-open.log
+          playwright-cli snapshot --filename=output/playwright/legacy-reconnect.yml
+          legacy_ref=$(python3 - <<'PYREF'
+          import re
+          from pathlib import Path
+          refs = re.findall(r'button "Reconnect selected media" \[ref=(e\d+)\]', Path('output/playwright/legacy-reconnect.yml').read_text())
+          assert len(refs) == 1, refs
+          print(refs[0])
+          PYREF
+          )
+          playwright-cli click "$legacy_ref"
+          playwright-cli upload docs/beta-samples/portrait-2s.mp4
+          playwright-cli run-code --filename=scripts/veycut_web_legacy_check.js > output/playwright/legacy-check.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('output/playwright/legacy-report.json').read_text())
+          assert report['status'] == 'passed' and len(report['checks']) == 4, report
+          PY
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Retain browser evidence

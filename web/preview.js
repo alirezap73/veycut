@@ -4,6 +4,7 @@
 window.VeyCutPreview = class {
   constructor(canvas,primary,{onTime=()=>{},onError=()=>{}}={}) {
     Object.assign(this,{canvas,primary,onTime,onError,sources:new Map(),nodes:new Map(),spec:null,media:null,selected:null,time:0,playing:false,frame:0,audio:null,syncUntil:0});
+    this.fontListener=()=>this.draw();document.fonts?.addEventListener('loadingdone',this.fontListener);
   }
   update(spec,media,selected) {
     this.pause();this.spec=spec;this.media=media;this.selected=selected;
@@ -50,5 +51,5 @@ window.VeyCutPreview = class {
   draw(){if(!this.spec)return;const pending=this.spec.clips.some(c=>['video','image'].includes(c.kind)&&this.time>=c.start&&this.time<c.start+c.duration&&this.spec.tracks.find(t=>t.id===c.trackId)?.visible!==false&&(!this.sources.get(c.id)||c.kind==='video'&&this.sources.get(c.id).readyState<2||c.kind==='image'&&!this.sources.get(c.id).complete));if(pending){const paint=this.canvas.getContext('2d');paint.fillStyle='#000';paint.fillRect(0,0,this.canvas.width,this.canvas.height);this.canvas.dataset.pending='true';return;}this.canvas.dataset.pending='false';const ctx=this.canvas.getContext('2d');if(window.VeyCutCompositor){try{window.VeyCutCompositor.render(ctx,{...this.spec,width:this.canvas.width,height:this.canvas.height},this.time,this.sources);}catch(error){this.pause();this.onError(error);}}else{ctx.fillStyle='#000';ctx.fillRect(0,0,this.canvas.width,this.canvas.height);const c=this.spec.clips.find(c=>c.id===this.selected),node=c&&this.sources.get(c.id);if(node instanceof HTMLVideoElement&&node.readyState>=2){const scale=Math.min(this.canvas.width/node.videoWidth,this.canvas.height/node.videoHeight);ctx.drawImage(node,0,0,node.videoWidth*scale,node.videoHeight*scale);}}}
   tick(){if(!this.playing)return;this.time=Math.min(this.duration(),this.origin+(performance.now()-this.epoch)/1000);try{this.sync();this.draw();}catch(error){this.pause();this.onError(error);return;}this.onTime(this.time);if(this.time>=this.duration()){this.pause();return;}this.frame=requestAnimationFrame(()=>this.tick());}
   reset(){this.pause();for(const node of this.sources.values())this.release(node);this.sources.clear();this.primary.removeAttribute('src');delete this.primary.dataset.sourceUrl;this.primary.load();this.time=0;}
-  dispose(){this.pause();for(const node of this.sources.values())this.release(node);this.sources.clear();if(this.audio)this.audio.close();}
+  dispose(){document.fonts?.removeEventListener('loadingdone',this.fontListener);this.pause();for(const node of this.sources.values())this.release(node);this.sources.clear();if(this.audio)this.audio.close();}
 };
