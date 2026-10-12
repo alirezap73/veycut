@@ -2,7 +2,7 @@
 
 The current interface update uses **English-only controls**. Persian/UTF-8 subtitle content, licensed Persian fonts and content-level RTL input/rendering remain supported. [English-interface server validation](https://github.com/alirezap73/veycut/actions/runs/38203197508) and [public deployment](https://github.com/alirezap73/veycut/actions/runs/38203552214) passed; earlier run results below remain scoped to their source.
 
-**Expanded Web editor: server-validated source, app version 0.3.1.** This working tree expands the browser editor with mixed media tracks, shared-engine text clips, grouped edits, keyframes and composited preview/export. The public [0.3.1-beta.2 Web ZIP](https://github.com/alirezap73/veycut/releases/download/v0.3.1-beta.2/VeyCut-0.3.1-beta.2-web.zip) contains the earlier single-track prototype. New controls and larger output limits below are not claims about that download.
+**Web editor: app version 0.3.1.** The current source has mixed media tracks, shared-engine text clips, grouped edits, keyframes and composited preview/export. Its media library lets you place an imported source again at the playhead or append it on a chosen track. The hosted editor and ZIP below are generated from a separately tested deployment; check their `build-info.json` for the exact published commit.
 
 App version remains **0.3.1**. [Open the hosted editor](https://alirezap73.github.io/veycut/) or [download the static ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip). [Public deployment and Wasm smoke checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) passed on source `26220d429da2cadfd05ea45db981c70a80dfc341`. [Platform support](https://github.com/alirezap73/veycut/blob/main/docs/PLATFORMS.md) separates released and development capabilities.
 
@@ -21,6 +21,7 @@ Media is selected locally and remains on the device. The current editor makes no
 ## Current development controls
 
 - Import browser-decodable video, audio and images. Arrange mixed tracks, set track visibility/mute, select groups and adjust timeline placement. Trim, split, ripple-delete, copy/paste and duplicate use shared commands with Undo/Redo in Wasm mode.
+- Reuse connected files from the media library on a chosen track without importing another copy. Saved projects retain source metadata; reconnecting an offline source makes it reusable again.
 - Change speed, volume, audio fades and mute. Set position, scale, rotation, opacity and crop. Add property keyframes; the browser compositor interpolates supported properties.
 - Add titles and caption text as native **shared-engine text clips**. Here, native means stored in the shared project document; browser Canvas draws the text using available browser fonts. Font shaping, colour and layout can differ from the Mac renderer.
 - Import the supported UTF-8 SRT or plain-text WebVTT subset; edit cue text, timing, size, colour and background; add/delete cues and use literal find/replace. Download SRT or WebVTT. Atomic import uses one stable caption lane and one Undo, bounded by **512 total project clips**, a **1 MiB serialized request**, and non-overlapping cue times. Group property edits remain bounded to **32 commands**. Files are at most **1 MiB**. The simple browser parser does not provide every native WebVTT feature.
@@ -45,7 +46,7 @@ The compositor draws aspect-fitted media, transforms, supported effects and text
 
 This is an SDR Canvas/real-time recording path. Native half-float HDR compositing, exact native font rendering and frame-accurate offline export are outside its current scope. Decode the whole output and check audio, timing and text before using it.
 
-## Released beta.2 evidence
+## Historical beta.2 evidence
 
 The shipped Web prototype has **120-second / 960-pixel / 64-MiB** limits, sequential single-track editing, SRT captions and WebM export. Its earlier [shared-engine/browser check](https://github.com/alirezap73/veycut/actions/runs/38126752421) passed on `d5b813370e5dd86b0addac17f684487461ee0f6c`.
 
