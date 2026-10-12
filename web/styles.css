@@ -51,3 +51,8 @@ button.primary:hover:not(:disabled){background:#a2f1ce}
 @media(max-width:1150px){.workspace{grid-template-columns:minmax(185px,230px) minmax(0,1fr)}.inspector{grid-column:1/-1;max-height:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 14px}.inspector h2,.inspector #clip-name,.inspector .properties,.inspector .muted,.inspector #reselect{grid-column:1/-1}}
 @media(max-width:760px){header{padding:12px 16px}.header-context{display:none}main{padding:16px 12px}.intro{display:block}.badge{margin-top:10px}.toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.toolbar button{min-width:0;padding:8px 5px;font-size:11px}.workspace{grid-template-columns:1fr}.media-library{max-height:none}.inspector{grid-column:auto;display:flex;max-height:500px}.media-library #media-library{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.monitor .screen{aspect-ratio:16/10}.cue-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}.project-settings select,.project-settings input{max-width:100%}.library-actions{gap:8px}}
+.effect-stack{display:grid;gap:7px;margin-top:12px}
+.effect-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:5px;align-items:center;padding:8px;border:1px solid #344451;border-radius:9px;background:#1d2b36}
+.effect-row span{font-size:11px;overflow-wrap:anywhere;grid-column:1/-2}
+.effect-row input[type=checkbox]{width:auto;margin:0 5px;justify-self:end}
+.effect-row button{padding:5px 6px;font-size:10px;margin:0}

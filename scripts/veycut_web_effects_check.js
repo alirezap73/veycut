@@ -15,6 +15,18 @@ async page => {
     await page.locator('#apply-effect').click();
   }
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects.length===3);
+  const rows=page.locator('#effect-stack [role="listitem"]');
+  assert(await rows.count()===3,'Applied effects are visible in the inspector');
+  await rows.nth(2).locator('button[data-action="up"]').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects[1].id==='concat.sharpen');
+  await page.locator('#undo').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects[1].id==='concat.posterize');
+  await rows.nth(0).locator('input[data-action="toggle"]').uncheck();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects[0].enabled===false);
+  await rows.nth(0).locator('input[data-action="toggle"]').check();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects[0].enabled===true);
+  await rows.nth(1).locator('button[data-action="edit"]').click();
+  assert(await page.locator('#effect-select').inputValue()==='concat.posterize','Stack edit opens the selected effect controls');
   const ids=await page.evaluate(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects.map(e=>e.id));
   assert(ids.join(',')==='concat.pixelate,concat.posterize,concat.sharpen','Effects retained in native document order');
   await page.locator('#playhead').press('Home');
@@ -25,6 +37,10 @@ async page => {
   await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
   assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
   await (await pending).saveAs('output/playwright/effects-video.webm');
+  await rows.nth(2).locator('button[data-action="remove"]').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects.length===2);
+  await page.locator('#undo').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects.length===3);
   await page.goto('http://127.0.0.1:4173/');
   await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
   await page.locator('#media-input').setInputFiles('output/playwright/blue.png');

@@ -113,7 +113,32 @@ function effectFields(clip){
  if(colour){const value=(stored?.params?.color??entry.params[0].default)>>>0;$('effect-color').value='#'+(value>>>8).toString(16).padStart(6,'0');}
  effectInputs.forEach((id,index)=>{const input=$(id),parameter=entry?.params[index],label=input.closest('label');label.hidden=!parameter||index===0&&colour;if(parameter&&parameter.type!=='color'){label.firstChild.textContent=parameter.label+' ';input.min=parameter.min;input.max=parameter.max;input.step=parameter.step;input.value=stored?.params?.[parameter.key]??parameter.default;}});
 }
-function inspectorTreatments(clip){const entry=clip?.videoEffects?.find(e=>effectCatalog.some(item=>item.id===e.id));editedEffectId=entry?.id||null;$('effect-select').value=editedEffectId||'';effectFields(clip);audioToneFields(clip);$('transition-select').value=clip?.transitionIn?.id||'';$('transition-duration').value=clip?.transitionIn?.duration||.5;}
+function effectStack(clip){
+ const root=$('effect-stack');root.replaceChildren();
+ for(const [index,effect]of (clip?.videoEffects||[]).entries()){
+  const entry=effectCatalog.find(item=>item.id===effect.id),name=entry?.name||effect.id;
+  const row=document.createElement('div');row.className='effect-row';row.setAttribute('role','listitem');
+  const label=document.createElement('span');label.textContent=name+(entry?'':' · unsupported');row.append(label);
+  const enabled=document.createElement('input');enabled.type='checkbox';enabled.checked=effect.enabled!==false;
+  enabled.setAttribute('aria-label','Enable '+name);enabled.dataset.action='toggle';
+  enabled.onchange=guarded(()=>changeEffectStack(clip.id,index,'toggle',enabled.checked));row.append(enabled);
+  for(const [action,title]of [['edit','Edit'],['up','Move up'],['down','Move down'],['remove','Remove']]){
+   const button=document.createElement('button');button.type='button';button.textContent=title;button.dataset.action=action;
+   button.setAttribute('aria-label',title+' '+name);button.disabled=action==='edit'&&!entry||action==='up'&&index===0||action==='down'&&index===clip.videoEffects.length-1;
+   button.onclick=guarded(()=>{if(action==='edit'){editedEffectId=effect.id;$('effect-select').value=effect.id;effectFields(clip);}else changeEffectStack(clip.id,index,action);});row.append(button);
+  }
+  root.append(row);
+ }
+}
+function changeEffectStack(clipId,index,action,checked){
+ const clip=state.clips.find(item=>item.id===clipId);if(!clip)return;
+ const effects=(clip.videoEffects||[]).map(item=>({...item}));
+ if(action==='toggle')effects[index].enabled=checked;
+ else if(action==='remove')effects.splice(index,1);
+ else{const other=index+(action==='up'?-1:1);[effects[index],effects[other]]=[effects[other],effects[index]];}
+ mutate([{op:'updateClip',clipId,patch:{videoEffects:effects}}]);
+}
+function inspectorTreatments(clip){const entry=clip?.videoEffects?.find(e=>e.id===editedEffectId&&effectCatalog.some(item=>item.id===e.id))||clip?.videoEffects?.find(e=>effectCatalog.some(item=>item.id===e.id));editedEffectId=entry?.id||null;$('effect-select').value=editedEffectId||'';effectFields(clip);effectStack(clip);audioToneFields(clip);$('transition-select').value=clip?.transitionIn?.id||'';$('transition-duration').value=clip?.transitionIn?.duration||.5;}
 $('effect-select').onchange=()=>{if($('effect-select').value)editedEffectId=$('effect-select').value;effectFields(current());};
 $('apply-effect').onclick=guarded(()=>{const entry=effectCatalog.find(e=>e.id===$('effect-select').value),params={};if(entry)entry.params.forEach((parameter,index)=>params[parameter.key]=parameter.type==='color'?((parseInt($('effect-color').value.slice(1),16)*256+255)>>>0):number(effectInputs[index],parameter.min,parameter.max));mutate(each(c=>{const existing=(c.videoEffects||[]).find(e=>e.id===editedEffectId),effects=(c.videoEffects||[]).filter(e=>e.id!==editedEffectId);if(entry)effects.push({...existing,id:entry.id,params:{...existing?.params,...params},enabled:true,keys:existing?.keys||{}});return{op:'updateClip',clipId:c.id,patch:{videoEffects:effects}};}));});
 const transitionCatalog=window.VeyCutCompositor.transitionCatalog||[];
