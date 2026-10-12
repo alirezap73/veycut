@@ -357,6 +357,7 @@ jobs:
           playwright-cli run-code --filename=scripts/veycut_web_effects_check.js > output/playwright/effects-check.log
           ffmpeg -v error -xerror -i output/playwright/effects-video.webm -f null -
           ffmpeg -v error -xerror -i output/playwright/chroma-video.webm -f null -
+          ffmpeg -v error -xerror -i output/playwright/blur-filtered.webm -f null -
           python3 scripts/verify_web_effects.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log

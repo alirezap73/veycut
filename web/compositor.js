@@ -21,6 +21,7 @@ window.VeyCutCompositor = (() => {
     {id:'concat.posterize',name:'Posterize',params:[param('levels','Levels',2,8,4)]},
     {id:'concat.pixelate',name:'Pixelate',params:[param('size','Size (px)',2,64,16)]},
     {id:'concat.sharpen',name:'Sharpen',params:[param('amount','Amount',.2,3,1,.05)]},
+    {id:'concat.gaussian-blur',name:'Gaussian blur',params:[param('radius','Radius (px)',1,50,10)]},
     {id:'concat.chroma-key',name:'Chroma key',params:[
       Object.freeze({...param('color','Screen colour',0,4294967295,11616511),type:'color'}),
       param('similarity','Similarity (%)',1,60,30),param('softness','Softness (%)',0,50,10),
@@ -40,6 +41,7 @@ window.VeyCutCompositor = (() => {
 
   const cache = new WeakMap();
   const stillCache = new WeakMap();
+  let blurScratch=null;
 
   function ease(progress, control) {
     const named = {linear:[0,0,1,1], in:[.42,0,1,1], out:[0,0,.58,1], inOut:[.42,0,.58,1]};
@@ -169,6 +171,18 @@ window.VeyCutCompositor = (() => {
           const i=(yy*width+xx)*4;for(let c=0;c<4;c++)pixels[i+c]=sum[c]/count;
         }
       }
+    }else if(effect.id==='concat.gaussian-blur'){
+      if(!blurScratch){blurScratch={source:document.createElement('canvas'),target:document.createElement('canvas')};}
+      const {source,target}=blurScratch;
+      if(source.width!==width||source.height!==height){source.width=target.width=width;source.height=target.height=height;}
+      const input=source.getContext('2d',{willReadFrequently:true}),output=target.getContext('2d',{willReadFrequently:true});
+      if(!('filter' in output))throw new Error('This browser cannot render Gaussian blur with Canvas filters.');
+      input.putImageData(new ImageData(pixels,width,height),0,0);
+      output.clearRect(0,0,width,height);
+      output.filter=`blur(${clamp(effect.p.radius,1,50)}px)`;
+      output.drawImage(source,0,0);
+      output.filter='none';
+      pixels.set(output.getImageData(0,0,width,height).data);
     }else if(effect.id==='concat.sharpen'){
       // A separable five-tap Gaussian gives the same 5x5 unsharp-mask
       // footprint as the native effect without 25 reads per output pixel.
@@ -188,10 +202,10 @@ window.VeyCutCompositor = (() => {
   }
   function filterPixels(pixels,treatments,at,geometry={},shading={scale:1,offset:0}) {
     const enabled=treatments.filter(effect=>effect.enabled!==false).map(effect=>({id:effect.id,p:parameters(effect,at)}));
-    if(enabled.some(e=>e.id==='concat.pixelate'||e.id==='concat.sharpen')){
+    if(enabled.some(e=>e.id==='concat.pixelate'||e.id==='concat.sharpen'||e.id==='concat.gaussian-blur')){
       let segment=[];
       for(const effect of treatments.filter(e=>e.enabled!==false)){
-        if(effect.id==='concat.pixelate'||effect.id==='concat.sharpen'){
+        if(effect.id==='concat.pixelate'||effect.id==='concat.sharpen'||effect.id==='concat.gaussian-blur'){
           if(segment.length)filterPixels(pixels,segment,at,geometry);
           spatialPixels(pixels,{id:effect.id,p:parameters(effect,at)},geometry);
           segment=[];
