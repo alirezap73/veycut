@@ -1,5 +1,6 @@
 # Fork release checklist
 
+Current public experimental release: [0.3.1-beta.2](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2), with separate validated Mac and Web packages. App development stays at 0.3.1. The source-candidate and 0.2.0/0.3.0 records below are historical checklists, not the current download status. See [platform support](docs/PLATFORMS.md) and [beta readiness](docs/BETA-READINESS.md).
 Use [the version and commit policy](docs/VERSIONING.md) for release numbering.
 
 ## Source candidate
@@ -67,4 +68,4 @@ Publish source updates for server validation. Publish a Mac preview only after i
 - [ ] Publish a new preview after completing the beta milestone; the 0.3.0 draft remains unpublished.
 - [ ] Windows native validation passes. Compilation completed, then the effect test reported GPU device loss and reached its timeout; Windows is outside the Mac beta scope.
 
-The public preview remains 0.2.0-preview.1. The 0.3.0 package is an unpublished candidate; see [beta criteria](docs/BETA-READINESS.md). Keep the development version fixed until a tested milestone is ready.
+Historical status for the 0.3.0 checklist: public preview was 0.2.0-preview.1 and that 0.3.0 package remained an unpublished candidate. Current public status is 0.3.1-beta.2; see [beta criteria](docs/BETA-READINESS.md).

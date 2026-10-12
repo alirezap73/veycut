@@ -21,20 +21,20 @@ This matrix describes the **public 0.3.1-beta.2 downloads**, published October 1
 
 Both projects reference source media instead of embedding it. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
 
-## Current Web development · awaiting validation
+## Expanded Web editor · server-validated source
 
-This second matrix describes the working tree after beta.2. It is **implementation scope awaiting exact-source CI**, not the downloaded beta.2 package. App version stays 0.3.1; the hosted URL remains pending.
+This second matrix describes the working tree after beta.2. It is **source validated in [GitHub checks](https://github.com/alirezap73/veycut/actions/runs/38192514807)**, not the downloaded beta.2 package. App version stays 0.3.1; the hosted URL remains pending.
 
 | Area | Current development implementation | Remaining limitation or validation |
 |---|---|---|
-| Timeline and media | Video/audio/image/text on mixed tracks; visibility/mute; grouped placement/clipboard/duplicate, ripple removal and Undo/Redo | Requires shared-engine Wasm for advanced edits; current UI and regressions await CI |
+| Timeline and media | Video/audio/image/text on mixed tracks; visibility/mute; grouped placement/clipboard/duplicate, ripple removal and Undo/Redo | Requires shared-engine Wasm for advanced edits; short Chromium scenarios passed; other browsers and longer footage remain unverified |
 | Titles and captions | Shared-engine text clips, cue timing/appearance, SRT/plain-text WebVTT import/export and find/replace | Browser fonts differ from Mac; 31-cue atomic import and 32-command group limit; parser subset |
-| Transform and animation | Position/scale/rotation/opacity/crop and supported property keyframes | Browser interpolation/rendering awaits matching output checks |
+| Transform and animation | Position/scale/rotation/opacity/crop and supported property keyframes | Keyed opacity and transformed still output passed the short mixed-layer check |
 | Picture effects | Exposure, contrast and saturation | Full native catalogue, transitions, HDR and model tools remain gaps |
 | Audio | Mixed active source audio, speed/volume/fades/mute | Browser/device timing; native audio filters and variable speed curves unsupported |
 | Composed output | Shared browser compositor for layered preview and real-time export | SDR Canvas, not native HDR or frame-accurate offline rendering |
-| Formats | WebM; H.264/AAC MP4 offered only if MediaRecorder reports explicit codec support | Codec/browser availability varies; current MP4 path unverified |
-| Bounds | 120 seconds, 1920-pixel long edge, 256 MiB output, 16 simultaneous non-text media layers | Enlarged limits await CI/stress/performance checks; preview also bounds active/selected sources |
+| Formats | WebM; H.264/AAC MP4 offered only if MediaRecorder reports explicit codec support | Codec/browser availability varies; MP4 was unavailable on tested Chromium; other recorder implementations remain unverified |
+| Bounds | 120 seconds, 1920-pixel long edge, 256 MiB output, 16 simultaneous non-text media layers | Short 360×640 output and duration rejection passed; higher-resolution/layer/byte stress remains unverified; preview also bounds active/selected sources |
 
 See the [current Web source guide](../web/README.md) for exact limits and the older released evidence. Native/Web feature parity is not established.
 

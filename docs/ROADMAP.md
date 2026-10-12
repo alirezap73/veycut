@@ -12,7 +12,7 @@ The next target is a browser workflow closer to the Mac editor while keeping the
 | 4 | More dependable browser video output | Cancellation/cleanup, gaps/audio/caption timing and longer real-footage decode checks |
 | 5 | Hosted editor access | Deployment succeeds and the public URL is verified before being linked |
 
-Multi-track compositing, effects/transitions, separate audio mixing and desktop/Web project interchange are capability gaps. Their implementation and tests determine when they can ship. A redesigned interface alone does not close those gaps.
+Mixed-track compositing, titles/captions, separate audio mixing and grouped edits passed [short Chromium workflows and decoded output checks](https://github.com/alirezap73/veycut/actions/runs/38192514807). Full native effects/transitions, HDR, model tools, desktop/Web project interchange and frame-accurate offline output remain gaps. Browser breadth, longer footage and performance determine the next milestones.
 
 ## Mac beta validation
 

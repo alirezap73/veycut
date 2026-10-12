@@ -4,9 +4,13 @@ The target is a reliable beta for Apple silicon macOS with the main editing path
 
 The public experimental pre-release is 0.3.1-beta.2. Development source is 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. Keep 0.3.1 fixed while it is validated; more commits do not require another version increase or create a public beta.
 
+## Expanded browser editor
+
+[Expanded Web checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f` with eight shared-engine tests and 32 browser scenario groups. The mixed 360×640 WebM fully decoded with 64 video frames and separate source audio, transformed/keyframed stills, native text and burned captions. Legacy-project migration and malformed-project preservation passed. This source expands the Web editor after the beta.2 ZIP; the Mac installer is unchanged. Browser HDR, the full native effect/model catalogue, offline frame accuracy, Safari/Firefox and longer real footage remain unverified or unsupported. MP4 was unavailable in tested Chromium under explicit H.264/AAC codec gating.
+
 ## Version numbering
 
-Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The existing unpublished development version stays fixed during the current work.
+Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The app version remains 0.3.1 during current work. The public beta.2 packages and later development commits are separate milestones.
 
 ## Latest CJK and accessibility runtime at 974c65e
 
@@ -54,6 +58,10 @@ editing and real-camera footage remain unverified. QuickTime automation timed
 out; decoding/frame review is separate evidence. CPU/memory were not sampled,
 so no zero-load or measured performance claim is made. An independent Mac/tester
 is available; a source-matched completed report remains a release gate.
+
+## Historical runtime and package checks
+
+The following sections retain earlier revision-specific evidence. Descriptions of unpublished candidates and then-current limitations apply to those recorded revisions; current public downloads are 0.3.1-beta.2.
 
 ## Stereo layout and GPU failure runtime at e6bce73
 

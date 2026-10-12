@@ -2,7 +2,7 @@
 
 ## Unreleased · Web editing work
 
-Development stays at **0.3.1**. The current branch expands the browser editor toward the Mac editing workflow. Interface and capability changes require new exact-source browser checks before inclusion in a downloadable release. The [roadmap](docs/ROADMAP.md) records targets; it does not mark them as shipped.
+Development stays at **0.3.1**. The current branch expands the browser editor toward the Mac editing workflow. [Exact-source checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f`: mixed video/image/audio/text tracks, group clipboard/history, speed, transforms/crop/keyframes, three color effects, subtitle timing/style/find-replace/SRT/WebVTT and decoded WebM output. Legacy projects are normalized before replacing the live session. Static image treatments are cached, and audio silence clocks source preparation/gaps. Current Web ceilings are 120 seconds, 1920 pixels, 256 MiB and 16 simultaneous media layers; only a short 360×640 generated fixture is decoded proof. H.264/AAC MP4 is offered only with explicit browser codec support and was unavailable on tested Chromium. The existing beta.2 download remains the older package. The [roadmap](docs/ROADMAP.md) records targets; it does not mark them as shipped.
 
 ## 0.3.1-beta.2 — public experimental release (2026-10-11)
 

@@ -1,8 +1,8 @@
 # VeyCut Web editor
 
-**Current source: development, awaiting exact-source CI.** This working tree expands the browser editor with mixed media tracks, shared-engine text clips, grouped edits, keyframes and composited preview/export. The public [0.3.1-beta.2 Web ZIP](https://github.com/alirezap73/veycut/releases/download/v0.3.1-beta.2/VeyCut-0.3.1-beta.2-web.zip) contains the earlier single-track prototype. New controls and larger output limits below are not claims about that download.
+**Expanded Web editor: server-validated source, app version 0.3.1.** This working tree expands the browser editor with mixed media tracks, shared-engine text clips, grouped edits, keyframes and composited preview/export. The public [0.3.1-beta.2 Web ZIP](https://github.com/alirezap73/veycut/releases/download/v0.3.1-beta.2/VeyCut-0.3.1-beta.2-web.zip) contains the earlier single-track prototype. New controls and larger output limits below are not claims about that download.
 
-App version remains **0.3.1**. A hosted editor URL is pending. [Platform support](../docs/PLATFORMS.md) separates released and development capabilities.
+App version remains **0.3.1**. A hosted editor URL is pending. [Platform support](https://github.com/alirezap73/veycut/blob/main/docs/PLATFORMS.md) separates released and development capabilities.
 
 ## Start a static package
 
@@ -34,9 +34,9 @@ Direct desktop project import is not implemented. Loading a JavaScript-only proj
 
 ## Real-time export in development
 
-Current limits are **120 seconds**, **1920-pixel long edge**, **256 MiB of recorded output**, and **16 simultaneous non-text media layers**. The preview also bounds needed active/selected media sources to 16. These enlarged limits await CI and stress testing. They do not guarantee smooth performance at every supported size or layer count.
+Current limits are **120 seconds**, **1920-pixel long edge**, **256 MiB of recorded output**, and **16 simultaneous non-text media layers**. The preview also bounds needed active/selected media sources to 16. The short 360×640 scenario passed CI; higher-resolution/many-layer performance and the byte ceiling are not stress-tested. They do not guarantee smooth performance at every supported size or layer count.
 
-Export uses browser Canvas capture, MediaRecorder and Web Audio. Select WebM, or **MP4 only when the browser reports recording support**. Unsupported formats are disabled; MP4 is not a bundled offline H.264 encoder or a promise of universal browser support. Available codecs follow MediaRecorder support. Requested output frame rates are 24, 25, 30 or 60 fps; delivered frame timing can drift.
+Export uses browser Canvas capture, MediaRecorder and Web Audio. Select WebM, or **H.264/AAC MP4 only when the browser explicitly reports support for those codecs**. Unsupported formats are disabled; MP4 is not a bundled offline H.264 encoder or a promise of universal browser support. Available codecs follow MediaRecorder support. Requested output frame rates are 24, 25, 30 or 60 fps; delivered frame timing can drift.
 
 The compositor draws aspect-fitted media, transforms, supported effects and text over black. Timeline gaps produce black/silence. Audio sources mix with mute, volume and fades into the recording destination. Keep the tab visible; hiding it aborts recording. Preparation pauses are excluded from recording where possible. The UI locks project changes during export. Cancel returns no download and tears down recording sources/tracks/audio context; success downloads the browser's recorded WebM or MP4 file.
 
@@ -48,4 +48,6 @@ The shipped Web prototype has **120-second / 960-pixel / 64-MiB** limits, sequen
 
 [Export validation](https://github.com/alirezap73/veycut/actions/runs/38137325706) passed on `8c21b937675745375bf72e7e310ab5d4ec4cdb00`. Chromium checked 15 scenarios, including cancellation, disconnected-source refusal, project preservation and a 121-second timeline rejection. A short 360×640 VP8/Opus output fully decoded with source audio and burned Persian/English captions. Those generated-fixture checks apply to the recorded revisions and do not validate the expanded working tree.
 
-Current mixed-track/text/keyframe/effect and MP4 paths await exact-source server validation. Safari/Firefox, longer real footage, high-resolution/many-layer performance and the enlarged byte cap remain unverified. No local browser, video recording or native build was run for this documentation update.
+The [expanded editing checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f6a8fa0606ae127cacba866de307bfe22a`: eight shared-engine tests, arithmetic/refusal regressions, 16 baseline browser checks, 12 mixed-media editing/export checks and four legacy-project checks. The mixed 360×640 VP8/Opus WebM fully decoded with 64 video frames, a final video timestamp of 2.078 seconds, separate 880 Hz audio, a transformed/keyframed still and native title text. Cancellation, disconnected-media refusal, preserved projects and a rejected 121-second timeline remained covered. MP4 was correctly unavailable on the tested Chromium recorder because explicit H.264/AAC recording was not supported; that path is not a passed MP4 proof.
+
+Safari/Firefox, longer real footage, high-resolution/many-layer performance and the enlarged byte cap remain unverified. All builds, browser runs and video decoding ran on GitHub; no local browser, video recording or native build was run.
