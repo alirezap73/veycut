@@ -21,6 +21,10 @@ window.VeyCutCompositor = (() => {
     {id:'concat.posterize',name:'Posterize',params:[param('levels','Levels',2,8,4)]},
     {id:'concat.pixelate',name:'Pixelate',params:[param('size','Size (px)',2,64,16)]},
     {id:'concat.sharpen',name:'Sharpen',params:[param('amount','Amount',.2,3,1,.05)]},
+    {id:'concat.chroma-key',name:'Chroma key',params:[
+      Object.freeze({...param('color','Screen colour',0,4294967295,11616511),type:'color'}),
+      param('similarity','Similarity (%)',1,60,30),param('softness','Softness (%)',0,50,10),
+      param('spill','Spill cleanup (%)',0,100,50)]},
     {id:'concat.mono',name:'Mono (no grain)',params:[param('colour','Colour filter',-100,100,40),param('contrast','Contrast',0,100,40),param('grain','Grain (not supported)',0,0,0)]},
     {id:'concat.vignette',name:'Vignette',params:[param('strength','Strength',10,100,50)]}
   ].map(entry=>Object.freeze({...entry,params:Object.freeze(entry.params)})));
@@ -200,6 +204,7 @@ window.VeyCutCompositor = (() => {
     for(const e of enabled)if(e.id==='concat.warm'||e.id==='concat.cool'){const tint=kelvin(e.p.temperature).map((v,i)=>v/daylight[i]);e.gain=tint.map(v=>v/Math.max(luma(tint),.001));}
     for(let i=0;i<pixels.length;i+=4){
       let rgb=[pixels[i]/255,pixels[i+1]/255,pixels[i+2]/255].map(v=>Math.pow(v,2.4));
+      let alpha=pixels[i+3]/255;
       for(const e of enabled){const p=e.p;
         if(e.id==='concat.exposure')rgb=rgb.map(v=>v*Math.pow(2,p.stops));
         else if(e.id==='concat.contrast')rgb=rgb.map(v=>v>0?Math.min(65504,.18*Math.pow(Math.max(v,1e-10)/.18,1+p.amount/100)):v);
@@ -211,6 +216,21 @@ window.VeyCutCompositor = (() => {
           if(e.id==='concat.saturation'){const grey=luma(display),s=p.amount/100,amount=s>0?1+2*s:(1+s)*(1+s);display=display.map(v=>grey+(v-grey)*amount);}
           else if(e.id==='concat.warm'||e.id==='concat.cool')display=display.map((v,j)=>v*e.gain[j]);
           else if(e.id==='concat.posterize'){const steps=clamp(Math.round(p.levels),2,8)-1;display=display.map(v=>Math.round(v*steps)/steps);}
+          else if(e.id==='concat.chroma-key'){
+            const color=clamp(Math.round(p.color),0,4294967295)>>>0;
+            const key=[(color>>>24)/255,((color>>>16)&255)/255,((color>>>8)&255)/255];
+            const chroma=c=>[-.1146*c[0]-.3854*c[1]+.5*c[2],.5*c[0]-.4542*c[1]-.0458*c[2]];
+            const here=chroma(display),target=chroma(key);
+            const distance=Math.hypot(here[0]-target[0],here[1]-target[1])/.7071;
+            alpha*=smooth(clamp(p.similarity,1,60)/100,
+              clamp(p.similarity,1,60)/100+Math.max(clamp(p.softness,0,50)/100,.001),distance);
+            const reach=Math.hypot(...target);
+            if(reach>1e-4){
+              const direction=target.map(v=>v/reach),amount=Math.max(here[0]*direction[0]+here[1]*direction[1],0)*clamp(p.spill,0,100)/100;
+              const cb=here[0]-direction[0]*amount,cr=here[1]-direction[1]*amount,y=luma(display);
+              display=[y+1.5748*cr,y-.1873*cb-.4681*cr,y+1.8556*cb];
+            }
+          }
           else if(e.id==='concat.mono'){const f=p.colour/100,r=.3+.35*f,b=.11-.05*f,grey=display[0]*r+display[1]*(1-r-b)+display[2]*b,c=clamp(grey,0,1),out=c+(c*c*(3-2*c)-c)*(p.contrast/100*.8)+(grey-c);display=[out,out,out];}
           else if(e.id==='concat.vibrance'){
             const mx=Math.max(...display),mn=Math.min(...display),chroma=mx-mn,grey=luma(display),amount=1+p.amount*Math.max(1-chroma,0);
@@ -222,6 +242,7 @@ window.VeyCutCompositor = (() => {
         }
       }
       for(let channel=0;channel<3;channel++)pixels[i+channel]=Math.round(255*Math.pow(clamp(rgb[channel]*shading.scale+shading.offset,0,1),1/2.4));
+      pixels[i+3]=Math.round(alpha*255);
     }
     return pixels;
   }

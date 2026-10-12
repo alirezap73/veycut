@@ -353,8 +353,10 @@ jobs:
           playwright-cli run-code --filename=scripts/veycut_web_audio_tone_check.js > output/playwright/audio-tone-check.log
           python3 scripts/verify_web_audio_tone.py
           ffmpeg -v error -f lavfi -i testsrc2=s=256x256 -frames:v 1 -threads 1 -y output/playwright/effects-source.png
+          ffmpeg -v error -f lavfi -i color=c=0x00b140:s=256x256 -frames:v 1 -threads 1 -y output/playwright/screen.png
           playwright-cli run-code --filename=scripts/veycut_web_effects_check.js > output/playwright/effects-check.log
           ffmpeg -v error -xerror -i output/playwright/effects-video.webm -f null -
+          ffmpeg -v error -xerror -i output/playwright/chroma-video.webm -f null -
           python3 scripts/verify_web_effects.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log

@@ -28,3 +28,11 @@ assert near_posterized >= len(samples) * .75, (near_posterized, len(samples))
     'sampleCount': len(samples), 'nearPosterizedSamples': near_posterized,
     'precision': 'Short synthetic source; spatial/colour behaviour and export checked, not long-footage performance.'
 }, indent=2))
+keyed = folder / 'chroma-video.webm'
+centre = subprocess.check_output([
+    'ffmpeg', '-v', 'error', '-ss', '0.6', '-i', str(keyed), '-frames:v', '1',
+    '-vf', 'crop=2:2:180:320', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'
+])
+assert len(centre) == 12
+blue = list(centre[:3])
+assert blue[2] > 180 and blue[0] < 50 and blue[1] < 50, blue

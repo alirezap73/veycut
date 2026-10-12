@@ -25,4 +25,26 @@ async page => {
   await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
   assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
   await (await pending).saveAs('output/playwright/effects-video.webm');
+  await page.goto('http://127.0.0.1:4173/');
+  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await page.locator('#media-input').setInputFiles('output/playwright/blue.png');
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
+  await page.locator('#trim-out').fill('2');await page.locator('#trim').click();
+  await page.locator('#media-input').setInputFiles('output/playwright/screen.png');
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===2);
+  await page.locator('#clip-start').fill('0');
+  await page.locator('#clip-track').selectOption('T3');
+  await page.locator('#move-clips').click();
+  await page.locator('#trim-out').fill('2');await page.locator('#trim').click();
+  await page.locator('details:has(#effect-select) summary').click();
+  await page.locator('#effect-select').selectOption('concat.chroma-key');
+  assert(await page.locator('#effect-color').inputValue()==='#00b140','Native screen colour is visible in the picker');
+  await page.locator('#apply-effect').click();
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.some(c=>c.videoEffects?.some(e=>e.id==='concat.chroma-key')));
+  await page.locator('#export-size').selectOption('360x640');
+  const keyed=page.waitForEvent('download',{timeout:45000});
+  await page.locator('#video-export').click();
+  await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
+  assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
+  await (await keyed).saveAs('output/playwright/chroma-video.webm');
 }
