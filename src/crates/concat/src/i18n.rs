@@ -1,36 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 
-//! The interface's words in other languages.
+//! English platform-interface strings.
 //!
-//! A locale is one JSON file of keys to words - `"export.tenBitColour":
-//! "10-Bit-Farbe"` - and a `_` entry naming the language in its own words.
-//! A key is dotted lowerCamelCase: the area of the interface the string
-//! belongs to (`common` for one used all over), then a name for it. Every
-//! string a person reads passes through [`t`] here or `I18n.t` in the
-//! `.slint` tree by its key. `en.json` holds the English for every key and
-//! sits under whatever language is chosen, so a string with no translation
-//! yet reads in English rather than as a key, and adding a language is
-//! adding a file.
-//!
-//! A package's words come from its manifest, in English, and are looked
-//! up by keys made from its id ([`package_text`], [`shelf_text`]):
-//! `effects.goldenHour.name`. A package of the user's own has no keys and
-//! reads as its author wrote it. A text preset's name is never looked up:
-//! presets are data, shared between people, and read as written.
-//!
-//! Two places hold locales. The ones the app ships live in `locales/` next
-//! to this crate's `src/` and are compiled in. Anyone can add or correct a
-//! language without a build by dropping `<code>.json` into the `locales`
-//! folder of the app's config directory; a file there with a shipped
-//! locale's code lays its entries over the shipped ones, so a correction
-//! is a file of the lines that change.
-//!
-//! One lookup is a hash-map read behind a read lock, and the active
-//! catalogue is swapped whole, so changing language is one write and every
-//! string reads it on its next evaluation. A file from before keys, keyed
-//! by the English itself, still loads: each English line is read as the
-//! key `en.json` gives it.
+//! The shipped English inventory is authoritative for the interface.
+//! Saved, system and custom locale choices cannot replace it. Original locale
+//! resources remain available to tooling; authored text, presets and subtitle
+//! content are independent of this interface-language policy.
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -126,96 +102,28 @@ fn keyed(strings: HashMap<String, String>) -> HashMap<String, String> {
 }
 
 /// Where a machine's own locales live.
+#[cfg(test)]
 pub fn user_dir(dirs: &AppDirs) -> std::path::PathBuf {
     dirs.config.join("locales")
 }
 
-/// Every language on offer: English, then the shipped locales, then any
-/// the machine adds, each once, by code. A machine's file for a shipped
-/// code renames it if its `_` entry says so.
-pub fn languages(dirs: &AppDirs) -> Vec<Language> {
-    let mut out: Vec<Language> = vec![Language {
+/// The platform interface offers English only. Content language is separate.
+pub fn languages(_dirs: &AppDirs) -> Vec<Language> {
+    vec![Language {
         code: ENGLISH.to_owned(),
         name: "English".to_owned(),
-    }];
-    for (code, text) in BUILT_IN {
-        if code == ENGLISH {
-            continue;
-        }
-        if let Some((name, _)) = parse(text) {
-            out.push(Language {
-                code: code.to_owned(),
-                name,
-            });
-        }
-    }
-    let mut added: Vec<Language> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(user_dir(dirs)) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(code) = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| name.strip_suffix(".json"))
-                .filter(|code| !code.is_empty())
-            else {
-                continue;
-            };
-            let Some((name, _)) = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|text| parse(&text))
-            else {
-                continue;
-            };
-            match out.iter_mut().find(|held| held.code == code) {
-                Some(held) => {
-                    if !name.is_empty() {
-                        held.name = name;
-                    }
-                }
-                None => added.push(Language {
-                    code: code.to_owned(),
-                    name: if name.is_empty() {
-                        code.to_owned()
-                    } else {
-                        name
-                    },
-                }),
-            }
-        }
-    }
-    added.sort_by(|a, b| a.code.cmp(&b.code));
-    out.extend(added);
-    out
+    }]
 }
 
-/// Makes `code` the interface's language: the shipped locale of that code,
-/// with the machine's own file of the same code laid over it. English, or
-/// a code nothing answers to, is `en.json`.
-pub fn select(code: &str, dirs: &AppDirs) {
-    let mut strings: HashMap<String, String> = HashMap::new();
-    if code != ENGLISH
-        && let Some((_, built_in)) = BUILT_IN
-            .iter()
-            .find(|(held, _)| *held == code)
-            .and_then(|(_, text)| parse(text))
-    {
-        strings = built_in;
-    }
-    if let Some((_, own)) = std::fs::read_to_string(user_dir(dirs).join(format!("{code}.json")))
-        .ok()
-        .and_then(|text| parse(&text))
-    {
-        strings.extend(keyed(own));
-    }
-    let catalog = (!strings.is_empty() || code != ENGLISH).then(|| {
-        Arc::new(Catalog {
-            code: code.to_owned(),
-            strings,
-        })
+/// Selects the shipped English inventory regardless of a remembered locale.
+/// Custom files, including an en.json override, never change platform labels.
+pub fn select(_code: &str, _dirs: &AppDirs) {
+    let catalog = Arc::new(Catalog {
+        code: ENGLISH.to_owned(),
+        strings: keyed(english().by_key.clone()),
     });
     if let Ok(mut slot) = active().write() {
-        *slot = catalog;
+        *slot = Some(catalog);
     }
 }
 
@@ -502,7 +410,7 @@ mod tests {
         select("de", &dirs);
         assert_eq!(
             package_text("concat.exposure", "name", "Exposure"),
-            "Belichtung"
+            "Exposure"
         );
         assert_eq!(
             package_text("alice.exposure", "name", "Exposure"),
@@ -518,10 +426,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A machine's own file from before keys, keyed by the English, still
-    /// lays its lines over the shipped ones.
+    /// Historical custom locales cannot override the English platform UI.
     #[test]
-    fn a_file_keyed_by_the_english_still_reads() {
+    fn custom_locales_cannot_replace_platform_interface_words() {
         let _language = language();
         let root = std::env::temp_dir().join(format!("concat-i18n-l-{}", std::process::id()));
         let dirs = AppDirs::under(&root);
@@ -532,8 +439,9 @@ mod tests {
         )
         .expect("writes");
         select("de", &dirs);
-        assert_eq!(t("common.settings"), "Optionen");
-        assert_eq!(t("common.export"), "Ausgabe");
+        assert_eq!(current(), ENGLISH);
+        assert_eq!(t("common.settings"), "Settings");
+        assert_eq!(t("common.export"), "Export");
         select(ENGLISH, &dirs);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -552,10 +460,49 @@ mod tests {
         let root = std::env::temp_dir().join(format!("concat-i18n-{}", std::process::id()));
         let dirs = AppDirs::under(&root);
         select("de", &dirs);
-        assert_eq!(current(), "de");
+        assert_eq!(current(), ENGLISH);
         assert_eq!(t("a key nobody translated"), "a key nobody translated");
-        assert_ne!(t("common.settings"), "Settings");
+        assert_eq!(t("common.settings"), "Settings");
         select(ENGLISH, &dirs);
         assert_eq!(t("common.settings"), "Settings");
+    }
+
+    #[test]
+    fn english_only_ui_ignores_saved_system_and_custom_choices_without_changing_content() {
+        let _language = language();
+        let root = std::env::temp_dir().join(format!("veycut-english-ui-{}", std::process::id()));
+        let dirs = AppDirs::under(&root);
+        std::fs::create_dir_all(user_dir(&dirs)).expect("locale folder");
+        std::fs::write(user_dir(&dirs).join("en.json"),
+            r#"{"_":{"name":"Custom"},"common.settings":"تنظیمات","common.export":"Custom export"}"#).expect("custom English override");
+        std::fs::write(
+            user_dir(&dirs).join("fa.json"),
+            r#"{"_":{"name":"فارسی"},"common.settings":"تنظیمات"}"#,
+        )
+        .expect("custom Persian locale");
+        let content = "زیرنویس فارسی — سلام دنیا";
+        for remembered in ["fa", "de", "zh-TW", "customLocale", "en-US", ENGLISH] {
+            select(remembered, &dirs);
+            assert_eq!(current(), ENGLISH);
+            assert_eq!(t("common.settings"), "Settings");
+            assert_eq!(t("common.export"), "Export");
+            assert_eq!(
+                languages(&dirs),
+                vec![Language {
+                    code: ENGLISH.to_owned(),
+                    name: "English".to_owned()
+                }]
+            );
+            assert_eq!(t_or("user.authoredCaption", content), content);
+            assert_eq!(
+                fill("Caption: {0}", &[&content]),
+                format!("Caption: {content}")
+            );
+        }
+        assert!(
+            user_dir(&dirs).join("fa.json").exists(),
+            "locale resources are retained"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

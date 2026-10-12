@@ -28,7 +28,7 @@ The Web preview has a **120-second timeline**, **1920-pixel long-edge**, **256-M
 2. Import a short video, trim or split it, and add an SRT subtitle file.
 3. Save your project, then export a video using a new filename.
 
-Choose English or Persian in the interface. Media stays on your device; the current Web package makes no media uploads. Web export runs on your device in real time, so keep the tab visible.
+The current Web interface update uses English controls and preserves Persian subtitles, fonts and right-to-left text entry. Matching CI and deployment validate the new UI revision. The unchanged Mac beta still includes its existing language settings. Media stays on your device; the current Web package makes no media uploads. Web export runs on your device in real time, so keep the tab visible.
 
 ![VeyCut Web editor](https://alirezap73.github.io/veycut/screenshots/editor.png)
 

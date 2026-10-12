@@ -2030,7 +2030,8 @@ impl Studio {
     /// A window with nothing open: the launch screen, with the recents list
     /// read off disk.
     pub fn new(host: Host) -> Self {
-        let prefs = Preferences::load(&host.dirs);
+        let mut prefs = Preferences::load(&host.dirs);
+        prefs.locale = Some(i18n::ENGLISH.to_owned());
         // The remembered log level, unless this run's environment named
         // one: CONCAT_LOG is the louder ask.
         if concat_host::logs::environment_level().is_none()
@@ -2042,9 +2043,8 @@ impl Studio {
         {
             concat_host::logs::set_level(level);
         }
-        // The words first, so everything published from here on is in
-        // the remembered language.
-        i18n::select(prefs.locale.as_deref().unwrap_or(i18n::ENGLISH), &host.dirs);
+        // Platform labels always use English; authored content keeps its language.
+        i18n::select(i18n::ENGLISH, &host.dirs);
         let languages = i18n::languages(&host.dirs);
         let recents = projects::list(&host.dirs.config);
         let text_presets = presets::all(&host.dirs);

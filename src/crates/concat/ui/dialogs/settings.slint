@@ -641,13 +641,9 @@ export component SettingsDialog inherits Modal {
                 DialogSection {
                     first: true;
                     title: I18n.t("settings.language");
-
-                    // Native names: whoever is stranded in a language they
-                    // cannot read must still recognise their own in this list.
-                    Select {
-                        options: root.languages;
-                        current: root.data.language;
-                        changed(index) => { root.language-changed(index); }
+                    Text {
+                        text: "English";
+                        color: Theme.fg;
                     }
                 }
 

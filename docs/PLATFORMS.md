@@ -4,7 +4,7 @@ This matrix describes the **public 0.3.1-beta.2 downloads**, published October 1
 
 | Capability | Apple silicon Mac beta | Downloadable Web prototype |
 |---|---|---|
-| Interface | Native desktop; English/Persian | Browser interface; English/Persian |
+| Interface | Native desktop; English/Persian | Historical beta.2 browser interface; English/Persian |
 | Local video import | Native media picker | Browser-decodable local files |
 | Timeline | Multiple tracks; move/trim/split; grouped clipboard/duplicate | Sequential single video track; trim/split/remove |
 | History | Native command Undo/Redo | Shared engine commands/history where Wasm is loaded; disclosed JavaScript fallback otherwise |
@@ -22,6 +22,8 @@ This matrix describes the **public 0.3.1-beta.2 downloads**, published October 1
 Both projects reference source media instead of embedding it. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
 
 ## Current expanded Web editor · server-validated source
+
+The next UI revision uses English-only controls while retaining Persian/UTF-8 caption content, licensed fonts and content-level RTL direction. This interface change needs its own exact-source browser/deployment checks; the previous runs below describe their recorded revisions.
 
 The [exact-source Web checks](https://github.com/alirezap73/veycut/actions/runs/38201512547) passed on `221d7ca`. These capabilities are merged into main at app version 0.3.1 and are separate from the older beta.2 Web archive. The [hosted editor](https://alirezap73.github.io/veycut/) and [current ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) identify their exact revision in [build-info.json](https://alirezap73.github.io/veycut/build-info.json); publication reruns the browser checks before deployment.
 

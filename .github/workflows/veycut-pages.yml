@@ -38,7 +38,7 @@ jobs:
         run: |
           mkdir -p site/screenshots
           cp verified-checks/parity-desktop.png site/screenshots/editor.png
-          cp verified-checks/parity-persian-mobile.png site/screenshots/editor-fa.png
+          cp verified-checks/parity-english-mobile-persian-content.png site/screenshots/editor-mobile.png
           cp verified-checks/parity-report.json verified-checks/parity-decoder-report.json site/
           cp verified-checks/native-report.json verified-checks/timelines-report.json verified-checks/transition-decoder-report.json site/
           cp verified-checks/native-interchange.png site/screenshots/native-interchange.png
