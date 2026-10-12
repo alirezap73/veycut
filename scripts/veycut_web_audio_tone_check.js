@@ -15,6 +15,7 @@ async page => {
     await (await pending).saveAs('output/playwright/'+name);
   };
   await exportAudio('tone-baseline.webm');
+  await page.locator('details:has(#audio-tone-select) summary').click();
   await page.locator('#audio-tone-select').selectOption('concat.bass');
   await page.locator('#audio-tone-gain').fill('12');
   await page.locator('#audio-tone-apply').click();
