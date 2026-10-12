@@ -48,7 +48,7 @@ c.render(ctx,{width:100,height:100,tracks:[{id:'bottom'},{id:'top'}],clips:[
 assert.deepEqual(painted,['bottom','top'],'Native tracks composite bottom-first');
 assert.equal(depth,0);
 // Native display-space packages keep alpha and use the same parameter defaults.
-assert.equal(c.effectCatalog.length,11);
+assert.equal(c.effectCatalog.length,12);
 const pixel=(id,params,rgb=[180,120,70,31],geometry)=>{const p=new Uint8ClampedArray(rgb);c.filterPixels(p,[{id,params}],0,geometry);return [...p];};
 assert.deepEqual(pixel('concat.mono',{}),pixel('concat.mono',{colour:40,contrast:40,grain:0}));
 const mono=pixel('concat.mono',{colour:0,contrast:0});assert.equal(mono[0],mono[1]);assert.equal(mono[1],mono[2]);assert.equal(mono[3],31);
@@ -69,6 +69,10 @@ c.filterPixels(edge,[{id:'concat.sharpen',params:{amount:1}}],0,{width:5,height:
 assert.ok(edge[(2*5+1)*4]<70&&edge[(2*5+2)*4]>180,'Sharpen increases contrast at a real edge');
 assert.equal(edge[(2*5+2)*4+3],199);
 assert.throws(()=>pixel('concat.pixelate',{}),/dimensions/);
+const keyedScreen=new Uint8ClampedArray([0,177,64,255,255,0,0,255]);
+c.filterPixels(keyedScreen,[{id:'concat.chroma-key'}],0,{width:2,height:1});
+assert.equal(keyedScreen[3],0,'Broadcast-green screen becomes transparent');
+assert.ok(keyedScreen[7]>240,'Red foreground remains opaque');
 assert.throws(()=>pixel('concat.mono',{grain:1}),/grain/);
 assert.throws(()=>c.validateClip({...clip,videoEffects:[{id:'concat.mono',keys:{grain:[{at:1,value:2}]}}]}),/grain/);
 assert.throws(()=>pixel('concat.warm',{unexpected:3}),/parameter/);
