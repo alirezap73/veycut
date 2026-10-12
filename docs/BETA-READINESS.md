@@ -2,23 +2,23 @@
 
 The target is a reliable beta for Apple silicon macOS with the main editing path: import media, arrange/trim/split clips, add text and sound, save/reopen, and export. Feature parity with other products and a completion percentage have not been established.
 
-The public experimental pre-release is 0.3.1-beta.2. Development source is 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. Keep 0.3.1 fixed while it is validated; more commits do not require another version increase or create a public beta.
+The public experimental Mac pre-release is 0.3.1-beta.3. Development source remains 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. More commits do not require another application version increase or create a public beta.
 
 ## English-interface Mac candidate (October 12, 2026)
 
 The app version remains **0.3.1**. Native validation passed Linux tests/lints, Mac compilation, WebAssembly and Windows tests on source `8d639f3`. The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38204492520) built successfully from `9082f26`; all four packaged scenarios passed: core editing/decoded output, 32-second editing/output, caption navigation and full-movie import/reopen. See [exact package evidence](beta-tests/english-mac-2026-10-12.json) and [candidate notes](../RELEASE-PREVIEW.md) for source, checksums and run links.
 
-This candidate uses an English-only interface and retains Persian authored content. It is an Actions test artifact, not a new public release. Independent clean installation and a 10–15-minute real-camera editing session remain unverified. The public beta.2 installer remains the older package.
+This candidate uses an English-only interface and retains Persian authored content. Its exact DMG is the [public beta.3 Mac release](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.3). On a local macOS 27.0.1 Mac, the package passed signature verification, import, split, Undo/Redo, bilingual subtitle edit, save/reopen and a fully decoded two-second H.264/AAC export. Independent clean installation and a 10–15-minute real-camera editing session remain unverified.
 
 ## Expanded browser editor
 
 The [public Web editor](https://alirezap73.github.io/veycut/) and [downloadable ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) passed [deployment and hosted Wasm checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) on `26220d4`, published October 12, 2026. The app version remains 0.3.1.
 
-[Expanded Web checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f` with eight shared-engine tests and 32 browser scenario groups. The mixed 360×640 WebM fully decoded with 64 video frames and separate source audio, transformed/keyframed stills, native text and burned captions. Legacy-project migration and malformed-project preservation passed. This source expands the Web editor after the beta.2 ZIP; the Mac installer is unchanged. Browser HDR, the full native effect/model catalogue, offline frame accuracy, Safari/Firefox and longer real footage remain unverified or unsupported. MP4 was unavailable in tested Chromium under explicit H.264/AAC codec gating.
+[Expanded Web checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f` with eight shared-engine tests and 32 browser scenario groups. The mixed 360×640 WebM fully decoded with 64 video frames and separate source audio, transformed/keyframed stills, native text and burned captions. Legacy-project migration and malformed-project preservation passed. This source expanded the Web editor after the beta.2 ZIP; its Web package remains separate from the beta.3 Mac installer. Browser HDR, the full native effect/model catalogue, offline frame accuracy, Safari/Firefox and longer real footage remain unverified or unsupported. MP4 was unavailable in tested Chromium under explicit H.264/AAC codec gating.
 
 ## Version numbering
 
-Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The app version remains 0.3.1 during current work. The public beta.2 packages and later development commits are separate milestones.
+Change version numbers only when releasing a tested milestone. Small fixes and modest additions use the next patch number (for example, `0.2.0` to `0.2.1`); pre-release revisions of the same milestone increment their suffix. Reserve a minor-version change for a substantial, documented expansion of capabilities. Major-version changes require a major product milestone. Commit counts and comparisons with other products do not determine the version number. The app version remains 0.3.1 during current work. The public beta.3 Mac package, hosted Web build and later development commits are separate milestones.
 
 ## Latest CJK and accessibility runtime at 974c65e
 
@@ -69,7 +69,7 @@ is available; a source-matched completed report remains a release gate.
 
 ## Historical runtime and package checks
 
-The following sections retain earlier revision-specific evidence. Descriptions of unpublished candidates and then-current limitations apply to those recorded revisions; current public downloads are 0.3.1-beta.2.
+The following sections retain earlier revision-specific evidence. Descriptions of unpublished candidates and then-current limitations apply to those recorded revisions; the current public Mac download is 0.3.1-beta.3.
 
 ## Stereo layout and GPU failure runtime at e6bce73
 

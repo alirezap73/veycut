@@ -1,23 +1,23 @@
 # VeyCut platform support
 
-This matrix describes the **public 0.3.1-beta.2 downloads**, published October 11, 2026. Development on the Web editor proceeds separately at app version 0.3.1. New source changes require matching tests and a new package before this matrix marks them as shipped.
+This matrix describes the **public 0.3.1-beta.3 Mac download** and the separately [hosted current Web editor](https://alirezap73.github.io/veycut/). Both remain experimental at app version 0.3.1. New source changes require matching tests and a new package or deployment before this matrix marks them as shipped.
 
-| Capability | Apple silicon Mac beta | Downloadable Web prototype |
+| Capability | Apple silicon Mac beta | Current Web editor/ZIP |
 |---|---|---|
-| Interface | Native desktop; English/Persian | Historical beta.2 browser interface; English/Persian |
+| Interface | Native desktop; English controls, Persian content | English controls, Persian content |
 | Local video import | Native media picker | Browser-decodable local files |
-| Timeline | Multiple tracks; move/trim/split; grouped clipboard/duplicate | Sequential single video track; trim/split/remove |
-| History | Native command Undo/Redo | Shared engine commands/history where Wasm is loaded; disclosed JavaScript fallback otherwise |
-| Subtitles | SRT and plain-text WebVTT; timing/style/find/replace; paged navigation | SRT import/edit/download; fixed global cue times |
-| Titles and appearance | Native text rendering and presets | Subtitle overlay and burned caption text; separate title tools pending |
-| Audio | Native audio editing and stereo meters | Source audio playback and recorded export; separate audio-track mixing pending |
-| Effects and transitions | Native tools retained; dedicated packaged checks vary | Pending |
+| Timeline | Multiple tracks; move/trim/split; grouped clipboard/duplicate | Mixed video/image/audio/text tracks, multiple timelines, trim/split/move and grouped edits |
+| History | Native command Undo/Redo | Shared engine Undo/Redo where Wasm is loaded |
+| Subtitles | SRT and plain-text WebVTT; timing/style/find/replace; paged navigation | SRT and plain-text WebVTT; timing/style/find/replace and download |
+| Titles and appearance | Native text rendering and presets | Text tracks, transform/keyframes and burned captions |
+| Audio | Native audio editing and stereo meters | Mixed source audio and stereo meters |
+| Effects and transitions | Native tools retained; dedicated packaged checks vary | Eight picture effects and dissolve/black/white transitions |
 | Project storage | Desktop project folders referencing media | Downloaded browser JSON referencing media; reconnect after reopen |
-| Project interchange | Native project format | Browser envelope plus shared engine document; direct desktop project import pending |
+| Project interchange | Native project format | Browser envelope plus shared engine document; supported desktop manifest import with media reconnect |
 | Video export | Native H.264/AAC path verified with generated fixtures | Real-time VP8/Opus WebM path verified in Chromium with short generated media |
-| Export limits | Configurable native output; long real-footage sessions unverified | 120 seconds; 960-pixel long edge; requested 30 fps; 64 MiB |
+| Export limits | Configurable native output; local 2-second and server 32-second output checked | 120 seconds; 1920-pixel long edge; 256 MiB; 16 simultaneous non-text media layers |
 | Failure protection | Existing-output refusal, active Cancel and missing/corrupt-source restoration retry verified | Cancellation, disconnected-source refusal and project preservation verified |
-| Installation | DMG, ad-hoc signed; Apple notarization and independent install unverified | Extract ZIP and serve over HTTP; original archive requires HTTP; current hosted preview is linked below |
+| Installation | DMG, ad-hoc signed; not Apple-notarized | Hosted editor or extract the current ZIP and serve over HTTP |
 
 Both projects reference source media instead of embedding it. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
 
@@ -43,8 +43,8 @@ Native/Web feature parity is not established. See the [Web source guide](../web/
 
 ## Other platforms and remaining checks
 
-Intel Mac, Windows, Linux, Android and iOS installers are not included in beta.2. Existing source/platform targets and compilation checks do not establish downloadable application support. Chromium was used for the Web checks; Safari/Firefox, longer footage and other OS/browser combinations remain unverified.
+Intel Mac, Windows, Linux, Android and iOS installers are not included in beta.3. Existing source/platform targets and compilation checks do not establish downloadable application support. Chromium was used for the Web checks; Safari/Firefox, longer footage and other OS/browser combinations remain unverified.
 
 The Mac beta still needs an independent clean-install report and a 10–15-minute real-camera editing session with decoded output. Relocation/relink picker interaction, separate-player viewing and controlled performance measurements are also outstanding. Mac recovery tests restored the original source at its original path.
 
-[Downloads](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) · [Quick start](QUICK-START.md) · [Beta evidence](BETA-READINESS.md) · [Web evidence and limits](../web/README.md) · [Roadmap](ROADMAP.md)
+[Mac download](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.3) · [Current Web editor](https://alirezap73.github.io/veycut/) · [Quick start](QUICK-START.md) · [Beta evidence](BETA-READINESS.md) · [Web evidence and limits](../web/README.md) · [Roadmap](ROADMAP.md)

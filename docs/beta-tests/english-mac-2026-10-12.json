@@ -1,6 +1,7 @@
 {
   "app_version": "0.3.1",
-  "channel": "mac-test-candidate",
+  "channel": "mac-beta.3",
+  "release_tag": "v0.3.1-beta.3",
   "package_source_revision": "9082f2686b7896e49561d2c531fd3ec105e456eb",
   "native_validation_revision": "8d639f3957a0b2bbadcbd9021cf7944dabca5a09",
   "native_validation_run": 38203218423,
@@ -27,8 +28,19 @@
       "conclusion": "success"
     }
   },
+  "local_mac_check": {
+    "macos_version": "27.0.1",
+    "exact_dmg_signature_verified": true,
+    "short_video_import": "passed",
+    "bilingual_subtitle_import_and_persian_edit": "passed",
+    "video_split_undo_redo": "passed",
+    "project_save_reopen": "passed",
+    "two_second_h264_aac_export_and_full_decode": "passed",
+    "separate_quicktime_playback": "not_verified_tool_timeout",
+    "output_sha256": "9c2c62e9b931f7d6c2a30d6c51ddd7d276c438801251d3a55e22b26c98eccc2a"
+  },
   "independent_clean_installation_verified": false,
   "real_camera_editing_10_to_15_minutes_verified": false,
   "apple_notarized": false,
-  "new_public_release": false
+  "new_public_release": true
 }

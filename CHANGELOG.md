@@ -1,8 +1,12 @@
 # VeyCut changelog
 
+## 0.3.1-beta.3 — public experimental Mac update (2026-10-12)
+
+The Apple silicon Mac app now uses an English-only interface while retaining Persian titles, subtitles and right-to-left content. The app version remains **0.3.1**. The [matching package](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.3) passed four packaged server checks and a light local Mac import, split, Undo/Redo, bilingual caption, save/reopen and H.264/AAC export test. The Web editor remains a separate hosted/ZIP build. See the release notes for the exact package source and checksum.
+
 ## 0.3.1 English interface (2026-10-12)
 
-The current Web and native source use an English-only interface. Saved or custom native UI locales cannot override English labels. Persian titles, subtitles, right-to-left content, fonts and content-processing language choices remain supported. The app version stays 0.3.1. The existing beta.2 Mac download is unchanged. A matching English-interface Mac candidate is now built and passed all four packaged checks; see [candidate evidence](docs/beta-tests/english-mac-2026-10-12.json). Independent installation and a real-camera editing session remain outstanding.
+The current Web and native source use an English-only interface. Saved or custom native UI locales cannot override English labels. Persian titles, subtitles, right-to-left content, fonts and content-processing language choices remain supported. The app version stays 0.3.1. A matching English-interface Mac candidate passed all four packaged checks and was subsequently published as beta.3; see [candidate evidence](docs/beta-tests/english-mac-2026-10-12.json).
 
 ## 0.3.1 Web timelines and interoperability (2026-10-12)
 

@@ -16,7 +16,7 @@ The app version comes from `[workspace.package].version` in
   app version. Version numbers do not measure feature coverage or product quality.
 
 Keep development source at **0.3.1** during the current validation. The public experimental
-pre-release is **0.3.1-beta.2**, with documented package revisions, checksums
+Mac pre-release is **0.3.1-beta.3**, with documented package revisions, checksums
 and remaining limitations. A development commit or successful CI run alone is not a beta release.
 See [the beta gates](BETA-READINESS.md).
 
