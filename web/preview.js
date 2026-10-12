@@ -73,7 +73,9 @@ window.VeyCutPreview = class {
     if(status){status.textContent=this.meterPeak?`${(20*Math.log10(this.meterPeak)).toFixed(1)} dBFS`:'−∞ dBFS';status.dataset.clipped=String(this.meterPeak>=1);status.dataset.livePeak=String(peak);}
   }
   sync(){if(!this.spec||this.renderError)return;this.ensureSources();const tracks=new Map(this.spec.tracks.map(t=>[t.id,t]));for(const c of this.spec.clips){const node=this.sources.get(c.id);if(!(node instanceof HTMLMediaElement))continue;const live=this.time>=c.start&&this.time<c.start+c.duration,track=tracks.get(c.trackId);if(!live){node.pause();this.nodes.get(node)?.gain.gain.setValueAtTime(0,this.audio.currentTime);continue;}
-      const speed=c.speed||1,target=window.VeyCutCompositor?.sourceTime(c,this.time)??c.in+(this.time-c.start)*speed;node.playbackRate=speed;node.preservesPitch=c.preservePitch!==false;
+      const compositor=window.VeyCutCompositor,speed=compositor?.speedAt(c,this.time)??c.speed??1;
+      const target=compositor?.sourceTime(c,this.time)??c.in+(this.time-c.start)*speed;
+      node.playbackRate=speed;node.preservesPitch=c.preservePitch!==false;
       if(node.readyState>=1&&Math.abs(node.currentTime-target)>(this.playing?.15:.015)){this.syncUntil=performance.now()+150;try{node.currentTime=target;}catch{}}
       const gain=window.VeyCutCompositor?window.VeyCutCompositor.audioGain(c,this.time,track):c.muted||track?.muted?0:c.volume??1;
       const pair=this.nodes.get(node);if(pair){window.VeyCutAudioFilters.rewire(this.audio,pair,c.filters);pair.gain.gain.value=gain;}else node.volume=Math.min(1,gain);
