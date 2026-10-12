@@ -1,0 +1,34 @@
+{
+  "app_version": "0.3.1",
+  "channel": "mac-test-candidate",
+  "package_source_revision": "9082f2686b7896e49561d2c531fd3ec105e456eb",
+  "native_validation_revision": "8d639f3957a0b2bbadcbd9021cf7944dabca5a09",
+  "native_validation_run": 38203218423,
+  "candidate_run": 38204492520,
+  "installer": "VeyCut-0.3.1-macos-arm64.dmg",
+  "installer_sha256": "9c3ad16516af18bccbb5fe11d417c5aa95c54f94408d534df7c2a5f604d871cf",
+  "platform_interface": "English",
+  "persian_authored_content_supported": true,
+  "checks": {
+    "core_gui": {
+      "run": 38205865493,
+      "conclusion": "success"
+    },
+    "extended_gui_32_seconds": {
+      "run": 38205868345,
+      "conclusion": "success"
+    },
+    "caption_navigation_gui": {
+      "run": 38205870832,
+      "conclusion": "success"
+    },
+    "full_movie_import_reopen_only": {
+      "run": 38206727095,
+      "conclusion": "success"
+    }
+  },
+  "independent_clean_installation_verified": false,
+  "real_camera_editing_10_to_15_minutes_verified": false,
+  "apple_notarized": false,
+  "new_public_release": false
+}
