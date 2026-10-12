@@ -143,7 +143,7 @@ $('project-input').onchange=async()=>{
  const f=$('project-input').files[0];$('project-input').value='';if(!f||loading)return;const epoch=revision;let candidate=null,committed=false;
  try{
   if(f.size>4*1024*1024)throw Error(t('badProject'));
-  const input=JSON.parse(await f.text()),desktop=input?.format!=='veycut-web',document=desktop?window.VeyCutProjectInterop.envelope(input):input,prepared=validateProject(document);if(revision!==epoch)return;let native=null;
+  const input=JSON.parse(await f.text()),desktop=input?.format!=='veycut-web';if(desktop&&input?.format)throw Error(t('badProject'));const document=desktop?window.VeyCutProjectInterop.envelope(input):input,prepared=validateProject(document);if(revision!==epoch)return;let native=null;
   if(document.engineDocument){
    if(!EngineClass)throw Error(t('advanced'));candidate=new EngineClass();const result=JSON.parse(candidate.open_project(JSON.stringify(document.engineDocument)));if(!result.ok)throw Error(result.error.message);native=result.document;if(desktop)window.VeyCutProjectInterop.assertPreserved(input,native);
    if(native.clips.length!==prepared.state.clips.length||prepared.state.clips.some(c=>!native.clips.some(n=>n.id===c.id&&n.mediaId===c.mediaId&&Math.abs(n.start-c.timelineStart)<.00001&&Math.abs(n.sourceStart-c.in)<.00001&&Math.abs(n.sourceStart+n.duration*(['video','audio'].includes(n.kind)?n.speed:1)-c.out)<.00001)))throw Error(t('badProject'));

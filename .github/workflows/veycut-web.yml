@@ -142,6 +142,7 @@ jobs:
           assert abs(duration - .8) < .002
           project['clips'], native['clips'] = [], []
           project['cues'], project['cueIds'] = [], []
+          project['timelineCueIds'] = {timeline['id']: [] for timeline in native['timelines']}
           for index in range(151):
               identifier, position = 'browser-limit-' + str(index), .2 + index * duration
               ui_clip, native_clip = copy.deepcopy(ui_source), copy.deepcopy(native_source)

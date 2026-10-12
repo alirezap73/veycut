@@ -36,6 +36,10 @@ This second matrix describes the working tree after beta.2. It is **source valid
 | Formats | WebM; H.264/AAC MP4 offered only if MediaRecorder reports explicit codec support | Codec/browser availability varies; MP4 was unavailable on tested Chromium; other recorder implementations remain unverified |
 | Bounds | 120 seconds, 1920-pixel long edge, 256 MiB output, 16 simultaneous non-text media layers | Short 360×640 output and duration rejection passed; higher-resolution/layer/byte stress remains unverified; preview also bounds active/selected sources |
 
+## Next Web parity candidate
+
+[PR #3](https://github.com/alirezap73/veycut/pull/3) implements multiple timelines, native-manifest interchange with property-preservation guards, rational frame settings, atomic bulk captions, stereo meters/frame navigation, eight picture effects and dissolve/black/white dips. Exact browser validation is pending; these additions are not yet claims about the live hosted build above. Native JSON export preserves original paths but does not bundle media/fonts or produce a complete project folder. Caption imports require non-overlapping times and remain subject to 512 total project clips / 1 MiB per request. Full native render, audio-filter and model parity remain incomplete.
+
 See the [current Web source guide](../web/README.md) for exact limits and the older released evidence. Native/Web feature parity is not established.
 
 ## Other platforms and remaining checks
