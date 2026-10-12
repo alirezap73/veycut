@@ -1,11 +1,12 @@
 'use strict';
 // Real-time browser export. No uploads, remote codecs, or simulated output.
 window.VeyCutExporter = (() => {
-  const LIMITS = Object.freeze({seconds:120,longEdge:960,fps:30,bytes:64*1024*1024});
-  function capability() {
+  const LIMITS = Object.freeze({seconds:120,longEdge:1920,fps:30,bytes:256*1024*1024,simultaneous:16});
+  function capability(format='webm') {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
-    const mime = ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm']
+    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1.420028,mp4a.40.2'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
+    const mime = types
       .find(type => MediaRecorder.isTypeSupported(type));
     return mime ? {Audio,mime} : null;
   }
@@ -23,78 +24,148 @@ window.VeyCutExporter = (() => {
   }
   function validate(spec) {
     const {width,height,clips}=spec;
-    if(!Number.isInteger(width)||!Number.isInteger(height)||width<2||height<2||Math.max(width,height)>LIMITS.longEdge)throw new Error('Export dimensions exceed the 960-pixel limit.');
-    if(!clips.length)throw new Error('Import and arrange a video before exporting.');
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<2||height<2||width%2||height%2||Math.max(width,height)>LIMITS.longEdge)throw new Error('Export dimensions exceed the 1920-pixel limit or are not even.');
+    if(!clips.length)throw new Error('Import and arrange media before exporting.');
+    if(spec.fps!==undefined && ![24,25,30,60].includes(spec.fps))throw new Error('Choose an export frame rate of 24, 25, 30 or 60.');
+    const compositor=window.VeyCutCompositor;
+    if(!compositor)throw new Error('The shared browser compositor did not load.');
     let end=0;
-    for(const c of clips){if(!c.url||!c.url.startsWith('blob:'))throw new Error('Reconnect every original media file before exporting.');
-      if(![c.start,c.in,c.out].every(Number.isFinite)||c.start<end-.00001||c.in<0||c.out-c.in<.05)throw new Error('Export requires non-overlapping video clips with valid source ranges.');end=c.start+c.out-c.in;}
+    const ids=new Set();
+    for(const c of clips){
+      compositor.validateClip(c);
+      if(ids.has(c.id))throw new Error('Duplicate clip identity in export.');ids.add(c.id);
+      const begin=compositor.start(c), seconds=compositor.duration(c);
+      if(!Number.isFinite(begin)||!Number.isFinite(seconds)||begin<0||seconds<1/60)throw new Error('Invalid timeline range.');
+      if(c.kind!=='text' && (!c.url||!c.url.startsWith('blob:')))throw new Error('Reconnect every original media file before exporting.');
+      if(c.kind!=='text' && c.kind!=='image' && (!Number.isFinite(c.in)||!Number.isFinite(c.out)||c.in<0||c.out-c.in<.05))throw new Error('Invalid source range.');
+      end=Math.max(end,begin+seconds);
+    }
     if(end<=0||end>LIMITS.seconds)throw new Error('Export supports timelines up to 120 seconds.');
+    const times=clips.flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)]);
+    for(const time of times){
+      const count=clips.filter(c=>c.kind!=='text'&&time>=compositor.start(c)&&time<compositor.start(c)+compositor.duration(c)).length;
+      if(count>LIMITS.simultaneous)throw new Error('Export supports at most 16 simultaneous media layers.');
+    }
     return end;
-  }
-  function captions(ctx,cues,time,width,height) {
-    const active=cues.filter(c=>time>=c.start&&time<c.end);
-    if(!active.length)return;
-    const font=Math.max(14,Math.round(height*.037));ctx.font=`600 ${font}px system-ui, sans-serif`;ctx.textAlign='center';ctx.textBaseline='bottom';ctx.lineJoin='round';
-    const rows=[];
-    for(const cue of active){for(const line of cue.text.split('\n')){let row='';for(const word of line.split(' ')){const next=row?row+' '+word:word;if(row&&ctx.measureText(next).width>width*.86){rows.push(row);row=word;}else row=next;}rows.push(row);}}
-    const visible=rows.slice(-8),bottom=height*.91;
-    visible.forEach((text,index)=>{ctx.direction=/[\u0590-\u08ff]/.test(text)?'rtl':'ltr';const y=bottom-(visible.length-index-1)*font*1.3;ctx.lineWidth=Math.max(2,font*.13);ctx.strokeStyle='#000';ctx.strokeText(text,width/2,y,width*.9);ctx.fillStyle='#fff';ctx.fillText(text,width/2,y,width*.9);});
   }
   async function exportTimeline(spec,{signal:userSignal,onProgress=()=>{},onState=()=>{}}) {
     const controller=new AbortController(),signal=controller.signal;const userAbort=()=>controller.abort(cancelled());
     if(userSignal.aborted)throw cancelled();
-    const duration=validate(spec),supported=capability();if(!supported)throw new Error('This browser cannot record WebM with canvas and source audio.');check(signal);
+    const duration=validate(spec),supported=capability(spec.format);if(!supported)throw new Error('This browser cannot record the selected format with canvas and source audio.');check(signal);
     // Resume starts synchronously in the export button's gesture. Audio is routed
     // only to the recording destination, never to speakers (no echo/monitoring).
     const audio=new supported.Audio({sampleRate:48000});const resumeAudio=audio.resume();
     const canvas=document.createElement('canvas');canvas.width=spec.width;canvas.height=spec.height;
     const ctx=canvas.getContext('2d',{alpha:false});
-    const video=document.createElement('video');video.playsInline=true;video.preload='auto';video.setAttribute('aria-hidden','true');video.style.cssText='position:fixed;left:-10000px;top:0;width:2px;height:2px;';document.body.append(video);
-    let stream=null,recorder=null,source=null,destination=null,animation=0,watchdog=0,bytes=0,chunks=[],failure=null,currentURL=null;
+    const compositor=window.VeyCutCompositor;
+    const prepared=new Map(), sources=new Map();
+    let stream=null,recorder=null,destination=null,silence=null,animation=0,watchdog=0,bytes=0,chunks=[],failure=null;
     const fail=error=>{failure=error;controller.abort(error);};
     userSignal.addEventListener('abort',userAbort,{once:true});
     const hide=()=>{if(document.hidden)fail(new Error('Export stopped because this tab became hidden.'));};document.addEventListener('visibilitychange',hide);
-    const abort=()=>{video.pause();};signal.addEventListener('abort',abort,{once:true});
+    const abort=()=>{for(const item of prepared.values())item.element.pause?.();};signal.addEventListener('abort',abort,{once:true});
     const checkRun=()=>{check(signal);if(failure)throw failure;};
-    function draw(time,showVideo){ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);if(showVideo&&video.readyState>=2){const scale=Math.min(canvas.width/video.videoWidth,canvas.height/video.videoHeight),w=video.videoWidth*scale,h=video.videoHeight*scale;ctx.drawImage(video,(canvas.width-w)/2,(canvas.height-h)/2,w,h);}captions(ctx,spec.cues,time,canvas.width,canvas.height);}
-    async function recording(active){checkRun();if(active&&recorder.state==='paused')await event(recorder,'resume',signal,()=>recorder.resume(),3000);else if(!active&&recorder.state==='recording')await event(recorder,'pause',signal,()=>recorder.pause(),3000);}
-    async function prepare(clip){
-      onState('preparing');video.pause();
-      if(currentURL!==clip.url){
-        currentURL=clip.url;
-        await event(video,'loadedmetadata',signal,()=>{video.src=clip.url;video.load();});
-        // Metadata is not a decoded frame. Prime actual playback while the
-        // recorder is paused, then rewind to the exact requested source in.
-        // Audio remains routed only into the paused recording destination.
-        await event(video,'playing',signal,()=>video.play());
-        video.pause();
+    function draw(time,startup=false){
+      compositor.render(ctx,startup?{...spec,clips:spec.clips.filter(c=>c.kind==='text')}:spec,time,sources);
+      for(const [id,item] of prepared){
+        if(item.gain){
+          const clip=spec.clips.find(c=>c.id===id),track=(spec.tracks||[]).find(t=>t.id===clip.trackId)||{};
+          item.gain.gain.setValueAtTime(compositor.audioGain(clip,time,track),audio.currentTime);
+        }
       }
-      if(clip.out>video.duration+.01)throw new Error('The selected source does not cover the saved clip range.');
-      if(Math.abs(video.currentTime-clip.in)>.001)await event(video,'seeked',signal,()=>{video.currentTime=clip.in;});
-      if(video.readyState<HTMLMediaElement.HAVE_CURRENT_DATA||video.videoWidth<=0||video.videoHeight<=0){
-        throw new Error(`No decoded source frame after preparation (readyState=${video.readyState}, networkState=${video.networkState}, currentTime=${video.currentTime.toFixed(3)}, mediaError=${video.error?.code||'none'}).`);
-      }
-      checkRun();
     }
-    function segment(begin,seconds,clip){return new Promise((resolve,reject)=>{let begun=performance.now(),lastMediaTime=video.currentTime,lastAdvance=begun;
+    async function recording(active){checkRun();if(active&&recorder.state==='paused')await event(recorder,'resume',signal,()=>recorder.resume(),3000);else if(!active&&recorder.state==='recording')await event(recorder,'pause',signal,()=>recorder.pause(),3000);}
+    function dispose(id){
+      const item=prepared.get(id);if(!item)return;
+      item.element.pause?.();item.node?.disconnect();item.gain?.disconnect();
+      item.element.removeAttribute('src');item.element.load?.();item.element.remove();
+      prepared.delete(id);sources.delete(id);
+    }
+    async function prepare(time){
+      onState('preparing');
+      const active=spec.clips.filter(c=>time>=compositor.start(c)&&time<compositor.start(c)+compositor.duration(c));
+      const wanted=new Set(active.map(c=>c.id));
+      for(const id of [...prepared.keys()])if(!wanted.has(id))dispose(id);
+      for(const clip of active){
+        if(clip.kind==='text')continue;
+        let item=prepared.get(clip.id);
+        if(!item){
+          const element=document.createElement(clip.kind==='image'?'img':clip.kind==='audio'?'audio':'video');
+          element.setAttribute('aria-hidden','true');element.style.cssText='position:fixed;left:-10000px;top:0;width:2px;height:2px;';document.body.append(element);
+          item={element};prepared.set(clip.id,item);sources.set(clip.id,element);
+          if(clip.kind==='image')await event(element,'load',signal,()=>{element.src=clip.url;});
+          else {
+            element.preload='auto';element.playsInline=true;element.playbackRate=clip.speed||1;
+            element.preservesPitch=clip.preservePitch!==false;
+            await event(element,'loadedmetadata',signal,()=>{element.src=clip.url;element.load();});
+            item.node=audio.createMediaElementSource(element);item.gain=audio.createGain();item.gain.gain.value=0;
+            item.node.connect(item.gain);item.gain.connect(destination);
+            await event(element,'playing',signal,()=>element.play());element.pause();
+          }
+        }
+        if(clip.kind==='video'||clip.kind==='audio'||!clip.kind){
+          const at=clip.in+(time-compositor.start(clip))*(clip.speed||1);
+          if(clip.out>item.element.duration+.01)throw new Error('The selected source does not cover the saved clip range.');
+          if(Math.abs(item.element.currentTime-at)>.001)await event(item.element,'seeked',signal,()=>{item.element.currentTime=at;});
+          if(item.element.readyState<HTMLMediaElement.HAVE_CURRENT_DATA)throw new Error('No decoded source after preparation.');
+        }
+        checkRun();
+      }
+      return active;
+    }
+    async function play(active){
+      for(const clip of active){const item=prepared.get(clip.id);if(item?.element.play)await item.element.play();}
+    }
+    function segment(begin,seconds){return new Promise((resolve,reject)=>{
+      const begun=audio.currentTime;
       function stop(error){signal.removeEventListener('abort',abortSegment);cancelAnimationFrame(animation);error?reject(error):resolve();}
       const abortSegment=()=>stop(signal.reason instanceof Error?signal.reason:cancelled());signal.addEventListener('abort',abortSegment,{once:true});
-      function tick(){try{checkRun();const now=performance.now(),elapsed=(now-begun)/1000;const position=clip?Math.max(0,video.currentTime-clip.in):elapsed;
-        if(clip&&video.currentTime>lastMediaTime+.001){lastMediaTime=video.currentTime;lastAdvance=now;}
-        if(clip&&(video.ended&&position<seconds-.06||now-lastAdvance>3000))throw new Error('Source playback stalled before the clip ended.');
-        // Media time drives clip boundaries; gap time is a monotonic wall clock.
-        // Real-time recording can still drift under load and is not frame exact.
-        const at=begin+Math.min(seconds,position);draw(at,!!clip);onProgress(Math.min(1,at/duration));
-        if(position>=seconds-.008){video.pause();stop();return;}animation=requestAnimationFrame(tick);
+      function tick(){try{
+        checkRun();const elapsed=audio.currentTime-begun,at=begin+Math.min(seconds,elapsed);
+        for(const [id,item] of prepared){
+          const clip=spec.clips.find(c=>c.id===id);
+          if(item.element.play && item.element.error)throw new Error('Source decoding failed: '+clip.id);
+          if(item.element.play){
+            const expected=clip.in+(at-compositor.start(clip))*(clip.speed||1);
+            if(item.element.ended && expected<clip.out-.06)
+              throw new Error('Source ended before the saved clip range; export was cancelled.');
+            if(item.element.seeking || item.element.readyState<HTMLMediaElement.HAVE_CURRENT_DATA){
+              item.unreadySince ??= audio.currentTime;
+              if(audio.currentTime-item.unreadySince>.35)
+                throw new Error('Source decoding stalled; export was cancelled to protect timing.');
+            }else{
+              item.unreadySince=null;
+              if(!item.element.ended && Math.abs(item.element.currentTime-expected)>.35)
+                throw new Error('Source playback drifted; output was cancelled to protect timing.');
+            }
+          }
+        }
+        draw(Math.min(begin+seconds-.000001,at));onProgress(Math.min(1,at/duration));
+        if(elapsed>=seconds-.004){stop();return;}animation=requestAnimationFrame(tick);
       }catch(error){stop(error);}}animation=requestAnimationFrame(tick);
     });}
     try {
       if(!ctx)throw new Error('Canvas rendering unavailable.');await resumeAudio;checkRun();
-      destination=audio.createMediaStreamDestination();source=audio.createMediaElementSource(video);source.connect(destination);
-      draw(0,false);const canvasStream=canvas.captureStream(LIMITS.fps);stream=new MediaStream([...canvasStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
+      destination=audio.createMediaStreamDestination();
+      // Keep the audio recording track clocked before any source is prepared,
+      // and across empty timeline gaps. Some recorders wait for both their
+      // first video frame and first audio packet before emitting `start`.
+      silence=audio.createConstantSource();silence.offset.value=0;
+      silence.connect(destination);silence.start();
+      if(document.fonts){
+        const fonts=[...new Set(spec.clips.filter(c=>c.kind==='text').map(c=>{
+          const style=c.text||c.textStyle||{};
+          return `${style.italic?'italic ':''}${style.fontWeight||600} ${Math.max(1,(style.fontSize||.055)*spec.height)}px ${style.fontFamily||'system-ui'}`;
+        }))];
+        let fontTimer;
+        try{await Promise.race([Promise.all(fonts.map(font=>document.fonts.load(font,'سلام VeyCut'))),
+          new Promise((_,reject)=>{fontTimer=setTimeout(()=>reject(new Error('Text fonts did not load within the export budget.')),8000);})]);}
+        finally{clearTimeout(fontTimer);}checkRun();
+      }
+      draw(0,true);const canvasStream=canvas.captureStream(spec.fps||LIMITS.fps);stream=new MediaStream([...canvasStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
       recorder=new MediaRecorder(stream,{mimeType:supported.mime,videoBitsPerSecond:2000000,audioBitsPerSecond:128000});
       recorder.addEventListener('error',()=>fail(new Error('Browser recording failed.')));
-      recorder.addEventListener('dataavailable',e=>{if(!e.data.size)return;bytes+=e.data.size;if(bytes>LIMITS.bytes){fail(new Error('Export exceeded the 64 MiB output limit.'));return;}chunks.push(e.data);});
+      recorder.addEventListener('dataavailable',e=>{if(!e.data.size)return;bytes+=e.data.size;if(bytes>LIMITS.bytes){fail(new Error('Export exceeded the 256 MiB output limit.'));return;}chunks.push(e.data);});
       watchdog=setTimeout(()=>fail(new Error('Export exceeded its bounded wall-clock budget.')),duration*3000+30000);
       // A drawing made before captureStream cannot provide its first captured
       // frame. Feed the real initial black/gap frame after recording starts;
@@ -104,7 +175,7 @@ window.VeyCutExporter = (() => {
         await event(recorder,'start',signal,()=>{
           recorder.start(500);
           const firstFrames=()=>{
-            draw(0,false);
+            draw(0,true);
             canvasStream.getVideoTracks()[0].requestFrame?.();
             startupFrame=requestAnimationFrame(firstFrames);
           };
@@ -112,15 +183,21 @@ window.VeyCutExporter = (() => {
         },3000);
       } finally {cancelAnimationFrame(startupFrame);}
       await recording(false);
-      let cursor=0;
-      for(const clip of spec.clips){await prepare(clip);if(clip.start>cursor+.00001){onState('recording');draw(cursor,false);await recording(true);await segment(cursor,clip.start-cursor,null);await recording(false);}await prepare(clip);draw(clip.start,true);await video.play();checkRun();onState('recording');await recording(true);await segment(clip.start,clip.out-clip.in,clip);await recording(false);cursor=clip.start+clip.out-clip.in;}
+      const boundaries=[...new Set([0,duration,...spec.clips.flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)])])].sort((a,b)=>a-b);
+      for(let index=0;index<boundaries.length-1;index++){
+        const begin=boundaries[index],seconds=boundaries[index+1]-begin;
+        if(seconds<=0)continue;
+        const active=await prepare(begin+.0000001);draw(begin);await play(active);checkRun();
+        onState('recording');await recording(true);await segment(begin,seconds);await recording(false);
+        for(const item of prepared.values())item.element.pause?.();
+      }
       checkRun();await event(recorder,'stop',signal,()=>recorder.stop(),5000);checkRun();
       const blob=new Blob(chunks,{type:recorder.mimeType||supported.mime});if(!blob.size)throw new Error('The browser returned an empty recording.');
-      onProgress(1);return {blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime'};
+      onProgress(1);return {blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:spec.fps||LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime'};
     } finally {
-      clearTimeout(watchdog);cancelAnimationFrame(animation);document.removeEventListener('visibilitychange',hide);signal.removeEventListener('abort',abort);userSignal.removeEventListener('abort',userAbort);video.pause();if(recorder&&recorder.state!=='inactive'){try{recorder.stop();}catch{}}
-      if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());if(source)source.disconnect();video.removeAttribute('src');video.load();video.remove();await audio.close().catch(()=>{});chunks=[];
+      clearTimeout(watchdog);cancelAnimationFrame(animation);document.removeEventListener('visibilitychange',hide);signal.removeEventListener('abort',abort);userSignal.removeEventListener('abort',userAbort);for(const item of prepared.values())item.element.pause?.();if(recorder&&recorder.state!=='inactive'){try{recorder.stop();}catch{}}
+      if(silence){silence.stop();silence.disconnect();}if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());for(const id of [...prepared.keys()])dispose(id);await audio.close().catch(()=>{});chunks=[];
     }
   }
-  return Object.freeze({capability,exportTimeline,LIMITS});
+  return Object.freeze({capability,exportTimeline,LIMITS,formats:()=>['webm','mp4'].filter(format=>capability(format))});
 })();

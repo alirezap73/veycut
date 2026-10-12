@@ -1,0 +1,80 @@
+name: Publish tested VeyCut Web
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/veycut-web.yml
+  deploy:
+    name: Publish verified browser package
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: veycut-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: VeyCut-web-prototype
+          path: site
+      - uses: actions/download-artifact@v5
+        with:
+          name: VeyCut-web-checks
+          path: verified-checks
+      - name: Retain public browser verification
+        run: |
+          mkdir -p site/screenshots
+          cp verified-checks/parity-desktop.png site/screenshots/editor.png
+          cp verified-checks/parity-persian-mobile.png site/screenshots/editor-fa.png
+          cp verified-checks/parity-report.json verified-checks/parity-decoder-report.json site/
+      - name: Package downloadable web edition
+        env:
+          VERIFIED_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          root = Path('site')
+          (root / 'build-info.json').write_text(json.dumps({'version': '0.3.1', 'channel': 'web-preview', 'sourceCommit': os.environ['VERIFIED_COMMIT'], 'validatedOn': 'GitHub Actions'}, indent=2))
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          folder = root / 'downloads'
+          folder.mkdir()
+          with zipfile.ZipFile(folder / 'VeyCut-web.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+              for path in files:
+                  archive.write(path, path.relative_to(root))
+          PY
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify public editor on server
+        env:
+          PUBLIC_WEB_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
+          web_url="${PUBLIC_WEB_URL%/}/"
+          curl --fail --silent --show-error --max-time 30 "${web_url}build-info.json"
+          curl --fail --silent --show-error --head --max-time 30 "${web_url}downloads/VeyCut-web.zip"
+          playwright-cli open "$PUBLIC_WEB_URL" --browser=chromium
+          playwright-cli run-code 'async page => { await page.waitForFunction(() => document.querySelector(".badge")?.dataset.engine === "wasm"); if (await page.title() !== "VeyCut Web") throw new Error("Unexpected hosted editor"); }'
+          playwright-cli close

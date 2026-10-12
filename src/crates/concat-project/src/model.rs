@@ -1800,7 +1800,7 @@ pub struct Timeline {
     /// what a second timeline is for.
     #[serde(default)]
     pub video: VideoSettings,
-    /// The lanes, top to bottom. Never empty - `RemoveTrack` keeps a floor
+    /// The lanes, bottom to top. Never empty - `RemoveTrack` keeps a floor
     /// of one.
     #[serde(deserialize_with = "wire::list")]
     pub tracks: Vec<Track>,

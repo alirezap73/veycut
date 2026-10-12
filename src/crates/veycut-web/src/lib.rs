@@ -160,9 +160,10 @@ impl WebEditor {
     }
 
     /// Applies one supported native command, preserving the engine's atomicity and history.
-    /// Supported ops: addMedia, addClip, splitClips, trimClip, moveClips,
-    /// updateClip, removeClips, addTextClip and addTrack. A batch of up to 32
-    /// direct supported commands is one atomic edit; nested batches are refused.
+    /// Native clip, group, property, key, track and timeline edits are enabled.
+    /// A batch of up to 32 direct supported commands is one atomic edit.
+    /// Rendering support is the browser caller's responsibility; preserving a
+    /// native property does not promise that its effect can be drawn in a browser.
     pub fn apply_command(&mut self, command_json: &str) -> String {
         if command_json.len() > MAX_REQUEST_BYTES {
             return error(
@@ -190,6 +191,34 @@ impl WebEditor {
         let mut media = self.editor.project().media.len();
         let mut clips = clip_count(&self.editor);
         let mut tracks = track_count(&self.editor);
+        let mut timelines = self.editor.project().timelines.len();
+        let mut sounds_per_media = self
+            .editor
+            .project()
+            .media
+            .iter()
+            .map(|item| item.audio_tracks.len().max(1))
+            .max()
+            .unwrap_or(1);
+        let largest_clip = self
+            .editor
+            .project()
+            .timelines
+            .iter()
+            .flat_map(|timeline| &timeline.clips)
+            .map(|clip| serde_json::to_vec(clip).map_or(MAX_DOCUMENT_BYTES, |bytes| bytes.len()))
+            .max()
+            .unwrap_or(4096);
+        let largest_timeline = self
+            .editor
+            .project()
+            .timelines
+            .iter()
+            .map(|timeline| {
+                serde_json::to_vec(timeline).map_or(MAX_DOCUMENT_BYTES, |bytes| bytes.len())
+            })
+            .max()
+            .unwrap_or(4096);
         let mut additional = 4096usize;
         for edit in commands {
             match edit {
@@ -206,10 +235,40 @@ impl WebEditor {
                             "Use a stable media key, a short display name and a positive duration when known.",
                         );
                     }
+                    sounds_per_media = sounds_per_media.max(item.audio_tracks.len().max(1));
                     media += 1;
                 }
-                Command::AddClip { .. } => clips += 1,
-                Command::AddTextClip { .. } => {
+                Command::AddClip { .. }
+                | Command::AddClipAtFirstFree { .. }
+                | Command::PasteClip { .. } => clips += 1,
+                Command::DuplicateClip { .. } => {
+                    clips += 1;
+                    additional = additional.saturating_add(largest_clip.saturating_mul(2));
+                }
+                Command::PasteClips { clips: snapshots } => {
+                    clips = clips.saturating_add(snapshots.len())
+                }
+                Command::DetachAudio { .. } => {
+                    // A file may hold separately named sound streams. The engine
+                    // clones one complete sound clip and possibly a lane for each.
+                    clips = clips.saturating_add(sounds_per_media);
+                    tracks = tracks.saturating_add(sounds_per_media);
+                    additional = additional.saturating_add(
+                        sounds_per_media.saturating_mul(
+                            largest_clip
+                                .saturating_add(command_json.len())
+                                .saturating_mul(2)
+                                .saturating_add(4096),
+                        ),
+                    );
+                }
+                Command::AddTimeline => {
+                    timelines += 1;
+                    tracks += 4;
+                }
+                Command::AddTextClip { .. }
+                | Command::AddShapeClip { .. }
+                | Command::AddLayerClip { .. } => {
                     clips += 1;
                     // The shared placement policy may create a lane.
                     tracks += 1;
@@ -219,9 +278,9 @@ impl WebEditor {
                     let growth = self
                         .editor
                         .project()
-                        .active()
-                        .clips
+                        .timelines
                         .iter()
+                        .flat_map(|timeline| &timeline.clips)
                         .filter(|clip| clip_ids.contains(&clip.id))
                         .map(|clip| {
                             serde_json::to_vec(clip)
@@ -234,7 +293,43 @@ impl WebEditor {
                 Command::TrimClip { .. }
                 | Command::MoveClips { .. }
                 | Command::UpdateClip { .. }
-                | Command::RemoveClips { .. } => {}
+                | Command::RemoveClips { .. }
+                | Command::MergeClips { .. }
+                | Command::RemoveMedia { .. }
+                | Command::RemoveTrack { .. }
+                | Command::SetTrackFlag { .. }
+                | Command::SetClipSpeed { .. }
+                | Command::SetClipTransform { .. }
+                | Command::SetClipSpeedCurve { .. }
+                | Command::SetClipKey { .. }
+                | Command::ClearClipKey { .. }
+                | Command::ClearClipKeys { .. }
+                | Command::SetEffectKey { .. }
+                | Command::ClearEffectKey { .. }
+                | Command::ClearEffectKeys { .. }
+                | Command::ReattachAudio { .. }
+                | Command::RemoveTimeline { .. }
+                | Command::RenameTimeline { .. }
+                | Command::MoveTimeline { .. } => {}
+                Command::SelectTimeline { .. } => {
+                    // Selecting a different timeline changes the flat mirror,
+                    // even though no clip is added to the native project.
+                    additional = additional.saturating_add(largest_timeline);
+                }
+                Command::SetTimelineVideo { video, .. } => {
+                    if !video.is_sane()
+                        || video.width > MAX_SIDE
+                        || video.height > MAX_SIDE
+                        || !video.width.is_multiple_of(2)
+                        || !video.height.is_multiple_of(2)
+                        || video.rate_num as f64 / video.rate_den as f64 > 240.0
+                    {
+                        return error(
+                            "invalidSettings",
+                            "Use even dimensions up to 8192 and a valid frame rate up to 240.",
+                        );
+                    }
+                }
                 _ => {
                     return error(
                         "unsupportedCommand",
@@ -244,10 +339,14 @@ impl WebEditor {
             }
             additional = additional.saturating_add(command_json.len().saturating_mul(2) + 4096);
         }
-        if media > MAX_MEDIA || clips > MAX_CLIPS || tracks > MAX_TRACKS {
+        if media > MAX_MEDIA
+            || clips > MAX_CLIPS
+            || tracks > MAX_TRACKS
+            || timelines > MAX_TIMELINES
+        {
             return error(
                 "projectCapacity",
-                "The edit exceeds browser limits of 128 media items, 512 clips or 64 tracks.",
+                "The edit exceeds browser limits of 128 media items, 512 clips, 64 tracks or 8 timelines.",
             );
         }
         // Reserve room for flat timeline mirrors and default properties before
@@ -258,8 +357,28 @@ impl WebEditor {
                 "The edit would exceed the browser document limit.",
             );
         }
-        match self.editor.apply(command) {
-            Ok(outcome) => self.response(outcome.applied, outcome.created_id),
+        // Clone the exact session, including the monotonic ID mint and both
+        // history stacks. Rebuilding from JSON would resurrect retired IDs.
+        let mut staged = self.editor.clone();
+        match staged.apply(command) {
+            Ok(outcome) => {
+                if !within_capacity(&staged) {
+                    return error(
+                        "projectCapacity",
+                        "The staged edit exceeds browser project limits.",
+                    );
+                }
+                if encoded_len(&staged.to_document(&document_settings(&self.name, &staged)))
+                    > MAX_DOCUMENT_BYTES
+                {
+                    return error(
+                        "documentTooLarge",
+                        "The staged edit exceeds the browser document limit.",
+                    );
+                }
+                self.editor = staged;
+                self.response(outcome.applied, outcome.created_id)
+            }
             Err(reason) => error("commandRejected", &reason.to_string()),
         }
     }
@@ -532,5 +651,250 @@ mod tests {
         assert_eq!(result["error"]["code"], "projectCapacity");
         assert_eq!(response(editor.snapshot()), before);
         assert_eq!(response(editor.undo())["document"]["clips"], json!([]));
+    }
+
+    #[test]
+    fn browser_native_group_edits_preserve_styling_links_and_single_step_history() {
+        let mut editor = WebEditor::new();
+        let media = imported(&mut editor);
+        let added = apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+        );
+        let id = added["createdId"].as_str().unwrap().to_owned();
+        let original = added["document"].clone();
+        let styled = apply(
+            &mut editor,
+            json!({"op":"batch","commands":[
+                {"op":"setClipSpeed","clipId":id,"speed":2},
+                {"op":"setClipTransform","clipId":id,"scale":1.4,"offsetX":0.2,"rotation":15,"stretchY":1.3},
+                {"op":"updateClip","clipId":id,"patch":{"volume":0.6,"opacity":0.75,"fadeIn":0.2,
+                    "transitionIn":{"id":"cross-fade","duration":0.4},"flipH":true}},
+                {"op":"setClipKey","clipId":id,"property":"opacity","at":0,"value":0.2},
+                {"op":"setClipKey","clipId":id,"property":"opacity","at":1,"value":0.9},
+                {"op":"setTrackFlag","trackId":"T1","flag":"muted","value":true}
+            ]}),
+        );
+        assert_eq!(styled["document"]["clips"][0]["duration"], 3.0);
+        assert_eq!(response(editor.undo())["document"], original);
+        assert_eq!(response(editor.redo())["document"], styled["document"]);
+        let duplicated = apply(&mut editor, json!({"op":"duplicateClip","clipId":id}));
+        let clips = duplicated["document"]["clips"].as_array().unwrap();
+        assert_eq!(clips.len(), 2);
+        let mut expected = clips[0].clone();
+        expected["id"] = clips[1]["id"].clone();
+        expected["start"] = json!(3.0);
+        assert_eq!(
+            clips[1], expected,
+            "complete native properties survive duplication"
+        );
+        assert_eq!(response(editor.undo())["document"], styled["document"]);
+        assert_eq!(response(editor.redo())["document"], duplicated["document"]);
+
+        let detached = apply(&mut editor, json!({"op":"detachAudio","clipId":id}));
+        let before_paste = detached["document"].clone();
+        let video = before_paste["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|clip| clip["id"] == id)
+            .unwrap();
+        let sound = before_paste["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|clip| clip["detachedFrom"] == id)
+            .unwrap();
+        let mut snapshots = vec![video.clone(), sound.clone()];
+        for clip in &mut snapshots {
+            clip["start"] = json!(12.0);
+        }
+        let pasted = apply(&mut editor, json!({"op":"pasteClips","clips":snapshots}));
+        let new = pasted["document"]["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|clip| clip["start"] == 12.0)
+            .collect::<Vec<_>>();
+        assert_eq!(new.len(), 2);
+        let new_video = new.iter().find(|clip| clip["kind"] == "video").unwrap();
+        let new_sound = new.iter().find(|clip| clip["kind"] == "audio").unwrap();
+        assert_eq!(new_sound["detachedFrom"], new_video["id"]);
+        assert_ne!(new_video["id"], video["id"]);
+        assert_eq!(new_video["keys"], video["keys"]);
+        assert_eq!(new_video["transitionIn"], video["transitionIn"]);
+        assert_eq!(response(editor.undo())["document"], before_paste);
+        assert_eq!(response(editor.redo())["document"], pasted["document"]);
+        let before_failure = response(editor.snapshot());
+        let mut conflict = snapshots;
+        conflict[0]["start"] = json!(0.0);
+        assert_eq!(
+            response(
+                editor.apply_command(&json!({"op":"pasteClips","clips":conflict}).to_string())
+            )["ok"],
+            false
+        );
+        assert_eq!(
+            response(editor.snapshot()),
+            before_failure,
+            "conflicting group leaves IDs and history unchanged"
+        );
+        let mut reopened = WebEditor::new();
+        assert_eq!(
+            response(reopened.open_project(&pasted["document"].to_string()))["document"],
+            pasted["document"]
+        );
+    }
+
+    #[test]
+    fn browser_timeline_settings_and_capacity_failures_preserve_history() {
+        let mut editor = WebEditor::new();
+        let first = response(editor.snapshot())["document"]["activeTimelineId"].clone();
+        let second = apply(&mut editor, json!({"op":"addTimeline"}));
+        let second_id = second["createdId"].clone();
+        let configured = apply(
+            &mut editor,
+            json!({"op":"batch","commands":[
+                {"op":"renameTimeline","timelineId":second_id,"name":"Landscape cut"},
+                {"op":"setTimelineVideo","timelineId":second_id,"video":{"width":1920,"height":1080,"rateNum":60000,"rateDen":1001}},
+                {"op":"selectTimeline","timelineId":first}
+            ]}),
+        );
+        assert_eq!(configured["document"]["activeTimelineId"], first);
+        let timeline = configured["document"]["timelines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|timeline| timeline["id"] == second_id)
+            .unwrap();
+        assert_eq!(timeline["name"], "Landscape cut");
+        assert_eq!(timeline["video"]["rateNum"], 60000);
+        assert_eq!(response(editor.undo())["document"], second["document"]);
+        assert_eq!(response(editor.redo())["document"], configured["document"]);
+        while editor.editor.project().timelines.len() < MAX_TIMELINES {
+            apply(&mut editor, json!({"op":"addTimeline"}));
+        }
+        let before = response(editor.snapshot());
+        let rejection = response(
+            editor.apply_command(
+                &json!({"op":"batch","commands":[
+                    {"op":"renameTimeline","timelineId":first,"name":"Must not land"},
+                    {"op":"addTimeline"}
+                ]})
+                .to_string(),
+            ),
+        );
+        assert_eq!(rejection["error"]["code"], "projectCapacity");
+        assert_eq!(response(editor.snapshot()), before);
+        assert!(response(editor.undo())["applied"].as_bool().unwrap());
+        assert_eq!(editor.editor.project().timelines.len(), MAX_TIMELINES - 1);
+        let restored = response(editor.redo());
+        assert_eq!(restored["document"], before["document"]);
+        assert_eq!(restored["canUndo"], before["canUndo"]);
+        assert_eq!(restored["canRedo"], before["canRedo"]);
+        let invalid = response(
+            editor.apply_command(
+                &json!({"op":"setTimelineVideo","timelineId":first,
+            "video":{"width":8194,"height":1080,"rateNum":30,"rateDen":1}})
+                .to_string(),
+            ),
+        );
+        assert_eq!(invalid["error"]["code"], "invalidSettings");
+        assert_eq!(response(editor.snapshot()), before);
+    }
+
+    #[test]
+    fn browser_group_snapshot_capacity_is_reserved_before_any_mutation() {
+        let mut editor = WebEditor::new();
+        let media = imported(&mut editor);
+        let added = apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+        );
+        let clip = added["document"]["clips"][0].clone();
+        // Short snapshots avoid the request-size limit and isolate the clip
+        // capacity gate; native defaults fill the omitted snapshot properties.
+        let snapshots = (0..MAX_CLIPS).map(|index| json!({"id":format!("held{index}"),
+            "mediaId":clip["mediaId"],"trackId":"T1","kind":"video","start":index*6+6,"duration":6.0}))
+            .collect::<Vec<_>>();
+        let before = response(editor.snapshot());
+        let request = json!({"op":"pasteClips","clips":snapshots}).to_string();
+        assert!(request.len() <= MAX_REQUEST_BYTES);
+        assert_eq!(
+            response(editor.apply_command(&request))["error"]["code"],
+            "projectCapacity"
+        );
+        assert_eq!(response(editor.snapshot()), before);
+    }
+
+    #[test]
+    fn browser_staged_rejection_preserves_retired_ids_and_redo() {
+        // Construct two independent sessions, not a cloned control. IdMint
+        // shares one counter across media/clip/track/timeline prefixes.
+        let prepare = || {
+            let mut editor = WebEditor::new();
+            let media = imported(&mut editor);
+            let first = apply(
+                &mut editor,
+                json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+            );
+            let first_id = first["createdId"].clone();
+            apply(
+                &mut editor,
+                json!({"op":"removeClips","clipIds":[first_id]}),
+            );
+            let second = apply(
+                &mut editor,
+                json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+            );
+            response(editor.undo());
+            (editor, media, first_id, second)
+        };
+        let (mut editor, media, first_id, second) = prepare();
+        let (mut control, control_media, control_first_id, control_second) = prepare();
+        let before_failure = response(editor.snapshot());
+        assert_eq!(response(control.snapshot()), before_failure);
+        // Only the subject receives an edit that mints a temporary ID before
+        // a real missing-reference error. The control sees no such request.
+        let failure = response(editor.apply_command(&json!({"op":"batch","commands":[
+            {"op":"addClip","mediaId":media,"trackId":"T1","start":0},
+            {"op":"pasteClips","clips":[{"id":"held","kind":"video","mediaId":"missing","trackId":"T1","start":10,"duration":1}]}
+        ]}).to_string()));
+        assert_eq!(failure["error"]["code"], "commandRejected");
+        assert_eq!(response(editor.snapshot()), before_failure);
+        assert_eq!(response(editor.redo()), response(control.redo()));
+        assert_eq!(response(editor.snapshot())["document"], second["document"]);
+        assert_eq!(second, control_second);
+        let removed = apply(
+            &mut editor,
+            json!({"op":"removeClips","clipIds":[second["createdId"]]}),
+        );
+        assert_eq!(
+            removed,
+            apply(
+                &mut control,
+                json!({"op":"removeClips","clipIds":[control_second["createdId"]]}),
+            )
+        );
+        let third = apply(
+            &mut editor,
+            json!({"op":"addClip","mediaId":media,"trackId":"T1","start":0}),
+        );
+        let control_third = apply(
+            &mut control,
+            json!({"op":"addClip","mediaId":control_media,"trackId":"T1","start":0}),
+        );
+        assert_eq!(
+            third, control_third,
+            "refused staged edit must not consume an ID or change document/history"
+        );
+        assert_ne!(third["createdId"], first_id, "deleted IDs stay retired");
+        assert_ne!(
+            third["createdId"], second["createdId"],
+            "undone IDs stay retired"
+        );
+        assert_eq!(first_id, control_first_id);
+        assert_eq!(response(editor.undo()), response(control.undo()));
+        assert_eq!(response(editor.redo()), response(control.redo()));
     }
 }

@@ -8,11 +8,19 @@ async (page) => {
   const assert = (value, message) => { if (!value) throw new Error(message); };
   const count = async expected => {
     phase += ':count-' + expected;
-    await page.waitForFunction(n => document.querySelectorAll('#timeline button').length === n, expected);
+    await page.waitForFunction(n => document.querySelectorAll('#timeline .timeline-clip[data-clip-id]').length === n, expected);
   };
   const seek = async seconds => {
     phase = 'seek-' + seconds;
-    await page.locator('#video').evaluate((video, value) => { video.currentTime = value; }, seconds);
+    const timelineTime = await page.evaluate(value => {
+      const state = window.VeyCutWeb.snapshot();
+      const selected = state.clips.find(clip => clip.id === state.selected);
+      if (!selected || !['video', 'audio'].includes(selected.kind)) throw new Error('Select source media before seeking');
+      return (selected.timelineStart ?? selected.start) + (value - selected.in) / (selected.speed || 1);
+    }, seconds);
+    await page.locator('#playhead').evaluate((input, value) => {
+      input.value = String(value); input.dispatchEvent(new Event('input', {bubbles: true}));
+    }, timelineTime);
     await page.waitForFunction(n => { const video = document.querySelector('#video'); return Math.abs(video.currentTime - n) < .02 && !video.seeking && video.readyState >= 2; }, seconds);
   };
   const download = async (button, path) => {
@@ -56,7 +64,7 @@ async (page) => {
     await emitReport(report);
     return;
   }
-  if (await page.locator('#timeline button').count() === 0) {
+  if (await page.locator('#timeline .timeline-clip[data-clip-id]').count() === 0) {
   await page.setViewportSize({width: 1440, height: 1100});
   phase = 'shared-engine-ready';
   await page.waitForFunction(() => document.querySelector('.badge').dataset.engine === 'wasm');
@@ -84,31 +92,46 @@ async (page) => {
   await page.waitForFunction(() => document.querySelector('#cue-select').options.length === 2);
   await page.locator('#cue-text').fill('Web check سلام');
   await page.locator('#cue-update').click();
+  await count(4);
+  await page.waitForFunction(() => {
+    const state = window.VeyCutWeb.snapshot();
+    return state.clips.filter(c => c.kind === 'video').length === 2 &&
+      state.clips.filter(c => c.kind === 'text').length === 2 &&
+      state.cues.every(c => c.nativeId && state.clips.some(clip => clip.id === c.nativeId && clip.kind === 'text' && clip.text.content === c.text));
+  });
   await download('#srt-save', 'output/playwright/subtitles.srt');
   await download('#save', 'output/playwright/project.json');
   phase = 'project-reopen';
   await page.locator('#project-input').setInputFiles('output/playwright/project.json');
-  await count(2);
+  await count(4);
   await page.locator('#reselect').waitFor({state: 'visible'});
   assert(await page.locator('#play').isDisabled(), 'Reopened project must request media');
   await rejectExport('Reconnect every original media file');
-  await count(2);
+  await count(4);
   return; // The CLI handles the native file chooser before stage two.
   }
   phase = 'media-reconnect';
   await page.waitForFunction(() => !document.querySelector('#play').disabled);
   await seek(.4);
   phase = 'caption-preview';
-  await page.waitForFunction(() => document.querySelector('#caption-overlay').textContent.includes('Web check سلام'));
+  await page.waitForFunction(() => {
+    const state = window.VeyCutWeb.snapshot();
+    const active = state.cues.find(c => c.text.includes('Web check سلام') && c.start <= .4 && c.end > .4);
+    return active && state.clips.some(c => c.id === active.nativeId && c.kind === 'text') &&
+      document.querySelector('#preview-canvas').dataset.pending === 'false' &&
+      Math.abs(Number(document.querySelector('#playhead').value) - .4) < .02;
+  });
   await page.screenshot({path: 'output/playwright/desktop.png', fullPage: true});
   phase = 'invalid-project-preservation';
   await page.locator('#project-input').setInputFiles('output/playwright/invalid.json');
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Invalid'));
-  await count(2);
+  await count(4);
   assert(!await page.locator('#play').isDisabled(), 'Invalid project preserves connected media');
   await page.locator('#export-size').selectOption('360x640');
+  await page.locator('#export-format').selectOption('webm');
+  await page.locator('#export-fps').selectOption('30');
   const offeredSizes = await page.locator('#export-size option').evaluateAll(options => options.map(option => option.value.split('x').map(Number)));
-  assert(offeredSizes.every(pair => pair.length === 2 && pair.every(value => value > 0 && value <= 960)), 'Offered export dimensions stay bounded');
+  assert(offeredSizes.every(pair => pair.length === 2 && pair.every(value => value > 0 && value <= 1920)), 'Offered export dimensions stay bounded');
   const cancelledDownloads = [];
   const cancellationObserver = item => cancelledDownloads.push(item.suggestedFilename());
   page.on('download', cancellationObserver);
@@ -128,7 +151,7 @@ async (page) => {
     await page.waitForTimeout(300);
     assert(cancelledDownloads.length === 0, 'Cancelled export must not publish a complete file');
   } finally { page.off('download', cancellationObserver); }
-  await count(2);
+  await count(4);
   await download('#save', 'output/playwright/cancel-after.json');
   phase = 'successful-export-start';
   const output = page.waitForEvent('download', {timeout: 30000});
@@ -154,9 +177,9 @@ async (page) => {
   await page.screenshot({path: 'output/playwright/mobile-fa.png', fullPage: true});
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'No horizontal overflow');
   const report = {status: 'passed', engine: await page.locator('.badge').getAttribute('data-engine'),
-    clips: 2, captions: 2, language: await page.locator('html').getAttribute('lang'),
+    clips: 4, videoClips: 2, textClips: 2, captions: 2, language: await page.locator('html').getAttribute('lang'),
     export: {filename: 'VeyCut-video.webm', mime, width: 360, height: 640, expectedTimelineSeconds: 1.8, precision: 'realtime', cancellationDownloaded: false, disconnectedMediaDownloaded: false},
-    checks: ['import', 'trim', 'split', 'undo-redo', 'project-reopen', 'media-reconnect', 'bilingual-srt', 'invalid-project-preservation', 'mobile-rtl', 'disconnected-export-refusal', 'export-cancellation', 'export-edit-preservation', 'webm-download', 'offered-size-limit']};
+    checks: ['import', 'trim', 'split', 'undo-redo', 'project-reopen', 'media-reconnect', 'bilingual-srt', 'native-caption-clips', 'invalid-project-preservation', 'mobile-rtl', 'disconnected-export-refusal', 'export-cancellation', 'export-edit-preservation', 'webm-download', 'offered-size-limit']};
   await page.locator('body').evaluate((body, value) => { body.dataset.checkReport = JSON.stringify(value); body.dataset.checkStage = 'limit'; }, report);
   await page.setViewportSize({width: 1440, height: 1100});
   await page.locator('#language').selectOption('en');
@@ -174,7 +197,7 @@ async (page) => {
           exportState: document.querySelector('#export-status')?.dataset.state,
           progress: document.querySelector('#export-progress')?.value,
           stage: document.body.dataset.checkStage || 'editing',
-          clips: document.querySelectorAll('#timeline button').length,
+          clips: document.querySelectorAll('#timeline .timeline-clip[data-clip-id]').length,
           hidden: document.hidden, video: {time: video?.currentTime, readyState: video?.readyState,
             paused: video?.paused, seeking: video?.seeking, error: video?.error?.message}};
       })};
