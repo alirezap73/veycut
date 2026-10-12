@@ -6,7 +6,9 @@
 
 [Download the Mac beta](https://github.com/alirezap73/veycut/releases/download/v0.3.1-beta.2/VeyCut-0.3.1-macos-arm64.dmg) · [Open the Web editor](https://alirezap73.github.io/veycut/) · [Download Web ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) · [Quick start](docs/QUICK-START.md)
 
-The Mac download is **0.3.1-beta.2**, published October 11, 2026. The expanded Web preview was published October 12: [build identity](https://alirezap73.github.io/veycut/build-info.json) and [deployment checks](https://github.com/alirezap73/veycut/actions/runs/38196479596). Both are experimental. The app version remains **0.3.1**. [Release notes and checksums](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) identify the separate Mac and Web package revisions.
+The Mac download is **0.3.1-beta.2**, published October 11, 2026. The expanded Web preview was published October 12: [build identity](https://alirezap73.github.io/veycut/build-info.json) and [deployment checks](https://github.com/alirezap73/veycut/actions/runs/38203552214). Both are experimental. The app version remains **0.3.1**. [Release notes and checksums](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) identify the separate Mac and Web package revisions.
+
+The current Web interface is English-only with Persian subtitle support. A [new English-interface Mac test package](https://github.com/alirezap73/veycut/actions/runs/38204492520) passed all four packaged checks; [source, checksum and remaining checks](RELEASE-PREVIEW.md) distinguish it from the unchanged beta.2 download.
 
 ## Choose your editor
 

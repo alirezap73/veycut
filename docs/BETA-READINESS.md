@@ -4,6 +4,12 @@ The target is a reliable beta for Apple silicon macOS with the main editing path
 
 The public experimental pre-release is 0.3.1-beta.2. Development source is 0.3.1 after one explicitly requested patch increment for the fixes documented in the changelog. The existing 0.3.0 build remains a separate unpublished candidate and does not contain those fixes. Keep 0.3.1 fixed while it is validated; more commits do not require another version increase or create a public beta.
 
+## English-interface Mac candidate (October 12, 2026)
+
+The app version remains **0.3.1**. Native validation passed Linux tests/lints, Mac compilation, WebAssembly and Windows tests on source `8d639f3`. The [matching Mac candidate](https://github.com/alirezap73/veycut/actions/runs/38204492520) built successfully from `9082f26`; all four packaged scenarios passed: core editing/decoded output, 32-second editing/output, caption navigation and full-movie import/reopen. See [exact package evidence](beta-tests/english-mac-2026-10-12.json) and [candidate notes](../RELEASE-PREVIEW.md) for source, checksums and run links.
+
+This candidate uses an English-only interface and retains Persian authored content. It is an Actions test artifact, not a new public release. Independent clean installation and a 10–15-minute real-camera editing session remain unverified. The public beta.2 installer remains the older package.
+
 ## Expanded browser editor
 
 The [public Web editor](https://alirezap73.github.io/veycut/) and [downloadable ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) passed [deployment and hosted Wasm checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) on `26220d4`, published October 12, 2026. The app version remains 0.3.1.

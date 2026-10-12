@@ -2,7 +2,7 @@
 
 ## 0.3.1 English interface (2026-10-12)
 
-The current Web and native source use an English-only interface. Saved or custom native UI locales cannot override English labels. Persian titles, subtitles, right-to-left content, fonts and content-processing language choices remain supported. The app version stays 0.3.1. The existing beta.2 Mac installer is unchanged until a matching package is built and validated.
+The current Web and native source use an English-only interface. Saved or custom native UI locales cannot override English labels. Persian titles, subtitles, right-to-left content, fonts and content-processing language choices remain supported. The app version stays 0.3.1. The existing beta.2 Mac download is unchanged. A matching English-interface Mac candidate is now built and passed all four packaged checks; see [candidate evidence](docs/beta-tests/english-mac-2026-10-12.json). Independent installation and a real-camera editing session remain outstanding.
 
 ## 0.3.1 Web timelines and interoperability (2026-10-12)
 

@@ -54,7 +54,38 @@ permissions:
   actions: read
 
 jobs:
+  wait-for-candidate:
+    name: Wait for the Mac package
+    if: github.repository == 'alirezap73/veycut'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Require the requested candidate to finish successfully
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, re, subprocess, time
+          candidate = os.environ['CANDIDATE_RUN']
+          assert re.fullmatch(r'[0-9]+', candidate), 'Invalid candidate run'
+          previous = None
+          for attempt in range(100):
+              run = json.loads(subprocess.check_output(['gh', 'api', 'repos/alirezap73/veycut/actions/runs/' + candidate], text=True))
+              assert run['path'] == '.github/workflows/veycut-candidate.yml', 'Wrong candidate workflow'
+              state = (run['status'], run.get('conclusion'))
+              if state != previous:
+                  print('Candidate status:', state, flush=True)
+                  previous = state
+              if run['status'] == 'completed':
+                  assert run['conclusion'] == 'success', 'Candidate did not pass: ' + str(run.get('conclusion'))
+                  break
+              time.sleep(30)
+          else:
+              raise SystemExit('Candidate wait expired; no package inspected')
+          PYTHON
   inspect:
+    needs: wait-for-candidate
     if: github.repository == 'alirezap73/veycut'
     runs-on: macos-15
     timeout-minutes: 25
