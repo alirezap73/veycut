@@ -23,7 +23,7 @@ Both projects reference source media instead of embedding it. Their project enve
 
 ## Current expanded Web editor · server-validated source
 
-The next UI revision uses English-only controls while retaining Persian/UTF-8 caption content, licensed fonts and content-level RTL direction. This interface change needs its own exact-source browser/deployment checks; the previous runs below describe their recorded revisions.
+The public Web editor uses English-only controls while retaining Persian/UTF-8 caption content, licensed fonts and content-level RTL direction. [English-interface browser checks](https://github.com/alirezap73/veycut/actions/runs/38203197508) and [public deployment](https://github.com/alirezap73/veycut/actions/runs/38203552214) passed. Earlier feature runs below remain scoped to their recorded revisions.
 
 The [exact-source Web checks](https://github.com/alirezap73/veycut/actions/runs/38201512547) passed on `221d7ca`. These capabilities are merged into main at app version 0.3.1 and are separate from the older beta.2 Web archive. The [hosted editor](https://alirezap73.github.io/veycut/) and [current ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) identify their exact revision in [build-info.json](https://alirezap73.github.io/veycut/build-info.json); publication reruns the browser checks before deployment.
 
