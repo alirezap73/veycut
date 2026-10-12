@@ -6,6 +6,8 @@ The public experimental pre-release is 0.3.1-beta.2. Development source is 0.3.1
 
 ## Expanded browser editor
 
+The [public Web editor](https://alirezap73.github.io/veycut/) and [downloadable ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) passed [deployment and hosted Wasm checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) on `26220d4`, published October 12, 2026. The app version remains 0.3.1.
+
 [Expanded Web checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f` with eight shared-engine tests and 32 browser scenario groups. The mixed 360×640 WebM fully decoded with 64 video frames and separate source audio, transformed/keyframed stills, native text and burned captions. Legacy-project migration and malformed-project preservation passed. This source expands the Web editor after the beta.2 ZIP; the Mac installer is unchanged. Browser HDR, the full native effect/model catalogue, offline frame accuracy, Safari/Firefox and longer real footage remain unverified or unsupported. MP4 was unavailable in tested Chromium under explicit H.264/AAC codec gating.
 
 ## Version numbering

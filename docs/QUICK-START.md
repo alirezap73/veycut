@@ -1,6 +1,6 @@
 # VeyCut quick start
 
-[0.3.1-beta.2](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) contains the Apple silicon Mac app and a Web prototype. Both are experimental; app version is 0.3.1. Check the release's SHA256SUMS before using a download. The [platform guide](PLATFORMS.md) explains their different capabilities.
+[0.3.1-beta.2](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.2) contains the Apple silicon Mac app and a Web prototype. The Mac download and [expanded hosted Web editor](https://alirezap73.github.io/veycut/) are experimental; app version is 0.3.1. The original beta.2 Web ZIP is an older package. Check the release's SHA256SUMS before using a download. The [platform guide](PLATFORMS.md) explains their different capabilities.
 
 ## Mac
 
@@ -22,20 +22,20 @@ The Mac UI also provides **Relink All** when opening a project with missing medi
 
 ## Web
 
-1. Download `VeyCut-0.3.1-beta.2-web.zip` and extract it.
+1. [Open the current Web editor](https://alirezap73.github.io/veycut/). For offline hosting, [download `VeyCut-web.zip`](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) and extract it.
 2. Serve its `veycut-web` folder over HTTP. For example, if Python 3 is installed, run this **inside that folder**:
 
    ```sh
    python3 -m http.server 8080 --bind 127.0.0.1
    ```
 
-   Open `http://127.0.0.1:8080` in Chrome/Chromium. Direct file opening does not reliably load the WebAssembly engine. A public hosted editor URL is pending.
+   Open `http://127.0.0.1:8080` in Chrome/Chromium. Direct file opening does not reliably load the WebAssembly engine. The [hosted editor](https://alirezap73.github.io/veycut/) can be used without a local server.
 3. Import a browser-decodable local video, select a clip, and set source in/out points or split. Preview is sequential and single-track.
 4. Import a UTF-8 SRT file, choose a cue and edit its text. Choose English or Persian using the language selector. Caption times stay fixed when video clips change.
 5. Save project JSON. After reopening, reconnect the original media files using their filename and size. Media bytes are not embedded. Desktop projects and Web projects have different formats.
 6. Reconnect every source, choose an output size and export WebM. Keep the tab visible. Export records in real time using your device and may drift under load. Cancel produces no video download.
 
-Web export includes source audio and burned subtitles. Limits are **120 seconds**, **960-pixel long edge**, requested **30 fps**, and **64 MiB**. Chromium was checked with short generated media. Safari/Firefox, longer real footage and frame-accurate output are unverified. See [Web implementation and limits](../web/README.md).
+Web export includes source audio and burned subtitles. Limits are **120 seconds**, **1920-pixel long edge**, requested **24/25/30/60 fps**, **16 simultaneous media sources**, and **256 MiB**. Chromium was checked with short generated media. Safari/Firefox, longer real footage and frame-accurate output are unverified. See [Web implementation and limits](../web/README.md).
 
 ## Report a problem
 
@@ -49,6 +49,6 @@ Use the [issue form](https://github.com/alirezap73/veycut/issues/new/choose). In
 
 برای فایل گمشده یا خراب، بازگرداندن فایل اصلی به مسیر قبلی و خروجی مجدد در آزمون بسته موفق بود. انتخاب پوشه با Relink All مسیر جداگانه‌ای است و هنوز در آزمون رابطِ بسته بررسی نشده است.
 
-**وب:** فایل ZIP را باز کنید و پوشهٔ veycut-web را با سرور محلی HTTP اجرا کنید؛ دستور بالا در همان پوشه اجرا می‌شود. سپس آدرس محلی را در Chrome باز کنید. فایل ویدئو و SRT را وارد و ویرایش کنید. پروژهٔ JSON رسانه را در خود ذخیره نمی‌کند؛ پس از بازگشایی باید فایل‌های اصلی را دوباره متصل کنید. خروجی WebM با صدا و زیرنویس روی دستگاه شما ضبط می‌شود. تب را باز و قابل‌مشاهده نگه دارید. سقف خروجی ۱۲۰ ثانیه، ضلع بلند ۹۶۰ پیکسل و حجم ۶۴ مگابایت است. لینک سایت عمومی هنوز اعلام نشده است.
+**وب:** [نسخهٔ آنلاین](https://alirezap73.github.io/veycut/) را باز کنید؛ یا [ZIP وب](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) را استخراج و پوشهٔ آن را با سرور محلی HTTP اجرا کنید؛ دستور بالا در همان پوشه اجرا می‌شود. سپس آدرس محلی را در Chrome باز کنید. فایل ویدئو و SRT را وارد و ویرایش کنید. پروژهٔ JSON رسانه را در خود ذخیره نمی‌کند؛ پس از بازگشایی باید فایل‌های اصلی را دوباره متصل کنید. خروجی WebM با صدا و زیرنویس روی دستگاه شما ضبط می‌شود. تب را باز و قابل‌مشاهده نگه دارید. سقف خروجی ۱۲۰ ثانیه، ضلع بلند ۱۹۲۰ پیکسل، ۱۶ رسانهٔ هم‌زمان و حجم ۲۵۶ مگابایت است.
 
 امکانات و قالب پروژهٔ مک و وب یکسان نیستند. آزمون مک مستقل و تدوین ۱۰ تا ۱۵ دقیقه با فیلم دوربین باقی است. گزارش اشکال را با مراحل، نسخه و پیام خطا در [Issues](https://github.com/alirezap73/veycut/issues) بنویسید.

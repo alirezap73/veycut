@@ -23,7 +23,7 @@ Both projects reference source media instead of embedding it. Their project enve
 
 ## Expanded Web editor · server-validated source
 
-This second matrix describes the working tree after beta.2. It is **source validated in [GitHub checks](https://github.com/alirezap73/veycut/actions/runs/38192514807)**, not the downloaded beta.2 package. App version stays 0.3.1; the hosted URL remains pending.
+This second matrix describes the working tree after beta.2. It is **source validated in [GitHub checks](https://github.com/alirezap73/veycut/actions/runs/38192514807)**, not the downloaded beta.2 package. App version stays 0.3.1. The [hosted editor](https://alirezap73.github.io/veycut/) and [current Web ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) were published and verified in [deployment checks](https://github.com/alirezap73/veycut/actions/runs/38196479596) on source `26220d4`.
 
 | Area | Current development implementation | Remaining limitation or validation |
 |---|---|---|

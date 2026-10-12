@@ -5,7 +5,27 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'web/**'
+      - 'scripts/test_web_compositor.js'
+      - 'scripts/veycut_web_*.js'
+      - 'scripts/verify_web_parity.py'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/workflows/veycut-web.yml'
+      - '.github/workflows/veycut-pages.yml'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'web/**'
+      - 'scripts/test_web_compositor.js'
+      - 'scripts/veycut_web_*.js'
+      - 'scripts/verify_web_parity.py'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/workflows/veycut-web.yml'
+      - '.github/workflows/veycut-pages.yml'
   workflow_dispatch:
     inputs:
       windows_only:

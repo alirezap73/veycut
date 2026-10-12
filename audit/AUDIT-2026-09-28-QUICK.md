@@ -1,5 +1,6 @@
-# Concat audit, 28 Sep 2026 — the quick version
+# Historical engine audit, 28 Sep 2026 — the quick version
 
+This imported report describes its named historical source snapshot, not current VeyCut validation. Source attribution is retained in [source notices](../SOURCE-NOTICES.md).
 Same audit as `AUDIT-2026-09-28.md`, one screen. Each bar has 10 slots:
 🟢 filled = good, ⚪ empty = missing. Severity: 🔴 critical · 🟠 high · 🟡 medium · ⚪ low.
 Arrows are against the 23 Sep audit. *prov.* = that crate's review was still
