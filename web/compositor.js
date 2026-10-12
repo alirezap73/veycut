@@ -18,6 +18,9 @@ window.VeyCutCompositor = (() => {
     {id:'concat.warm',name:'Warm',params:[param('temperature','Temperature (K)',3000,6000,4600,50)]},
     {id:'concat.cool',name:'Cool',params:[param('temperature','Temperature (K)',7000,11000,8500,50)]},
     {id:'concat.vibrance',name:'Vibrance',params:[param('amount','Vibrance',.1,2,.7,.05)]},
+    {id:'concat.posterize',name:'Posterize',params:[param('levels','Levels',2,8,4)]},
+    {id:'concat.pixelate',name:'Pixelate',params:[param('size','Size (px)',2,64,16)]},
+    {id:'concat.sharpen',name:'Sharpen',params:[param('amount','Amount',.2,3,1,.05)]},
     {id:'concat.mono',name:'Mono (no grain)',params:[param('colour','Colour filter',-100,100,40),param('contrast','Contrast',0,100,40),param('grain','Grain (not supported)',0,0,0)]},
     {id:'concat.vignette',name:'Vignette',params:[param('strength','Strength',10,100,50)]}
   ].map(entry=>Object.freeze({...entry,params:Object.freeze(entry.params)})));
@@ -146,8 +149,52 @@ window.VeyCutCompositor = (() => {
     if(effect.id==='concat.mono'&&(result.grain!==0||(effect.keys?.grain||[]).some(key=>key.value!==0)))throw new Error('Native animated grain is not available in the browser.');
     return result;
   }
+  function spatialPixels(pixels,effect,geometry){
+    const width=geometry.width,height=geometry.height;
+    if(!(Number.isInteger(width)&&Number.isInteger(height)&&width>0&&height>0&&width*height*4===pixels.length))
+      throw new Error('Spatial effect requires exact image dimensions.');
+    if(effect.id==='concat.pixelate'){
+      const size=clamp(Math.round(effect.p.size),2,64);
+      for(let y=0;y<height;y+=size)for(let x=0;x<width;x+=size){
+        const edgeX=Math.min(x+size,width),edgeY=Math.min(y+size,height),sum=[0,0,0,0];
+        for(let yy=y;yy<edgeY;yy++)for(let xx=x;xx<edgeX;xx++){
+          const i=(yy*width+xx)*4;for(let c=0;c<4;c++)sum[c]+=pixels[i+c];
+        }
+        const count=(edgeX-x)*(edgeY-y);
+        for(let yy=y;yy<edgeY;yy++)for(let xx=x;xx<edgeX;xx++){
+          const i=(yy*width+xx)*4;for(let c=0;c<4;c++)pixels[i+c]=sum[c]/count;
+        }
+      }
+    }else if(effect.id==='concat.sharpen'){
+      // A separable five-tap Gaussian gives the same 5x5 unsharp-mask
+      // footprint as the native effect without 25 reads per output pixel.
+      const kernel=[Math.exp(-2),Math.exp(-.5),1,Math.exp(-.5),Math.exp(-2)];
+      const divisor=kernel.reduce((a,b)=>a+b,0),horizontal=new Float32Array(width*height*3);
+      for(let y=0;y<height;y++)for(let x=0;x<width;x++)for(let c=0;c<3;c++){
+        let sum=0;for(let k=-2;k<=2;k++)sum+=pixels[(y*width+clamp(x+k,0,width-1))*4+c]*kernel[k+2];
+        horizontal[(y*width+x)*3+c]=sum/divisor;
+      }
+      const amount=clamp(effect.p.amount,.2,3);
+      for(let y=0;y<height;y++)for(let x=0;x<width;x++)for(let c=0;c<3;c++){
+        let sum=0;for(let k=-2;k<=2;k++)sum+=horizontal[(clamp(y+k,0,height-1)*width+x)*3+c]*kernel[k+2];
+        const index=(y*width+x)*4+c,original=pixels[index];
+        pixels[index]=original+(original-sum/divisor)*amount;
+      }
+    }
+  }
   function filterPixels(pixels,treatments,at,geometry={},shading={scale:1,offset:0}) {
     const enabled=treatments.filter(effect=>effect.enabled!==false).map(effect=>({id:effect.id,p:parameters(effect,at)}));
+    if(enabled.some(e=>e.id==='concat.pixelate'||e.id==='concat.sharpen')){
+      let segment=[];
+      for(const effect of treatments.filter(e=>e.enabled!==false)){
+        if(effect.id==='concat.pixelate'||effect.id==='concat.sharpen'){
+          if(segment.length)filterPixels(pixels,segment,at,geometry);
+          spatialPixels(pixels,{id:effect.id,p:parameters(effect,at)},geometry);
+          segment=[];
+        }else segment.push(effect);
+      }
+      return filterPixels(pixels,segment,at,geometry,shading);
+    }
     if(enabled.some(e=>e.id==='concat.vignette')&&(!(geometry.width>0&&geometry.height>0)||geometry.width*geometry.height*4!==pixels.length))throw new Error('Vignette requires exact image dimensions.');
     const daylight=kelvin(6500);
     for(const e of enabled)if(e.id==='concat.warm'||e.id==='concat.cool'){const tint=kelvin(e.p.temperature).map((v,i)=>v/daylight[i]);e.gain=tint.map(v=>v/Math.max(luma(tint),.001));}
@@ -163,6 +210,7 @@ window.VeyCutCompositor = (() => {
           let display=rgb.map(v=>Math.pow(Math.max(0,v),1/2.4));
           if(e.id==='concat.saturation'){const grey=luma(display),s=p.amount/100,amount=s>0?1+2*s:(1+s)*(1+s);display=display.map(v=>grey+(v-grey)*amount);}
           else if(e.id==='concat.warm'||e.id==='concat.cool')display=display.map((v,j)=>v*e.gain[j]);
+          else if(e.id==='concat.posterize'){const steps=clamp(Math.round(p.levels),2,8)-1;display=display.map(v=>Math.round(v*steps)/steps);}
           else if(e.id==='concat.mono'){const f=p.colour/100,r=.3+.35*f,b=.11-.05*f,grey=display[0]*r+display[1]*(1-r-b)+display[2]*b,c=clamp(grey,0,1),out=c+(c*c*(3-2*c)-c)*(p.contrast/100*.8)+(grey-c);display=[out,out,out];}
           else if(e.id==='concat.vibrance'){
             const mx=Math.max(...display),mn=Math.min(...display),chroma=mx-mn,grey=luma(display),amount=1+p.amount*Math.max(1-chroma,0);

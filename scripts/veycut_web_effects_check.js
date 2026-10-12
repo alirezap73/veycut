@@ -1,0 +1,28 @@
+// GitHub runner: exercise picture-effect controls, preview and real export.
+async page => {
+  const assert=(condition,message)=>{if(!condition)throw Error(message);};
+  await page.goto('http://127.0.0.1:4173/');
+  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await page.locator('#media-input').setInputFiles('output/playwright/effects-source.png');
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
+  await page.locator('#trim-out').fill('2');
+  await page.locator('#trim').click();
+  const details=page.locator('details:has(#effect-select)');
+  await details.locator('summary').click();
+  for(const [id,amount] of [['concat.pixelate',32],['concat.posterize',2],['concat.sharpen',1]]){
+    await page.locator('#effect-select').selectOption(id);
+    await page.locator('#effect-amount').fill(String(amount));
+    await page.locator('#apply-effect').click();
+  }
+  await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects.length===3);
+  const ids=await page.evaluate(()=>window.VeyCutWeb.snapshot().clips[0].videoEffects.map(e=>e.id));
+  assert(ids.join(',')==='concat.pixelate,concat.posterize,concat.sharpen','Effects retained in native document order');
+  await page.locator('#playhead').press('Home');
+  await page.waitForFunction(()=>document.querySelector('#preview-canvas').dataset.pending==='false');
+  await page.locator('#export-size').selectOption('360x640');
+  const pending=page.waitForEvent('download',{timeout:45000});
+  await page.locator('#video-export').click();
+  await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
+  assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
+  await (await pending).saveAs('output/playwright/effects-video.webm');
+}
