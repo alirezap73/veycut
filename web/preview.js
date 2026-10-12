@@ -49,18 +49,18 @@ window.VeyCutPreview = class {
           if(!node.dataset.previewBound){node.addEventListener('loadeddata',()=>this.seek(this.time));node.addEventListener('seeked',()=>this.draw());node.addEventListener('error',()=>this.onError(new Error('Media decoding failed.')));node.dataset.previewBound='true';}
           if(node!==this.primary){node.style.display='none';document.body.append(node);}}
         node.src=m.url;if(node instanceof HTMLMediaElement)node.load();this.sources.set(c.id,node);
-        if(this.audio&&node instanceof HTMLMediaElement&&!this.nodes.has(node))this.attachAudio(node);
+        if(this.audio&&node instanceof HTMLMediaElement&&!this.nodes.has(node))this.attachAudio(node,c);
       }
     }
   }
-  attachAudio(node){const source=this.audio.createMediaElementSource(node),gain=this.audio.createGain();gain.gain.value=0;source.connect(gain).connect(this.mix);this.nodes.set(node,{source,gain});}
-  release(node){if(node instanceof HTMLMediaElement){node.pause();const pair=this.nodes.get(node);if(pair&&node!==this.primary){pair.source.disconnect();pair.gain.disconnect();this.nodes.delete(node);}else if(pair)pair.gain.gain.value=0;if(node!==this.primary){node.removeAttribute('src');node.load();node.remove();}}else{node.onload=null;node.onerror=null;node.removeAttribute('src');}}
+  attachAudio(node,clip){const source=this.audio.createMediaElementSource(node),gain=this.audio.createGain();gain.gain.value=0;gain.connect(this.mix);const pair={source,gain};window.VeyCutAudioFilters.rewire(this.audio,pair,clip.filters);this.nodes.set(node,pair);}
+  release(node){if(node instanceof HTMLMediaElement){node.pause();const pair=this.nodes.get(node);if(pair&&node!==this.primary){pair.source.disconnect();for(const filter of pair.filterNodes||[])filter.disconnect();pair.gain.disconnect();this.nodes.delete(node);}else if(pair)pair.gain.gain.value=0;if(node!==this.primary){node.removeAttribute('src');node.load();node.remove();}}else{node.onload=null;node.onerror=null;node.removeAttribute('src');}}
   ensureAudio(){if(!this.audio){
       this.audio=new (window.AudioContext||window.webkitAudioContext)();
       this.mix=this.audio.createGain();this.mix.channelCount=2;this.mix.channelCountMode='explicit';this.mix.connect(this.audio.destination);
       const split=this.audio.createChannelSplitter(2),silent=this.audio.createGain();silent.gain.value=0;silent.connect(this.audio.destination);this.mix.connect(split);
       this.meters=[0,1].map(channel=>{const analyser=this.audio.createAnalyser();analyser.fftSize=256;split.connect(analyser,channel);analyser.connect(silent);return{analyser,samples:new Float32Array(256)};});
-    }for(const node of this.sources.values()){if(!(node instanceof HTMLMediaElement)||this.nodes.has(node))continue;this.attachAudio(node);}return this.audio.resume();}
+    }for(const [id,node] of this.sources){if(!(node instanceof HTMLMediaElement)||this.nodes.has(node))continue;const clip=this.spec.clips.find(c=>c.id===id);this.attachAudio(node,clip);}return this.audio.resume();}
   seek(time){this.time=Math.max(0,Math.min(time,this.duration()));this.syncUntil=performance.now()+150;try{if(!this.renderError)this.sync();}catch(error){this.renderError=error;this.pause();}this.draw();this.onTime(this.time);}
   duration(){return this.spec?Math.max(0,...this.spec.clips.map(c=>c.start+c.duration)):0;}
   async play(){if(this.renderError){this.draw();return;}if(this.playing)return;if(this.time>=this.duration())this.seek(0);await this.ensureAudio();this.playing=true;this.epoch=performance.now();this.origin=this.time;this.tick();}
@@ -76,7 +76,7 @@ window.VeyCutPreview = class {
       const speed=c.speed||1,target=window.VeyCutCompositor?.sourceTime(c,this.time)??c.in+(this.time-c.start)*speed;node.playbackRate=speed;node.preservesPitch=c.preservePitch!==false;
       if(node.readyState>=1&&Math.abs(node.currentTime-target)>(this.playing?.15:.015)){this.syncUntil=performance.now()+150;try{node.currentTime=target;}catch{}}
       const gain=window.VeyCutCompositor?window.VeyCutCompositor.audioGain(c,this.time,track):c.muted||track?.muted?0:c.volume??1;
-      const pair=this.nodes.get(node);if(pair)pair.gain.gain.value=gain;else node.volume=Math.min(1,gain);
+      const pair=this.nodes.get(node);if(pair){window.VeyCutAudioFilters.rewire(this.audio,pair,c.filters);pair.gain.gain.value=gain;}else node.volume=Math.min(1,gain);
       if(this.playing&&!window.VeyCutCompositor?.isHold(c)&&node.paused&&!node.dataset.playPending){node.dataset.playPending='true';node.play().catch(e=>this.onError(e)).finally(()=>delete node.dataset.playPending);}
     }}
   clearPicture(){const ctx=this.canvas.getContext('2d');if(!ctx)return;ctx.save();try{ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.fillStyle='#000';ctx.fillRect(0,0,this.canvas.width,this.canvas.height);}finally{ctx.restore();}}

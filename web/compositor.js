@@ -127,8 +127,7 @@ window.VeyCutCompositor = (() => {
     if (clip.transitionIn && (!transitionIDs.has(clip.transitionIn.id)||!Number.isFinite(clip.transitionIn.duration)||clip.transitionIn.duration<0)) throw new Error('Native transition is not available in browser export.');
     if (!(clip.speed===undefined || Number.isFinite(clip.speed) && clip.speed>0 && clip.speed<=16))
       throw new Error('Unsupported playback speed.');
-    if ((clip.filters || []).some(filter=>filter.enabled!==false))
-      throw new Error('Native audio filters are not yet available in browser export.');
+    window.VeyCutAudioFilters.active(clip.filters);
     if (!Object.hasOwn(blend,clip.blend || '')) throw new Error('Unsupported blend mode.');
     for (const effect of clip.videoEffects || []) {
       if (effect.enabled!==false) {if(!effects.has(effect.id))throw new Error('This effect is not yet rendered in the browser: '+effect.id);parameters(effect,0);}

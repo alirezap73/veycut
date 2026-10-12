@@ -68,6 +68,7 @@ jobs:
           sudo apt-get install --yes ffmpeg
           node --check web/app.js
           node --check web/export.js
+          node --check web/audio-filters.js
           node --check web/compositor.js
           node --check web/preview.js
           node --check web/project-interop.js
@@ -76,6 +77,7 @@ jobs:
           node --check scripts/veycut_web_native_check.js
           node --check scripts/veycut_web_timelines_check.js
           node --check scripts/veycut_web_transition_check.js
+          node --check scripts/veycut_web_audio_tone_check.js
           node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
@@ -96,7 +98,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -346,6 +348,9 @@ jobs:
           assert len(captions) == 55 and len(set(clip['trackId'] for clip in captions)) == 1
           assert captions[1]['text']['content'] == 'سلام 1'
           PYINTEROP
+          ffmpeg -v error -f lavfi -i sine=frequency=110:duration=2:sample_rate=48000 -c:a pcm_s16le -y output/playwright/tone-bass.wav
+          playwright-cli run-code --filename=scripts/veycut_web_audio_tone_check.js > output/playwright/audio-tone-check.log
+          python3 scripts/verify_web_audio_tone.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Retain browser evidence
