@@ -93,6 +93,14 @@ jobs:
               for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
+              if [ -f output/playwright/parity-report.json ]; then
+                python3 - <<'PYREPORT'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('output/playwright/parity-report.json').read_text())
+          print(json.dumps({key: report.get(key) for key in ['status','phase','error','pageErrors','exportState','exportStatus']}))
+          PYREPORT
+              fi
               timeout 20s playwright-cli snapshot --filename=output/playwright/failure-snapshot.yml > output/playwright/failure-snapshot.log 2>&1 || true
               timeout 20s playwright-cli console > output/playwright/failure-console.log 2>&1 || true
             fi
@@ -267,16 +275,7 @@ jobs:
           ffmpeg -v error -f lavfi -i sine=frequency=880:duration=2:sample_rate=48000 -c:a pcm_s16le -y output/playwright/tone.wav
           playwright-cli run-code --filename=scripts/veycut_web_parity_check.js > output/playwright/parity-check.log
           for kind in video image audio; do
-            playwright-cli snapshot --filename=output/playwright/parity-reconnect.yml
-            parity_ref=$(python3 - <<'PYREF'
-          import re
-          from pathlib import Path
-          refs = re.findall(r'button "Reconnect selected media" \[ref=(e\d+)\]', Path('output/playwright/parity-reconnect.yml').read_text())
-          assert len(refs) == 1, refs
-          print(refs[0])
-          PYREF
-            )
-            playwright-cli click "$parity_ref"
+            playwright-cli run-code 'async page => { await page.locator("#reselect").click(); }'
             case "$kind" in
               video) playwright-cli upload docs/beta-samples/portrait-2s.mp4 ;;
               image) playwright-cli upload output/playwright/layer.png ;;
@@ -286,16 +285,7 @@ jobs:
           done
           python3 scripts/verify_web_parity.py
           playwright-cli run-code --filename=scripts/veycut_web_legacy_check.js > output/playwright/legacy-open.log
-          playwright-cli snapshot --filename=output/playwright/legacy-reconnect.yml
-          legacy_ref=$(python3 - <<'PYREF'
-          import re
-          from pathlib import Path
-          refs = re.findall(r'button "Reconnect selected media" \[ref=(e\d+)\]', Path('output/playwright/legacy-reconnect.yml').read_text())
-          assert len(refs) == 1, refs
-          print(refs[0])
-          PYREF
-          )
-          playwright-cli click "$legacy_ref"
+          playwright-cli run-code 'async page => { await page.locator("#reselect").click(); }'
           playwright-cli upload docs/beta-samples/portrait-2s.mp4
           playwright-cli run-code --filename=scripts/veycut_web_legacy_check.js > output/playwright/legacy-check.log
           python3 - <<'PY'

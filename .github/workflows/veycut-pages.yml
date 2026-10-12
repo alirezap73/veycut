@@ -14,6 +14,7 @@ jobs:
     name: Publish verified browser package
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: write
@@ -62,3 +63,18 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify public editor on server
+        env:
+          PUBLIC_WEB_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
+          web_url="${PUBLIC_WEB_URL%/}/"
+          curl --fail --silent --show-error --max-time 30 "${web_url}build-info.json"
+          curl --fail --silent --show-error --head --max-time 30 "${web_url}downloads/VeyCut-web.zip"
+          playwright-cli open "$PUBLIC_WEB_URL" --browser=chromium
+          playwright-cli run-code 'async page => { await page.waitForFunction(() => document.querySelector(".badge")?.dataset.engine === "wasm"); if (await page.title() !== "VeyCut Web") throw new Error("Unexpected hosted editor"); }'
+          playwright-cli close
