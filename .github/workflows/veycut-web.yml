@@ -79,6 +79,7 @@ jobs:
           node --check scripts/veycut_web_transition_check.js
           node --check scripts/veycut_web_audio_tone_check.js
           node --check scripts/veycut_web_effects_check.js
+          node --check scripts/veycut_web_speed_curve_check.js
           node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
@@ -99,7 +100,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -365,6 +366,16 @@ jobs:
           ffmpeg -v error -xerror -i output/playwright/chroma-video.webm -f null -
           ffmpeg -v error -xerror -i output/playwright/blur-filtered.webm -f null -
           python3 scripts/verify_web_effects.py
+          playwright-cli run-code --filename=scripts/veycut_web_speed_curve_check.js > output/playwright/speed-curve-check.log
+          ffmpeg -v error -xerror -i output/playwright/speed-curve.webm -f null -
+          python3 - <<'PYSPEED'
+          import json, subprocess
+          meta=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_format','-show_streams','-of','json','output/playwright/speed-curve.webm']))
+          duration=float(meta['format']['duration'])
+          assert 1.7 < duration < 2.5, f'Curved export duration {duration}'
+          assert any(s['codec_type']=='video' for s in meta['streams'])
+          assert any(s['codec_type']=='audio' for s in meta['streams'])
+          PYSPEED
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Retain browser evidence

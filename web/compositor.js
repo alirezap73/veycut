@@ -76,7 +76,42 @@ window.VeyCutCompositor = (() => {
       number(clip[property],fallback));
   }
   function isHold(clip){return clip[hold]===true;}
-  function sourceTime(clip,time){return number(clip.in,number(clip.sourceStart,0))+(isHold(clip)?0:(time-start(clip))*number(clip.speed,1));}
+  function speedPoints(clip){
+    const points=clip.speedCurve;
+    if(!Array.isArray(points)||!points.length)return null;
+    const sorted=points.map(p=>({at:p.at,speed:p.speed})).sort((a,b)=>a.at-b.at);
+    if(sorted[0].at>0)sorted.unshift({at:0,speed:sorted[0].speed});
+    if(sorted[sorted.length-1].at<1)sorted.push({at:1,speed:sorted[sorted.length-1].speed});
+    return sorted;
+  }
+  function speedAt(clip,time){
+    const points=speedPoints(clip);
+    if(!points)return number(clip.speed,1);
+    const x=fraction(clip,time);
+    for(let i=1;i<points.length;i++)if(x<=points[i].at){
+      const a=points[i-1],b=points[i];
+      return b.at<=a.at?b.speed:a.speed+(b.speed-a.speed)*(x-a.at)/(b.at-a.at);
+    }
+    return points[points.length-1].speed;
+  }
+  function sourceTime(clip,time){
+    const source=number(clip.in,number(clip.sourceStart,0));
+    if(isHold(clip))return source;
+    const points=speedPoints(clip);
+    if(!points)return source+(time-start(clip))*number(clip.speed,1);
+    const x=fraction(clip,time);let consumed=0;
+    for(let i=1;i<points.length;i++){
+      const a=points[i-1],b=points[i];if(x<=a.at)break;
+      const end=Math.min(x,b.at),rate=b.at<=a.at?b.speed:a.speed+(b.speed-a.speed)*(end-a.at)/(b.at-a.at);
+      consumed+=(end-a.at)*(a.speed+rate)/2;if(x<=b.at)break;
+    }
+    return source+duration(clip)*consumed;
+  }
+  function timelineTime(clip,source){
+    let low=start(clip),high=low+duration(clip);
+    for(let i=0;i<40;i++){const mid=(low+high)/2;if(sourceTime(clip,mid)<source)low=mid;else high=mid;}
+    return (low+high)/2;
+  }
   function resolveTransitions(spec){
     if(spec[resolved])return spec;
     const fps=number(spec.fps,30);if(!(fps>0&&fps<=1000))throw new Error('Invalid transition frame rate.');
@@ -129,8 +164,16 @@ window.VeyCutCompositor = (() => {
   function validateClip(clip) {
     if (!['video','audio','image','text'].includes(clip.kind || 'video'))
       throw new Error('This clip kind is not rendered in the browser: '+clip.kind);
-    if (clip.cutout || clip.speedCurve?.length || clip.reversed || clip.reverse || clip.shape)
+    if (clip.cutout || clip.reversed || clip.reverse || clip.shape)
       throw new Error('This clip requires a native treatment that is not yet available in browser export.');
+    if(clip.speedCurve!=null){
+      if(!Array.isArray(clip.speedCurve)||!clip.speedCurve.length||clip.speedCurve.length>1024||
+        clip.speedCurve.some(p=>!p||!Number.isFinite(p.at)||p.at<0||p.at>1||!Number.isFinite(p.speed)||p.speed<.0625||p.speed>16))
+        throw new Error('Invalid speed curve.');
+      const covered=sourceTime(clip,start(clip)+duration(clip))-sourceTime(clip,start(clip));
+      if(clip.out!=null&&Math.abs(covered-(clip.out-sourceTime(clip,start(clip))))>.05)
+        throw new Error('Speed curve does not cover the saved source range.');
+    }
     if (clip.audioStream != null) throw new Error('Selecting a native audio stream is not yet available in browser export.');
     if (Number(clip.text?.tracking || 0) !== 0) throw new Error('Native letter spacing is not yet available in browser export.');
     if (clip.transitionIn && (!transitionIDs.has(clip.transitionIn.id)||!Number.isFinite(clip.transitionIn.duration)||clip.transitionIn.duration<0)) throw new Error('Native transition is not available in browser export.');
@@ -379,6 +422,6 @@ window.VeyCutCompositor = (() => {
     legacyCaptions(ctx,spec,time);
     } finally {ctx.restore();}
   }
-  return Object.freeze({render,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
+  return Object.freeze({render,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,speedAt,timelineTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
     supportedEffects:Object.freeze([...effects]),supportedBlends:Object.freeze(Object.keys(blend))});
 })();

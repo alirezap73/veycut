@@ -95,7 +95,7 @@ window.VeyCutExporter = (() => {
           item={element};prepared.set(clip.id,item);sources.set(clip.id,element);
           if(clip.kind==='image')await event(element,'load',signal,()=>{element.src=clip.url;});
           else {
-            element.preload='auto';element.playsInline=true;element.playbackRate=clip.speed||1;
+            element.preload='auto';element.playsInline=true;element.playbackRate=compositor.speedAt(clip,time);
             element.preservesPitch=clip.preservePitch!==false;
             await event(element,'loadedmetadata',signal,()=>{element.src=clip.url;element.load();});
             item.node=audio.createMediaElementSource(element);item.gain=audio.createGain();item.gain.gain.value=0;
@@ -127,6 +127,7 @@ window.VeyCutExporter = (() => {
           if(item.element.play && item.element.error)throw new Error('Source decoding failed: '+clip.id);
           if(item.element.play){
             const expected=compositor.sourceTime(clip,at);
+            item.element.playbackRate=compositor.speedAt(clip,at);
             if(item.element.ended && expected<clip.out-.06)
               throw new Error('Source ended before the saved clip range; export was cancelled.');
             if(item.element.seeking || item.element.readyState<HTMLMediaElement.HAVE_CURRENT_DATA){
