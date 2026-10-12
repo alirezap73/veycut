@@ -29,6 +29,16 @@ jobs:
         with:
           name: VeyCut-web-prototype
           path: site
+      - uses: actions/download-artifact@v5
+        with:
+          name: VeyCut-web-checks
+          path: verified-checks
+      - name: Retain public browser verification
+        run: |
+          mkdir -p site/screenshots
+          cp verified-checks/parity-desktop.png site/screenshots/editor.png
+          cp verified-checks/parity-persian-mobile.png site/screenshots/editor-fa.png
+          cp verified-checks/parity-report.json verified-checks/parity-decoder-report.json site/
       - name: Package downloadable web edition
         env:
           VERIFIED_COMMIT: ${{ github.sha }}

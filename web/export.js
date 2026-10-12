@@ -59,7 +59,7 @@ window.VeyCutExporter = (() => {
     const ctx=canvas.getContext('2d',{alpha:false});
     const compositor=window.VeyCutCompositor;
     const prepared=new Map(), sources=new Map();
-    let stream=null,recorder=null,destination=null,animation=0,watchdog=0,bytes=0,chunks=[],failure=null;
+    let stream=null,recorder=null,destination=null,silence=null,animation=0,watchdog=0,bytes=0,chunks=[],failure=null;
     const fail=error=>{failure=error;controller.abort(error);};
     userSignal.addEventListener('abort',userAbort,{once:true});
     const hide=()=>{if(document.hidden)fail(new Error('Export stopped because this tab became hidden.'));};document.addEventListener('visibilitychange',hide);
@@ -147,6 +147,11 @@ window.VeyCutExporter = (() => {
     try {
       if(!ctx)throw new Error('Canvas rendering unavailable.');await resumeAudio;checkRun();
       destination=audio.createMediaStreamDestination();
+      // Keep the audio recording track clocked before any source is prepared,
+      // and across empty timeline gaps. Some recorders wait for both their
+      // first video frame and first audio packet before emitting `start`.
+      silence=audio.createConstantSource();silence.offset.value=0;
+      silence.connect(destination);silence.start();
       if(document.fonts){
         const fonts=[...new Set(spec.clips.filter(c=>c.kind==='text').map(c=>{
           const style=c.text||c.textStyle||{};
@@ -191,7 +196,7 @@ window.VeyCutExporter = (() => {
       onProgress(1);return {blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:spec.fps||LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime'};
     } finally {
       clearTimeout(watchdog);cancelAnimationFrame(animation);document.removeEventListener('visibilitychange',hide);signal.removeEventListener('abort',abort);userSignal.removeEventListener('abort',userAbort);for(const item of prepared.values())item.element.pause?.();if(recorder&&recorder.state!=='inactive'){try{recorder.stop();}catch{}}
-      if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());for(const id of [...prepared.keys()])dispose(id);await audio.close().catch(()=>{});chunks=[];
+      if(silence){silence.stop();silence.disconnect();}if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());for(const id of [...prepared.keys()])dispose(id);await audio.close().catch(()=>{});chunks=[];
     }
   }
   return Object.freeze({capability,exportTimeline,LIMITS,formats:()=>['webm','mp4'].filter(format=>capability(format))});
