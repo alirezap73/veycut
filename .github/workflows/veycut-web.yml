@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js']
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
     inputs:
       long_export:
@@ -81,6 +81,20 @@ jobs:
           cp src/crates/concat-text/fonts/Vazirmatn-Variable.ttf web/fonts/
           cp src/crates/concat-text/fonts/LICENSE-Vazirmatn.txt web/fonts/
           cp LICENSE SOURCE-NOTICES.md LICENSE-EXCEPTIONS.md THIRD_PARTY_NOTICES.md TRADEMARK.md web/
+      - name: Bundle pinned frame-export codecs
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 2 --max-time 60 --max-filesize 10000000 https://registry.npmjs.org/mediabunny/-/mediabunny-1.61.4.tgz -o "$RUNNER_TEMP/mediabunny.tgz"
+          python3 - <<'PYCODEC'
+          import base64, hashlib, os
+          with open(os.environ['RUNNER_TEMP']+'/mediabunny.tgz','rb') as source:
+              digest=base64.b64encode(hashlib.file_digest(source,'sha512').digest()).decode()
+          assert digest=='gZPBi40ldiZGeU2DJxT/Q3hlNiaxfpwNYTfmi0Maq3SoBJT64+W+ySc0Z7t+2JUGxNbkXnLFrDkSS2OQuweOhA==', 'Unexpected codec package'
+          PYCODEC
+          mkdir -p web/vendor
+          tar -xOf "$RUNNER_TEMP/mediabunny.tgz" package/dist/bundles/mediabunny.min.mjs > web/vendor/mediabunny.min.mjs
+          tar -xOf "$RUNNER_TEMP/mediabunny.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny.txt
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -92,6 +106,9 @@ jobs:
           sudo apt-get install --yes ffmpeg
           node --check web/app.js
           node --check web/export.js
+          node --check web/offline-export.js
+          node scripts/test_blob_writer.js
+          node --check scripts/veycut_web_offline_check.js
           node --check web/webm-metadata.js
           node --check web/output-check.js
           node --check web/audio-filters.js
@@ -138,7 +155,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log output/playwright/bundle-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log output/playwright/bundle-check.log output/playwright/offline-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -444,6 +461,8 @@ jobs:
           PYRELIABLE
           playwright-cli run-code --filename=scripts/veycut_web_bundle_check.js > output/playwright/bundle-check.log
           ffmpeg -v error -xerror -i output/playwright/bundle-video.mp4 -f null -
+          playwright-cli run-code --filename=scripts/veycut_web_offline_check.js > output/playwright/offline-check.log
+          python3 scripts/verify_web_offline.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Five-minute source and real browser export

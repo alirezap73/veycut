@@ -246,5 +246,5 @@ window.VeyCutExporter = (() => {
       if(silence){silence.stop();silence.disconnect();}if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());for(const id of [...prepared.keys()])dispose(id);if(audio.state!=='closed')await audio.close().catch(()=>{});chunks=[];
     }
   }
-  return Object.freeze({capability,exportTimeline,LIMITS,PROFILES,budget,formats:()=>['webm','mp4'].filter(format=>capability(format))});
+  return Object.freeze({capability,exportTimeline,validate,LIMITS,PROFILES,budget,formats:()=>['webm','mp4'].filter(format=>capability(format))});
 })();

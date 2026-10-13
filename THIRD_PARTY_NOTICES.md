@@ -223,3 +223,7 @@ License. The still lives at `src/crates/concat-host/assets/card-still.jpg`
 and is embedded in the app; each card is the effect's own shader run over
 it on the GPU when the app first needs the card (`concat-host`'s
 `cards.rs`).
+
+## Mediabunny · Web frame export
+
+The Web build includes the unmodified Mediabunny 1.61.4 browser bundle, licensed under MPL-2.0. Its license is retained in `web/vendor/LICENSE-mediabunny.txt` in the built Web package. Source and version history: https://github.com/Vanilagy/mediabunny . The versioned source distribution is available through https://www.npmjs.com/package/mediabunny/v/1.61.4 . The dependency is bundled on GitHub; runtime imports stay on the application origin and do not upload media.
