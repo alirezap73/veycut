@@ -382,7 +382,7 @@ jobs:
           ffmpeg -v error -xerror -i output/playwright/shapes-video.webm -f null -
           python3 - <<'PYSHAPES'
           import subprocess
-          frame=subprocess.check_output(['ffmpeg','-v','error','-ss','.8','-i','output/playwright/shapes-video.webm','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'])
+          frame=subprocess.check_output(['ffmpeg','-v','error','-ss','0.8','-i','output/playwright/shapes-video.webm','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'])
           assert len(frame)==360*640*3
           def pixel(x,y):
               at=(y*360+x)*3
