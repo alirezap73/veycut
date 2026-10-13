@@ -2,6 +2,13 @@
 // Real-time browser export. No uploads, remote codecs, or simulated output.
 window.VeyCutExporter = (() => {
   const LIMITS = Object.freeze({seconds:600,longEdge:1920,fps:30,bytes:256*1024*1024,simultaneous:16});
+  const PROFILES=Object.freeze({compact:Object.freeze({videoBitsPerSecond:2000000}),balanced:Object.freeze({videoBitsPerSecond:5000000}),detailed:Object.freeze({videoBitsPerSecond:8000000})});
+  function budget(seconds,quality='compact'){
+    const profile=PROFILES[quality];if(!profile)throw Error('Choose a supported export quality.');
+    if(!Number.isFinite(seconds)||seconds<0)throw Error('Invalid export duration.');
+    const estimatedBytes=Math.ceil(seconds*(profile.videoBitsPerSecond+128000)/8*1.05);
+    return {quality,videoBitsPerSecond:profile.videoBitsPerSecond,audioBitsPerSecond:128000,estimatedBytes,maxSeconds:Math.min(LIMITS.seconds,Math.floor(LIMITS.bytes*8/(profile.videoBitsPerSecond+128000)/1.05)),fits:estimatedBytes<=LIMITS.bytes};
+  }
   function capability(format='webm') {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
@@ -42,6 +49,7 @@ window.VeyCutExporter = (() => {
       end=Math.max(end,begin+seconds);
     }
     if(end<=0||end>LIMITS.seconds)throw new Error('Export supports timelines up to 600 seconds.');
+    if(!budget(end,spec.quality).fits)throw Error('This quality would exceed the output budget. Choose Compact or shorten the timeline.');
     const times=clips.flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)]);
     for(const time of times){
       const count=clips.filter(c=>!['text','shape'].includes(c.kind)&&time>=compositor.start(c)&&time<compositor.start(c)+compositor.duration(c)).length;
@@ -188,7 +196,7 @@ window.VeyCutExporter = (() => {
         canvasStream=canvas.captureStream(spec.fps||LIMITS.fps);
       }
       stream=new MediaStream([...canvasStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
-      recorder=new MediaRecorder(stream,{mimeType:supported.mime,videoBitsPerSecond:2000000,audioBitsPerSecond:128000});
+      recorder=new MediaRecorder(stream,{mimeType:supported.mime,videoBitsPerSecond:budget(duration,spec.quality).videoBitsPerSecond,audioBitsPerSecond:128000});
       recorder.addEventListener('error',()=>fail(new Error('Browser recording failed.')));
       recorder.addEventListener('dataavailable',e=>{if(!e.data.size)return;bytes+=e.data.size;if(bytes>LIMITS.bytes){fail(new Error('Export exceeded the 256 MiB output limit.'));return;}chunks.push(e.data);});
       watchdog=setTimeout(()=>fail(new Error('Export exceeded its bounded wall-clock budget.')),duration*3000+30000);
@@ -232,11 +240,11 @@ window.VeyCutExporter = (() => {
       if(blob.type.startsWith('video/webm'))blob=await window.VeyCutWebmMetadata.withDuration(blob,recordedSeconds);
       if(blob.size>LIMITS.bytes)throw Error('Final output exceeded the 256 MiB output limit.');
       const verification=await window.VeyCutOutputCheck.verify(blob,{width:spec.width,height:spec.height,seconds:duration,fps:spec.fps||LIMITS.fps,signal});checkRun();
-      onProgress(1);return {blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:spec.fps||LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime',verification,timing:{recordedSeconds,maxSourceDrift,maxRenderGap,drawnFrames,captureMode:captureTrack?'manual':'automatic'}};
+      onProgress(1);return {encoding:budget(duration,spec.quality),blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:spec.fps||LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime',verification,timing:{recordedSeconds,maxSourceDrift,maxRenderGap,drawnFrames,captureMode:captureTrack?'manual':'automatic'}};
     } finally {
       clearTimeout(watchdog);cancelAnimationFrame(animation);document.removeEventListener('visibilitychange',hide);signal.removeEventListener('abort',abort);userSignal.removeEventListener('abort',userAbort);for(const item of prepared.values())item.element.pause?.();if(recorder&&recorder.state!=='inactive'){try{recorder.stop();}catch{}}
       if(silence){silence.stop();silence.disconnect();}if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());for(const id of [...prepared.keys()])dispose(id);if(audio.state!=='closed')await audio.close().catch(()=>{});chunks=[];
     }
   }
-  return Object.freeze({capability,exportTimeline,LIMITS,formats:()=>['webm','mp4'].filter(format=>capability(format))});
+  return Object.freeze({capability,exportTimeline,LIMITS,PROFILES,budget,formats:()=>['webm','mp4'].filter(format=>capability(format))});
 })();
