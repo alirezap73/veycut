@@ -2,9 +2,9 @@
 async page=>{
   const assert=(ok,message)=>{if(!ok)throw Error(message);};
   const cases=[['camera-mov-narration','mov'],['camera-vfr-candidate','mp4']];
-  const reports=[];
+  const reports=[],target=page.url().startsWith('http://127.0.0.1:4173/')?'http://127.0.0.1:4173/':'https://alirezap73.github.io/veycut/';
   for(const [id,extension] of cases){
-    await page.goto('https://alirezap73.github.io/veycut/');
+    await page.goto(target);
     await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
     const build=await page.evaluate(async()=>await(await fetch('build-info.json',{cache:'no-store'})).json());
     await page.locator('#project-format').selectOption('1280x720');await page.locator('#apply-project-format').click();

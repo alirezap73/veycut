@@ -2,7 +2,7 @@ name: Native Mac and Web visual comparison
 on:
   push:
     branches: [development/web-ramp-parity]
-    paths: ['scripts/native_parity*', '.github/workflows/veycut-native-web-parity.yml']
+    paths: ['scripts/native_parity*', '!scripts/native_parity_text_layout.js', '.github/workflows/veycut-native-web-parity.yml']
   workflow_dispatch:
     inputs:
       validated_run:
@@ -30,7 +30,7 @@ jobs:
       - name: Require exact tested browser sources
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN: ${{ inputs.validated_run || '38402925386' }}
+          SOURCE_RUN: ${{ inputs.validated_run || '38405434013' }}
         run: |
           set -euo pipefail
           for attempt in {1..80}; do
@@ -54,7 +54,7 @@ jobs:
         with:
           name: VeyCut-web-prototype
           path: web
-          run-id: ${{ inputs.validated_run || '38402925386' }}
+          run-id: ${{ inputs.validated_run || '38405434013' }}
           github-token: ${{ github.token }}
       - uses: actions/checkout@v7
         with:
@@ -107,6 +107,7 @@ jobs:
         with:
           workspaces: native-baseline/src
           key: native-web-parity-macos-released-source
+          cache-on-failure: true
       - name: Canonical fixtures and actual native GPU exports
         id: native
         run: |
@@ -155,6 +156,16 @@ jobs:
       - name: Compare actual native and browser ramp and narration audio
         if: (success() || failure()) && steps.audio_native.outputs.ready == 'true'
         run: python3 scripts/native_parity_audio_compare.py
+      - name: Objective real-speech word retention using the existing local native recognizer
+        if: (success() || failure()) && steps.audio_native.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          test -f output/native-parity/browser-audio-report.json
+          python3 scripts/native_parity_speech_retention.py prepare
+          mkdir -p native-baseline/src/crates/concat-speech/examples
+          cp scripts/native_parity_speech_retention.rs native-baseline/src/crates/concat-speech/examples/native_parity_speech_retention.rs
+          cargo run --manifest-path native-baseline/src/Cargo.toml --locked -p concat-speech -j 1 --example native_parity_speech_retention -- "$PWD/output/native-parity/speech-retention-manifest.json" "$PWD/output/native-parity/speech-transcripts.json" "$RUNNER_TEMP/veycut-asr-model"
+          python3 scripts/native_parity_speech_retention.py analyse
       - uses: actions/upload-artifact@v7
         if: always()
         with:

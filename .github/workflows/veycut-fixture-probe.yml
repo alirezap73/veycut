@@ -2,6 +2,10 @@ name: Probe original camera and narrated speech fixtures
 on:
   workflow_dispatch:
     inputs:
+      validated_run:
+        description: Optional successful runtime-identical candidate Web build; empty uses public site on manual runs.
+        required: false
+        type: string
       diagnostic_run:
         description: 'Optional previous fixture run ID; reuse its outputs for diagnosis only, without repeating browser edits.'
         required: false
@@ -24,6 +28,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install server-only probing tools
         run: |
           sudo apt-get update -qq
@@ -48,10 +54,45 @@ jobs:
         run: |
           npm install --global @playwright/cli@0.1.22
           node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Require tested candidate browser package
+        if: inputs.diagnostic_run == '' && (inputs.validated_run != '' || github.event_name == 'push')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.validated_run || '38405434013' }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..80}; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/web-run.json"
+            state=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/web-run.json'))['status'])")
+            if [ "$state" = completed ]; then break; fi
+            sleep 15
+          done
+          source_commit=$(python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'web-run.json').read_text())
+          assert run['status']=='completed' and run['conclusion']=='success'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY'] and run['path']=='.github/workflows/veycut-web.yml'
+          print(run['head_sha'])
+          PY
+          )
+          git fetch origin "$source_commit"
+          git diff --exit-code "$source_commit" HEAD -- web src/crates/veycut-web src/crates/concat-project src/crates/concat-core
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name VeyCut-web-prototype --dir candidate-web
+          echo "FIXTURE_URL=http://127.0.0.1:4173/" >> "$GITHUB_ENV"
       - name: Test original camera edits through the public application
         if: inputs.diagnostic_run == ''
         run: |
-          playwright-cli open https://alirezap73.github.io/veycut/ --browser=chromium
+          if [ -d candidate-web ]; then
+            python3 -m http.server 4173 --bind 127.0.0.1 --directory candidate-web > output/fixtures/server.log 2>&1 &
+            server_pid=$!
+            trap 'kill "$server_pid" || true; playwright-cli close || true' EXIT
+            for attempt in {1..20}; do
+              if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+              sleep 1
+            done
+          fi
+          playwright-cli open "${FIXTURE_URL:-https://alirezap73.github.io/veycut/}" --browser=chromium
           playwright-cli run-code --filename=scripts/veycut_fixture_ui_check.js
           python3 scripts/veycut_fixture_verify.py
           playwright-cli close

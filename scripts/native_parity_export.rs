@@ -3,6 +3,7 @@
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 use concat_host::{dirs::AppDirs, export::{self, ExportSpec, WgpuCompositor}, media, projects, session::Session, titles::Titles};
 use concat_project::commands::{Command, ClipPatch, TrimEdge};
+use concat_project::model::AppliedFilter;
 use concat_media::VideoCodec;
 
 fn main() {
@@ -37,7 +38,12 @@ fn main() {
         }
         session.save(None).unwrap();
         let canonical = session.document();
-        assert_eq!(canonical["clips"][0]["videoEffects"], case["effects"], "native reader must retain requested effects");
+        // JSON preserves integer/float spelling; the native effect model's
+        // parameters are f64. Compare the exact typed treatments so 35 and
+        // 35.0 agree without relaxing IDs, enabled flags, keys or values.
+        let requested:Vec<AppliedFilter> = serde_json::from_value(case["effects"].clone()).unwrap();
+        let retained:Vec<AppliedFilter> = serde_json::from_value(canonical["clips"][0]["videoEffects"].clone()).unwrap();
+        assert_eq!(retained, requested, "native reader must retain requested effects");
         std::fs::write(root.join(format!("{name}.json")), serde_json::to_vec_pretty(&canonical).unwrap()).unwrap();
         let reopened = Session::open(session.path(), session.settings()).unwrap();
         assert_eq!(reopened.document(), canonical, "save/reopen changes fixture");
