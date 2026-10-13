@@ -204,7 +204,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log output/playwright/bundle-check.log output/playwright/offline-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log output/playwright/bundle-check.log output/playwright/offline-check.log output/playwright/mp4-input-check.log output/playwright/rate-check.log output/playwright/codec-check.log output/playwright/pitch-prototype-check.log output/playwright/pitch-export-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then

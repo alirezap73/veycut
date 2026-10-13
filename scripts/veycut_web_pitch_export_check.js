@@ -1,7 +1,7 @@
 // Real application/encoder checks after native speed edits; not a packaged Mac comparison.
 async page=>{
   const assert=(ok,message)=>{if(!ok)throw Error(message);},results=[];
-  const fresh=async()=>{await page.goto('http://127.0.0.1:4173/');await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');await page.locator('#media-input').setInputFiles('output/playwright/pitch-tone.wav');await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1&&!document.querySelector('#video-export').disabled);await page.locator('#export-mode').selectOption('frames');await page.locator('#export-size').selectOption('360x640');await page.locator('#export-fps').selectOption('24');};
+  const fresh=async()=>{await page.goto('http://127.0.0.1:4173/');await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');await page.locator('#media-input').setInputFiles('output/playwright/pitch-tone.wav');await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1&&!document.querySelector('#video-export').disabled);await page.locator('#export-mode').selectOption('frames');await page.locator('#export-size').selectOption('360x640');await page.locator('#export-fps').selectOption('24');await page.locator('details:has(#clip-speed) summary').click();};
   await fresh();
   for(const speed of [.25,.5,1.5,2,4]){
     await page.locator('#clip-speed').fill(String(speed));await page.locator('#apply-speed').click();await page.waitForFunction(speed=>window.VeyCutWeb.snapshot().clips[0].speed===speed,speed);
