@@ -1,0 +1,152 @@
+name: Native Mac and Web visual comparison
+on:
+  push:
+    branches: [development/web-ramp-parity]
+    paths: ['scripts/native_parity*', '.github/workflows/veycut-native-web-parity.yml']
+  workflow_dispatch:
+    inputs:
+      validated_run:
+        description: Successful Web workflow run with identical browser implementation
+        required: true
+        type: string
+      camera_fixture_run:
+        description: Optional successful original-camera fixture probe run for real narration PCM
+        required: false
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  compare:
+    runs-on: macos-15
+    timeout-minutes: 70
+    env:
+      NATIVE_BASELINE_SHA: 9082f2686b7896e49561d2c531fd3ec105e456eb
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require exact tested browser sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.validated_run || '38401825312' }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/web-run.json"
+          source_commit=$(python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'web-run.json').read_text())
+          assert run['status']=='completed' and run['conclusion']=='success'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert run['path']=='.github/workflows/veycut-web.yml'
+          print(run['head_sha'])
+          PY
+          )
+          git diff --exit-code "$source_commit" HEAD -- web src/crates/veycut-web src/crates/concat-project src/crates/concat-core
+      - uses: actions/download-artifact@v5
+        with:
+          name: VeyCut-web-prototype
+          path: web
+          run-id: ${{ inputs.validated_run || '38401825312' }}
+          github-token: ${{ github.token }}
+      - uses: actions/checkout@v7
+        with:
+          ref: 9082f2686b7896e49561d2c531fd3ec105e456eb
+          path: native-baseline
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Require successful real narration fixture probe
+        if: inputs.camera_fixture_run != '' || github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.camera_fixture_run || '38402551238' }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/fixture-run.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'fixture-run.json').read_text())
+          assert run['status']=='completed' and run['conclusion']=='success'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert run['path']=='.github/workflows/veycut-fixture-probe.yml'
+          PY
+      - uses: actions/download-artifact@v5
+        if: inputs.camera_fixture_run != '' || github.event_name == 'push'
+        with:
+          name: original-camera-fixture-probe
+          path: output/fixtures
+          run-id: ${{ inputs.camera_fixture_run || '38402551238' }}
+          github-token: ${{ github.token }}
+      - name: Native toolchain libraries on GitHub Mac
+        run: |
+          set -euo pipefail
+          brew install ffmpeg cmake
+          echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> "$GITHUB_ENV"
+          version=$(grep -A1 'name = "sherpa-onnx-sys"' native-baseline/src/Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          stem="sherpa-onnx-v$version-osx-arm64-static-lib"
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/sherpa.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$version/$stem.tar.bz2"
+          mkdir -p "$RUNNER_TEMP/sherpa"
+          tar -xjf "$RUNNER_TEMP/sherpa.tar.bz2" -C "$RUNNER_TEMP/sherpa"
+          test -d "$RUNNER_TEMP/sherpa/$stem/lib"
+          echo "SHERPA_ONNX_LIB_DIR=$RUNNER_TEMP/sherpa/$stem/lib" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native-baseline/src
+          key: native-web-parity-macos-released-source
+      - name: Canonical fixtures and actual native GPU exports
+        run: |
+          set -euo pipefail
+          python3 scripts/native_parity_fixtures.py
+          ffmpeg -v error -f lavfi -i "testsrc2=s=640x360,drawbox=x=32:y=32:w=128:h=96:color=0x00b140:t=fill" -frames:v 1 -threads 1 -y output/native-parity/source.png
+          mkdir -p native-baseline/src/crates/concat-host/examples
+          cp scripts/native_parity_export.rs native-baseline/src/crates/concat-host/examples/native_parity_export.rs
+          cargo run --manifest-path native-baseline/src/Cargo.toml --locked -p concat-host --features gpu -j 1 --example native_parity_export -- "$PWD/output/native-parity" "$PWD/output/native-parity/source.png" "$PWD/native-baseline/src/crates/concat-text/fonts/Vazirmatn-Variable.ttf"
+          mkdir -p web/parity-fixtures
+          cp output/native-parity/cases.json web/parity-fixtures/
+          cmp web/fonts/Vazirmatn-Variable.ttf native-baseline/src/crates/concat-text/fonts/Vazirmatn-Variable.ttf
+      - name: Native ramp and optional real speech from the same PCM
+        run: |
+          set -euo pipefail
+          ffmpeg -v error -f lavfi -i "aevalsrc=if(between(t\,1\,1.15)+between(t\,3\,3.15)+between(t\,5\,5.15)+between(t\,7\,7.15)\,.4\,.05)*sin(2*PI*880*t)|.25*sin(2*PI*660*t):s=48000:d=8" -c:a pcm_s16le -y output/native-parity/ramp-tone.wav
+          python3 scripts/native_parity_audio_fixtures.py
+          cp scripts/native_parity_audio_export.rs native-baseline/src/crates/concat-host/examples/native_parity_audio_export.rs
+          cargo run --manifest-path native-baseline/src/Cargo.toml --locked -p concat-host --features gpu -j 1 --example native_parity_audio_export -- "$PWD/output/native-parity/audio-cases.json" "$PWD/output/native-parity"
+          cp output/native-parity/audio-cases.json web/parity-fixtures/
+      - name: Actual Web frame exports from native saved documents
+        run: |
+          set -euo pipefail
+          npm install --global @playwright/cli@0.1.22
+          node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install chromium
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/native-parity/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" || true; playwright-cli close || true' EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          playwright-cli open http://127.0.0.1:4173/ --browser=chromium
+          result=0
+          playwright-cli run-code --filename=scripts/native_parity_browser.js || result=1
+          playwright-cli run-code --filename=scripts/native_parity_audio_browser.js || result=1
+          exit "$result"
+      - name: Decode both actual exporters and compare effects and bilingual text
+        if: success() || failure()
+        run: |
+          python3 -m pip install 'numpy==2.3.4'
+          python3 scripts/native_parity_compare.py
+      - name: Compare actual native and browser ramp and narration audio
+        if: success() || failure()
+        run: python3 scripts/native_parity_audio_compare.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: Native-Web-visual-comparison
+          path: output/native-parity/
