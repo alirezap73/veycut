@@ -106,6 +106,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            scripts/veycut_web_hosted_check.js
+            docs/beta-samples/portrait-2s.mp4
+          sparse-checkout-cone-mode: false
       - name: Verify public editor on server
         env:
           PUBLIC_WEB_URL: ${{ steps.deployment.outputs.page_url }}
@@ -116,5 +122,19 @@ jobs:
           curl --fail --silent --show-error --max-time 30 "${web_url}build-info.json"
           curl --fail --silent --show-error --head --max-time 30 "${web_url}downloads/VeyCut-web.zip"
           playwright-cli open "$PUBLIC_WEB_URL" --browser=chromium
-          playwright-cli run-code 'async page => { await page.waitForFunction(() => document.querySelector(".badge")?.dataset.engine === "wasm"); if (await page.title() !== "VeyCut Web") throw new Error("Unexpected hosted editor"); }'
+          playwright-cli run-code --filename=scripts/veycut_web_hosted_check.js
+          if ! command -v ffmpeg > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -v error -xerror -i hosted-frame.mp4 -f null -
+          python3 - <<'PYHOST'
+          import json, os, subprocess
+          report=json.load(open('hosted-frame-report.json'))
+          assert report['build']['sourceCommit']==os.environ['GITHUB_SHA'] and report['build']['version']=='0.3.1'
+          assert report['precision']=='fixed-frame-timestamps' and report['encoding']['audioCodec']=='aac'
+          streams=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json','hosted-frame.mp4']))['streams']
+          assert {s['codec_type']:s['codec_name'] for s in streams}=={'video':'h264','audio':'aac'}
+          print(json.dumps(report))
+          PYHOST
           playwright-cli close

@@ -232,5 +232,5 @@ document.addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT|BUTTON/.test(e
 window.addEventListener('beforeunload',()=>{exportController?.abort();preview.dispose();for(const m of media.values())if(m.url)URL.revokeObjectURL(m.url);});
 window.VeyCutWeb={snapshot:()=>copy(state),media:()=>media,engineDocument:()=>copy(engineDocument)};
 initializeInterface();
-(async()=>{try{const module=await import('./pkg/veycut_web.js');await module.default();EngineClass=module.WebEditor;if(state.clips.length||loading)return;engine=new EngineClass();reply(engine.create_project(JSON.stringify({name:'VeyCut Web',width:720,height:1280,rateNum:30,rateDen:1})));sync();badge();render();}catch{engine=null;engineDocument=null;badge();}})();
+(async()=>{try{const module=await import('./pkg/veycut_web.js');await module.default();EngineClass=module.WebEditor;if(state.clips.length||loading)return;engine=new EngineClass();reply(engine.create_project(JSON.stringify({name:'VeyCut Web',width:720,height:1280,rateNum:30,rateDen:1})));sync();badge();render();}catch(error){console.error('Shared editing engine initialization failed:',error);engine=null;engineDocument=null;badge();}})();
 })();
