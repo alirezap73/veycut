@@ -1,0 +1,77 @@
+{
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38398371859",
+  "testCommit": "fa49cf3700b9283c8357c1819c536ebd233a07ea",
+  "report": {
+    "build": {
+      "version": "0.3.1",
+      "channel": "web-preview",
+      "sourceCommit": "bcc18e6f231a3756e6144ff48a27d34db57775d9",
+      "validatedOn": "GitHub Actions"
+    },
+    "encoding": {
+      "quality": "compact",
+      "videoBitsPerSecond": 2000000,
+      "audioBitsPerSecond": 128000,
+      "estimatedBytes": 83790000,
+      "maxSeconds": 600,
+      "fits": true,
+      "videoCodec": "avc",
+      "audioCodec": "aac",
+      "audioEncoderBackend": "local-wasm",
+      "frames": 7200
+    },
+    "clip": {
+      "duration": 300,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "filters": [],
+      "id": "c2",
+      "kind": "audio",
+      "mediaId": "m1",
+      "name": "pitch-long.m4a",
+      "offsetX": 0,
+      "offsetY": 0,
+      "opacity": 1,
+      "preservePitch": true,
+      "rotation": 0,
+      "scale": 1,
+      "sourceStart": 0,
+      "speed": 2,
+      "start": 0,
+      "trackId": "T1",
+      "videoEffects": [],
+      "volume": 1,
+      "in": 0,
+      "out": 600,
+      "timelineStart": 0,
+      "textStyle": null
+    },
+    "status": "passed",
+    "seconds": 300,
+    "frames": 7200,
+    "fullDecode": true,
+    "pitchCheckpoints": [
+      {
+        "second": 1,
+        "leftPitch": 880,
+        "rightPitch": 660
+      },
+      {
+        "second": 59,
+        "leftPitch": 880,
+        "rightPitch": 660
+      },
+      {
+        "second": 149,
+        "leftPitch": 880,
+        "rightPitch": 660
+      },
+      {
+        "second": 298.5,
+        "leftPitch": 880,
+        "rightPitch": 660
+      }
+    ],
+    "scope": "Synthetic compressed ten-minute AAC input through actual public UI to five-minute 2x H.264/AAC output. Not real speech, camera footage, ramps or native Mac equivalence."
+  }
+}
