@@ -2,21 +2,52 @@ name: Publish tested VeyCut Web
 
 on:
   workflow_dispatch:
+    inputs:
+      validated_run_id:
+        description: Optional successful VeyCut Web main run for this exact commit
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   validate:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.validated_run_id == ''
     uses: ./.github/workflows/veycut-web.yml
+  reuse:
+    name: Verify an existing main build
+    if: github.ref == 'refs/heads/main' && inputs.validated_run_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Require a successful exact-commit Web run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATED_RUN_ID: ${{ inputs.validated_run_id }}
+        run: |
+          [[ "$VALIDATED_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN_ID" > validated-run.json
+          python3 - <<'PY'
+          import json, os
+          run=json.load(open('validated-run.json'))
+          assert run['status']=='completed' and run['conclusion']=='success', 'Build is not successful'
+          assert run['head_sha']==os.environ['GITHUB_SHA'], 'Build source differs from this publication'
+          assert run['head_branch']=='main' and run['event'] in ['push','workflow_dispatch'], 'Build is not a main publication candidate'
+          assert run['path']=='.github/workflows/veycut-web.yml', 'Unexpected validation workflow'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY'], 'Unexpected repository'
+          print('Verified main build',run['id'],run['head_sha'])
+          PY
   deploy:
     name: Publish verified browser package
-    needs: validate
+    needs: [validate, reuse]
+    if: always() && github.ref == 'refs/heads/main' && ((needs.validate.result == 'success' && needs.reuse.result == 'skipped') || (needs.reuse.result == 'success' && needs.validate.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
+      actions: read
       pages: write
       id-token: write
     environment:
@@ -30,10 +61,14 @@ jobs:
         with:
           name: VeyCut-web-prototype
           path: site
+          run-id: ${{ inputs.validated_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@v5
         with:
           name: VeyCut-web-checks
           path: verified-checks
+          run-id: ${{ inputs.validated_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Retain public browser verification
         run: |
           mkdir -p site/screenshots
@@ -43,6 +78,8 @@ jobs:
           cp verified-checks/native-report.json verified-checks/timelines-report.json verified-checks/transition-decoder-report.json site/
           cp verified-checks/native-interchange.png site/screenshots/native-interchange.png
           cp verified-checks/timelines-editor.png site/screenshots/timelines.png
+          if [ -f verified-checks/reliability-report.json ]; then cp verified-checks/reliability-report.json site/; fi
+          if [ -f verified-checks/long-decoder-report.json ]; then cp verified-checks/long-decoder-report.json site/; fi
       - name: Package downloadable web edition
         env:
           VERIFIED_COMMIT: ${{ github.sha }}

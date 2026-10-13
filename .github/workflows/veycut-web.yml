@@ -412,7 +412,7 @@ jobs:
           meta=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','json','output/playwright/reliable-video.webm']))
           assert abs(float(meta['format']['duration'])-2)<.5
           report=json.load(open('output/playwright/reliability-report.json'))
-          assert report['status']=='passed' and len(report['failures'])==3
+          assert report['status']=='passed' and len(report['failures'])==4
           PYRELIABLE
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log

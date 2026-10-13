@@ -45,6 +45,11 @@ async page=>{
   assert(failures[1].message.includes('audio clock stopped'),'Interrupted clock is a terminal timing failure');
   await reject('blocked-renderer',()=>Promise.resolve(),()=>page.evaluate(()=>{const until=performance.now()+500;while(performance.now()<until){}}));
   assert(failures[2].message.includes('Rendering stalled'),'A half-second rendering freeze must not be hidden');
+  await reject('ended-capture-track',()=>page.evaluate(()=>{
+    const native=HTMLCanvasElement.prototype.captureStream;
+    HTMLCanvasElement.prototype.captureStream=function(...args){const stream=native.apply(this,args);window.__testCaptureStream=stream;return stream;};
+  }),()=>page.evaluate(()=>window.__testCaptureStream.getVideoTracks()[0].stop()));
+  assert(/media track ended|recording failed/i.test(failures[3].message),'An ended capture track must not offer a partial video');
   const report={status:'passed',verification,timing,failures};
   const saved=page.waitForEvent('download');await page.evaluate(value=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='reliability-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},report);
   await(await saved).saveAs('output/playwright/reliability-report.json');

@@ -65,7 +65,7 @@ window.VeyCutExporter = (() => {
     userSignal.addEventListener('abort',userAbort,{once:true});
     const hide=()=>{if(document.hidden)fail(new Error('Export stopped because this tab became hidden.'));};document.addEventListener('visibilitychange',hide);
     const abort=()=>{for(const item of prepared.values())item.element.pause?.();};signal.addEventListener('abort',abort,{once:true});
-    const checkRun=()=>{check(signal);if(failure)throw failure;if(!recordingComplete&&audio.state!=='running')throw Error('The audio clock stopped; export was cancelled to protect timing.');};
+    const checkRun=()=>{check(signal);if(failure)throw failure;if(!recordingComplete&&audio.state!=='running')throw Error('The audio clock stopped; export was cancelled to protect timing.');if(!recordingComplete&&stream?.getTracks().some(track=>track.readyState!=='live'))throw Error('An output media track ended before export completed.');};
     function draw(time){
       compositor.render(ctx,spec,time,sources);drawnFrames++;
       for(const [id,item] of prepared){

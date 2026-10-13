@@ -37,7 +37,7 @@ The [current Web checks](https://github.com/alirezap73/veycut/actions/runs/38274
 | Project interchange | Supported desktop JSON manifests import with native-property preservation checks; original media reconnects; native JSON backup preserves paths | Media/fonts and complete project folders are not bundled; browser-added paths cannot be exported as a desktop manifest; unknown-size native media is not cryptographically verified |
 | Composed output | Shared browser compositor for layered preview and real-time export; fully decoded mixed and dissolve WebM checks passed | SDR Canvas, not native HDR or frame-accurate offline rendering; unsupported treatments remain recoverable in the project and refuse video output |
 | Formats | WebM; H.264/AAC MP4 offered only with explicit MediaRecorder codec support | MP4 was unavailable in tested Chromium; other recorder implementations unverified |
-| Bounds | 120 seconds, 1920-pixel long edge, 256 MiB, 16 simultaneous non-text media layers | Short 360×640 output and duration rejection passed; higher-resolution/layer/byte stress unverified |
+| Bounds | 300 seconds, 1920-pixel long edge, 256 MiB, 16 simultaneous non-text media layers | Short 360×640 output and duration rejection passed; higher-resolution/layer/byte stress unverified |
 
 Native/Web feature parity is not established. See the [Web source guide](../web/README.md) for exact import/export and capacity rules. Earlier mixed-layer validation remains recorded in the changelog.
 

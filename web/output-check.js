@@ -31,7 +31,7 @@ window.VeyCutOutputCheck=(()=>{
       try{
         const [,mediaTime]=await Promise.all([wait('seeked',()=>{video.currentTime=at;}),decoded]);
         check();if(video.readyState<HTMLMediaElement.HAVE_CURRENT_DATA)throw Error('The recorded video has no decoded verification frame.');
-        if(presented&&Math.abs(mediaTime-at)>.3)throw Error('The recorded video is missing frames near '+at.toFixed(2)+' seconds.');
+        if(presented&&(!Number.isFinite(mediaTime)||Math.abs(mediaTime-at)>.3))throw Error('The recorded video is missing frames near '+at.toFixed(2)+' seconds.');
         return mediaTime;
       }finally{clearTimeout(timer);if(callback)video.cancelVideoFrameCallback(callback);if(abortFrame)signal.removeEventListener('abort',abortFrame);}
     }

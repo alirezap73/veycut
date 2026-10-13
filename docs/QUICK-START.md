@@ -35,7 +35,7 @@ The Mac UI also provides **Relink All** when opening a project with missing medi
 5. Save project JSON. After reopening, reconnect the original media files using their filename and size. Media bytes are not embedded. Supported desktop JSON manifests can also be imported with preservation checks. Save desktop JSON is a manifest backup with original paths, not a complete media/font folder bundle; browser-added paths are refused. Native imports initially list all text clips as captions, while Web saves retain explicit caption roles for each timeline.
 6. Use the timeline selector to create or switch separate cuts. Each timeline keeps its caption roles and frame/rate settings. Frame buttons and stereo meters support preview navigation and audio monitoring. Reconnect every source, choose an output size and export WebM. Keep the tab visible. Export records in real time using your device and may drift under load. Cancel produces no video download.
 
-Web export includes source audio and burned subtitles. Limits are **120 seconds**, **1920-pixel long edge**, requested **24/25/30/60 fps**, **16 simultaneous media sources**, and **256 MiB**. Chromium was checked with short generated media. Safari/Firefox, longer real footage and frame-accurate output are unverified. See [Web implementation and limits](../web/README.md).
+Web export includes source audio and burned subtitles. Limits are **300 seconds**, **1920-pixel long edge**, requested **24/25/30/60 fps**, **16 simultaneous media sources**, and **256 MiB**. Chromium was checked with short generated media. Safari/Firefox, longer real footage and frame-accurate output are unverified. See [Web implementation and limits](../web/README.md).
 
 ## Report a problem
 
@@ -49,6 +49,6 @@ Use the [issue form](https://github.com/alirezap73/veycut/issues/new/choose). In
 
 برای فایل گمشده یا خراب، بازگرداندن فایل اصلی به مسیر قبلی و خروجی مجدد در آزمون بسته موفق بود. انتخاب پوشه با Relink All مسیر جداگانه‌ای است و هنوز در آزمون رابطِ بسته بررسی نشده است.
 
-**وب:** [نسخهٔ آنلاین](https://alirezap73.github.io/veycut/) را باز کنید؛ یا [ZIP وب](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) را استخراج و پوشهٔ آن را با سرور محلی HTTP اجرا کنید؛ دستور بالا در همان پوشه اجرا می‌شود. سپس آدرس محلی را در Chrome باز کنید. فایل ویدئو و SRT را وارد و ویرایش کنید. پروژهٔ JSON رسانه را در خود ذخیره نمی‌کند؛ پس از بازگشایی باید فایل‌های اصلی را دوباره متصل کنید. خروجی WebM با صدا و زیرنویس روی دستگاه شما ضبط می‌شود. تب را باز و قابل‌مشاهده نگه دارید. سقف خروجی ۱۲۰ ثانیه، ضلع بلند ۱۹۲۰ پیکسل، ۱۶ رسانهٔ هم‌زمان و حجم ۲۵۶ مگابایت است.
+**وب:** [نسخهٔ آنلاین](https://alirezap73.github.io/veycut/) را باز کنید؛ یا [ZIP وب](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) را استخراج و پوشهٔ آن را با سرور محلی HTTP اجرا کنید؛ دستور بالا در همان پوشه اجرا می‌شود. سپس آدرس محلی را در Chrome باز کنید. فایل ویدئو و SRT را وارد و ویرایش کنید. پروژهٔ JSON رسانه را در خود ذخیره نمی‌کند؛ پس از بازگشایی باید فایل‌های اصلی را دوباره متصل کنید. خروجی WebM با صدا و زیرنویس روی دستگاه شما ضبط می‌شود. تب را باز و قابل‌مشاهده نگه دارید. سقف خروجی ۳۰۰ ثانیه، ضلع بلند ۱۹۲۰ پیکسل، ۱۶ رسانهٔ هم‌زمان و حجم ۲۵۶ مگابایت است.
 
 امکانات و قالب پروژهٔ مک و وب یکسان نیستند. گزارش اشکال را با مراحل، نسخه و پیام خطا در [Issues](https://github.com/alirezap73/veycut/issues) بنویسید.
