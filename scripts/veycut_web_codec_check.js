@@ -1,7 +1,8 @@
 // Actual frame encoders, with explicit unavailable-codec refusal and no substitution.
 async page=>{
   const assert=(ok,message)=>{if(!ok)throw Error(message);};
-  await page.goto('http://127.0.0.1:4173/');await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  const publicPage=page.url().startsWith('https://alirezap73.github.io/veycut/');
+  await page.goto(publicPage?page.url():'http://127.0.0.1:4173/');await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
   await page.locator('#media-input').setInputFiles('docs/beta-samples/portrait-2s.mp4');await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1&&!document.querySelector('#video-export').disabled);
   await page.locator('#export-mode').selectOption('frames');await page.locator('#export-size').selectOption('360x640');await page.locator('#export-fps').selectOption('24');
   const expected=await page.evaluate(()=>JSON.stringify(window.VeyCutWeb.engineDocument())),results=[];
@@ -18,6 +19,7 @@ async page=>{
       assert(expected===await page.evaluate(()=>JSON.stringify(window.VeyCutWeb.engineDocument())),'Every codec attempt preserves project edits');
     }finally{page.off('download',observe);}
   }
-  const report={status:'passed',seconds:2,fps:24,results,scope:'Actual encoders on this runner; unavailable codecs are refused. SDR only, not universal codec/device support.'};
+  const build=publicPage?await page.evaluate(async()=>{const response=await fetch('./build-info.json',{cache:'no-store'});if(!response.ok)throw Error('Missing public build identity');return response.json();}):null;
+  const report={status:'passed',publicPage,build,seconds:2,fps:24,results,scope:'Actual encoders on this runner; unavailable codecs are refused. SDR only, not universal codec/device support.'};
   const saved=page.waitForEvent('download');await page.evaluate(value=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)])),a=document.createElement('a');a.href=url;a.download='codec-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},report);await(await saved).saveAs('output/playwright/codec-report.json');
 }
