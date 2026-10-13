@@ -26,5 +26,5 @@ for entry in report['results']:
         rms=math.sqrt(sum(value*value for value in values)/len(values));assert rms>.02,rms
         peak=max((abs(sum(value*complex(math.cos(2*math.pi*hz*i/8000),math.sin(2*math.pi*hz*i/8000)) for i,value in enumerate(values))),hz) for hz in range(wanted-8,wanted+9))[1];assert abs(peak-wanted)<=2,(entry['speed'],channel,peak);found.append(peak)
     results.append({'speed':entry['speed'],'seconds':seconds,'frames':len(frames),'leftPitch':found[0],'rightPitch':found[1],'fullDecode':True})
-result={'status':'passed','results':results,'unsupportedRangeRefused':report['unsupportedRangeRefused'],'cancellationDownloaded':report['cancellationDownloaded'],'decodeAbortCleanup':report['decodeAbortCleanup'],'retrySucceeded':report['retrySucceeded'],'lateBitmapClosed':report['lateBitmapClosed'],'scope':report['scope']}
+result={'status':'passed','publicPage':report.get('publicPage',False),'build':report.get('build'),'results':results,'unsupportedRangeRefused':report['unsupportedRangeRefused'],'cancellationDownloaded':report['cancellationDownloaded'],'decodeAbortCleanup':report['decodeAbortCleanup'],'retrySucceeded':report['retrySucceeded'],'lateBitmapClosed':report['lateBitmapClosed'],'scope':report['scope']}
 (root/'pitch-export-decoder-report.json').write_text(json.dumps(result,indent=2));print(json.dumps(result))
