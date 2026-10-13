@@ -56,3 +56,10 @@ button.primary:hover:not(:disabled){background:#a2f1ce}
 .effect-row span{font-size:11px;overflow-wrap:anywhere;grid-column:1/-2}
 .effect-row input[type=checkbox]{width:auto;margin:0 5px;justify-self:end}
 .effect-row button{padding:5px 6px;font-size:10px;margin:0}
+.speed-curve{margin-top:13px;padding:12px;border:1px solid #344451;border-radius:10px;background:#1d2b36}
+.speed-curve>span{display:block;color:#e1eaf0;font-size:12px;font-weight:650}
+.speed-curve .number-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.speed-curve label{min-width:0;font-size:11px}
+.speed-curve input{min-width:0}
+.speed-curve button{width:100%}
+.speed-curve small{display:block;margin-top:7px;line-height:1.5}
