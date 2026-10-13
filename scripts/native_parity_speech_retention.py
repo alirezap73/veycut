@@ -1,8 +1,8 @@
 """Prepare/analyse optional GitHub-only ASR retention measurements.
 
-Native/Web MP4s and source PCM are decoded only on GitHub. Author VTT cues
-fully inside the selected original window form a conservative partial reference;
-boundary cues are reported separately, never asserted to be verbatim ground truth.
+Native/Web MP4s and documented human source PCM are decoded only on GitHub.
+Publisher transcripts cover complete source FLACs; fractional trimmed derivatives
+may omit boundary words. Source recognition validity is checked first.
 """
 import argparse
 import array
@@ -78,17 +78,18 @@ def prepare():
     cases = json.loads((ROOT/'audio-cases.json').read_text())
     selected = [case for case in cases if case['name'].startswith('speech-')]
     assert len(selected) >= 2, 'Real narration cases are required for optional speech retention'
-    probe = json.loads((ROOT/'speech-source-probe.json').read_text())
-    metadata = {fixture['id']: fixture for fixture in probe['fixtures']}
+    report = json.loads((ROOT/'human-speech-source-report.json').read_text())
+    metadata = {fixture['id']: fixture for fixture in report['fixtures']}
     requests, sources, measurements = [], {}, {}
     for case in selected:
         source = Path(case['source'])
-        fixture = source.name.removesuffix('-speech-derived.wav')
-        derivative = metadata[fixture]['speechDerivative']
-        assert derivative['seconds']==20 and derivative['sourceStart']==10.137931
+        fixture = case['fixtureId']
+        derivative = metadata[fixture]['derivative']
+        assert derivative['durationSeconds']==20 and derivative['sourceStartSeconds']==.137931
         assert hashlib.sha256(source.read_bytes()).hexdigest()==derivative['sha256']
         if fixture not in sources:
-            reference = author_reference(Path('output/fixtures')/(fixture+'.vtt'), derivative['sourceStart'], 20)
+            reference = dict(text=metadata[fixture]['publisherTranscript'],
+                scope='Publisher transcript of complete 20–25-second FLAC; the 20-second derivative may omit boundary words. Source recognition validity is checked before output retention.')
             sources[fixture] = dict(source=str(source), reference=reference)
             requests.append(dict(id=fixture, kind='source', path=str(source), seconds=20))
             measurements[fixture] = voiced(source, 20)
@@ -118,7 +119,7 @@ def analyse():
         valid = (manifest['measurements'][fixture]['sufficient'] and len(words)>=10
                  and len(set(words))>=6 and len(author)>=6 and author_retention>=.4)
         sources[fixture] = dict(recognizedWordCount=len(words), uniqueRecognizedWords=len(set(words)),
-                                authorCompleteCueWordCount=len(author), sourceAuthorWordRetention=author_retention,
+                                publisherTranscriptWordCount=len(author), sourceAuthorWordRetention=author_retention,
                                 valid=valid, criteria=dict(minimumRecognizedWords=10, minimumUniqueWords=6,
                                                           minimumAuthorWords=6, minimumAuthorRetention=.4,
                                                           minimumNonSilentSeconds=1))

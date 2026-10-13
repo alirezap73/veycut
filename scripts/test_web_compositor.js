@@ -73,7 +73,7 @@ const blocks=new Uint8ClampedArray([
   0,0,0,255, 100,0,0,255, 200,0,0,255, 100,0,0,255
 ]);
 c.filterPixels(blocks,[{id:'concat.pixelate',params:{size:2}}],0,{width:4,height:2});
-assert.deepEqual([blocks[0],blocks[4],blocks[8],blocks[12]],[50,50,150,150]);
+assert.deepEqual([blocks[0],blocks[4],blocks[8],blocks[12]],[90,90,155,155]);
 const edge=new Uint8ClampedArray(5*5*4);
 for(let i=0;i<25;i++){edge[i*4]=i%5>=2?180:70;edge[i*4+3]=199;}
 c.filterPixels(edge,[{id:'concat.sharpen',params:{amount:1}}],0,{width:5,height:5});

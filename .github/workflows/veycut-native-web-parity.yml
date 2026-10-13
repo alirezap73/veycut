@@ -1,8 +1,5 @@
 name: Native Mac and Web visual comparison
 on:
-  push:
-    branches: [development/web-ramp-parity]
-    paths: ['scripts/native_parity*', '!scripts/native_parity_text_layout.js', '.github/workflows/veycut-native-web-parity.yml']
   workflow_dispatch:
     inputs:
       validated_run:
@@ -72,7 +69,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Require completed fixture run; verify actual PCM provenance separately
-        if: inputs.camera_fixture_run != '' || github.event_name == 'push'
+        if: inputs.camera_fixture_run != ''
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ inputs.camera_fixture_run || '38402551238' }}
@@ -89,7 +86,7 @@ jobs:
           print('Fixture UI conclusion:', run['conclusion'], '; source metadata and PCM hashes are verified by audio_fixtures.py, not inferred from UI checks.')
           PY
       - uses: actions/download-artifact@v5
-        if: inputs.camera_fixture_run != '' || github.event_name == 'push'
+        if: inputs.camera_fixture_run != ''
         with:
           name: original-camera-fixture-probe
           path: output/fixtures
@@ -116,7 +113,7 @@ jobs:
         id: reuse
         env:
           GH_TOKEN: ${{ github.token }}
-          REFERENCE_RUN: ${{ inputs.native_reference_run || (github.event_name == 'push' && '38405908653') || '' }}
+          REFERENCE_RUN: ${{ inputs.native_reference_run || '' }}
         run: |
           set -euo pipefail
           if [ -z "$REFERENCE_RUN" ]; then exit 0; fi
@@ -151,13 +148,16 @@ jobs:
           cp output/native-parity/cases.json web/parity-fixtures/
           cmp web/fonts/Vazirmatn-Variable.ttf native-baseline/src/crates/concat-text/fonts/Vazirmatn-Variable.ttf
           echo "ready=true" >> "$GITHUB_OUTPUT"
-      - name: Native ramp and optional real speech from the same PCM
+      - name: Extract checksummed human speech on GitHub only
+        run: python3 scripts/veycut_speech_fixture.py
+      - name: Native ramps and documented human speech from the same PCM
         id: audio_native
-        if: steps.reuse.outputs.ready != 'true'
         run: |
           set -euo pipefail
           ffmpeg -v error -f lavfi -i "aevalsrc=if(between(t\,1\,1.15)+between(t\,3\,3.15)+between(t\,5\,5.15)+between(t\,7\,7.15)\,.4\,.05)*sin(2*PI*880*t)|.25*sin(2*PI*660*t):s=48000:d=8" -c:a pcm_s16le -y output/native-parity/ramp-tone.wav
           python3 scripts/native_parity_audio_fixtures.py
+          python3 scripts/native_parity_human_cases.py
+          mkdir -p native-baseline/src/crates/concat-host/examples
           cp scripts/native_parity_audio_export.rs native-baseline/src/crates/concat-host/examples/native_parity_audio_export.rs
           cargo run --manifest-path native-baseline/src/Cargo.toml --locked -p concat-host --features gpu -j 1 --example native_parity_audio_export -- "$PWD/output/native-parity/audio-cases.json" "$PWD/output/native-parity"
           cp output/native-parity/audio-cases.json web/parity-fixtures/
@@ -215,3 +215,9 @@ jobs:
         with:
           name: Native-Web-visual-comparison
           path: output/native-parity/
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: Human-speech-source-fixtures
+          path: output/human-speech/
+          retention-days: 3

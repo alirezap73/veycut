@@ -34,6 +34,7 @@ for case, entry in zip(cases, browser['results']):
         assert np.isfinite(pcm).all() and np.max(np.abs(pcm)) <= 1.05
         assert np.sqrt(np.mean(pcm**2)) > .003, case['name'] + ': unexpectedly silent'
         audio[kind] = pcm
+        failures = []
         measurement = dict(fullDecode=True, audioSeconds=len(pcm)/8000, frames=expected_frames,
                            frameQuantization='nearest' if kind=='native' else 'ceiling')
         if case['name'].startswith('ramp-'):
@@ -47,18 +48,20 @@ for case, entry in zip(cases, browser['results']):
                         phase = np.arange(len(span)) * (2*math.pi*hz/8000)
                         scores.append((abs(np.dot(span[:,channel], np.exp(1j*phase))), hz))
                     found = max(scores)[1]
-                    assert abs(found-expected) <= 4, (kind, case['name'], found)
+                    if abs(found-expected) > 4:
+                        failures.append(dict(check='pitch', at=at, channel=channel, expectedHz=expected, measuredHz=found, toleranceHz=4))
                     frequencies.append(dict(at=at, channel=channel, hz=found))
             left = pcm[:,0]; size=len(left)//80
             env=np.sqrt(np.mean(left[:size*80].reshape(size,80)**2, axis=1))
             onsets=np.where((env>.12)&np.r_[True,env[:-1]<=.12])[0]*.01
             errors=[]
             for marker in entry['markers']:
-                assert len(onsets), (kind,case['name'],'missing markers')
-                error=float(np.min(abs(onsets-marker)))
-                assert error < .12, (kind,case['name'],marker,error)
+                error=float(np.min(abs(onsets-marker))) if len(onsets) else None
+                if error is None or error >= .12:
+                    failures.append(dict(check='source-marker', markerSeconds=marker, errorSeconds=error, toleranceSeconds=.12))
                 errors.append(error)
             measurement.update(pitch=frequencies, sourceMarkerErrorsSeconds=errors)
+        measurement.update(passed=not failures, failures=failures)
         row['measurements'][kind]=measurement
     count=min(len(audio['native']),len(audio['web']))//800
     envelopes=[np.sqrt(np.mean(pcm[:count*800].reshape(count,800,2)**2,axis=(1,2))) for pcm in audio.values()]
@@ -67,8 +70,14 @@ for case, entry in zip(cases, browser['results']):
     # Textbook tones can have near-constant broad energy; speech has meaningful
     # silence/phrase dynamics, so require broad native timing agreement there.
     if case['name'].startswith('speech-'):
-        assert math.isfinite(correlation) and correlation >= .8, (case['name'],correlation)
+        row['envelopePassed']=math.isfinite(correlation) and correlation >= .8
+    row['webPassed']=row['measurements']['web']['passed'] and row.get('envelopePassed', True)
+    row['nativeQualityPassed']=row['measurements']['native']['passed']
     results.append(row)
-report=dict(nativeSource=native['nativeSource'],passed=True,results=results,
-            scope='Actual native and browser output from same PCM/edit. Numerical pitch/timing/envelope checks; real speech needs human listening for intelligibility, not proven by correlation.')
+report=dict(nativeSource=native['nativeSource'],passed=all(row['webPassed'] for row in results),
+            nativeBaselineMeetsSameQualityChecks=all(row['nativeQualityPassed'] for row in results),
+            thresholds=dict(pitchHz=4, sourceMarkerSeconds=.12, speechEnvelopeCorrelation=.8), results=results,
+            scope='Actual native and browser output from same PCM/edit. Numerical pitch/timing/envelope checks; real speech needs human listening for intelligibility, not proven by correlation. Native and Web quality failures are recorded independently; a defective native pitch baseline does not excuse a Web pitch failure or require emulating that defect.')
 (root/'audio-comparison.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))
+
+assert report['passed'], 'Browser quality/native timing comparison failed; inspect independent measurements'

@@ -211,30 +211,77 @@ window.VeyCutCompositor = (() => {
     const width=geometry.width,height=geometry.height;
     if(!(Number.isInteger(width)&&Number.isInteger(height)&&width>0&&height>0&&width*height*4===pixels.length))
       throw new Error('Spatial effect requires exact image dimensions.');
-    if(effect.id==='concat.pixelate'){
-      const size=clamp(Math.round(effect.p.size),2,64);
-      for(let y=0;y<height;y+=size)for(let x=0;x<width;x+=size){
-        const edgeX=Math.min(x+size,width),edgeY=Math.min(y+size,height),sum=[0,0,0,0];
-        for(let yy=y;yy<edgeY;yy++)for(let xx=x;xx<edgeX;xx++){
-          const i=(yy*width+xx)*4;for(let c=0;c<4;c++)sum[c]+=pixels[i+c];
+    if(effect.id==='concat.pixelate'||effect.id==='concat.gaussian-blur'){
+      // Native spatial packages filter scene-linear, premultiplied light.
+      // Premultiply before bilinear interpolation: transparent RGB is not light.
+      const light=new Float32Array(pixels.length);
+      for(let i=0;i<pixels.length;i+=4){const alpha=pixels[i+3]/255;light[i+3]=alpha;for(let c=0;c<3;c++)light[i+c]=Math.pow(pixels[i+c]/255,2.4)*alpha;}
+      const read=(data,w,h,x,y,result)=>{
+        const xx=x-.5,yy=y-.5,firstX=Math.floor(xx),firstY=Math.floor(yy),fx=xx-firstX,fy=yy-firstY;
+        const x0=clamp(firstX,0,w-1),x1=clamp(firstX+1,0,w-1),y0=clamp(firstY,0,h-1),y1=clamp(firstY+1,0,h-1);
+        const a=(y0*w+x0)*4,b=(y0*w+x1)*4,c=(y1*w+x0)*4,d=(y1*w+x1)*4;
+        for(let channel=0;channel<4;channel++)result[channel]=(data[a+channel]*(1-fx)+data[b+channel]*fx)*(1-fy)+(data[c+channel]*(1-fx)+data[d+channel]*fx)*fy;
+        return result;
+      };
+      const write=(at,rgba)=>{const alpha=clamp(rgba[3],0,1);for(let c=0;c<3;c++)pixels[at+c]=255*Math.pow(clamp(rgba[c]/Math.max(alpha,1e-6),0,1),1/2.4);pixels[at+3]=alpha*255;};
+      const tap=new Float64Array(4),sum=new Float64Array(4);
+      if(effect.id==='concat.pixelate'){
+        const size=clamp(Math.round(effect.p.size),2,64);
+        for(let y=0;y<height;y+=size)for(let x=0;x<width;x+=size){
+          sum.fill(0);
+          // Sixteen bilinear taps at the native square's quarter-cell centres,
+          // including clamped taps beyond a partial block at the frame edge.
+          for(let yy=0;yy<4;yy++)for(let xx=0;xx<4;xx++){
+            read(light,width,height,x+(xx+.5)*size/4,y+(yy+.5)*size/4,tap);
+            for(let c=0;c<4;c++)sum[c]+=tap[c]/16;
+          }
+          for(let yy=y;yy<Math.min(y+size,height);yy++)for(let xx=x;xx<Math.min(x+size,width);xx++)write((yy*width+xx)*4,sum);
         }
-        const count=(edgeX-x)*(edgeY-y);
-        for(let yy=y;yy<edgeY;yy++)for(let xx=x;xx<edgeX;xx++){
-          const i=(yy*width+xx)*4;for(let c=0;c<4;c++)pixels[i+c]=sum[c]/count;
+      }else{
+        const sigma=clamp(effect.p.radius,1,50),reach=3*sigma,pairs=Math.ceil(reach)+1;
+        const shrink=Math.pow(2,Math.floor(Math.log2(Math.max(1,sigma/3))));
+        const acrossWidth=Math.ceil(width/shrink),across=new Float32Array(acrossWidth*height*4);
+        // Native across() reads source pixel centres through a +/-three-sigma
+        // Gaussian. Pair weighting equals these individual premultiplied taps.
+        const weights=centre=>{
+          const first=Math.floor(centre-reach-.5)+.5,result=[];let total=0;
+          for(let k=0;k<2*pairs;k++){const at=first+k,w=Math.exp(-(at-centre)*(at-centre)/(2*sigma*sigma));result.push([at,w]);total+=w;}
+          return result.map(([at,w])=>[at,w/total]);
+        };
+        for(let x=0;x<acrossWidth;x++){
+          const taps=weights((x+.5)*width/acrossWidth);
+          for(let y=0;y<height;y++){
+            sum.fill(0);for(const [at,w] of taps){read(light,width,height,at,y+.5,tap);for(let c=0;c<4;c++)sum[c]+=tap[c]*w;}
+            across.set(sum,(y*acrossWidth+x)*4);
+          }
+        }
+        const full=width/acrossWidth<1.5,downHeight=full?height:Math.ceil(height/shrink);
+        const down=new Float32Array(acrossWidth*downHeight*4);
+        for(let y=0;y<downHeight;y++){
+          const taps=weights((y+.5)*height/downHeight);
+          for(let x=0;x<acrossWidth;x++){
+            sum.fill(0);for(const [at,w] of taps){read(across,acrossWidth,height,x+.5,at,tap);for(let c=0;c<4;c++)sum[c]+=tap[c]*w;}
+            down.set(sum,(y*acrossWidth+x)*4);
+          }
+        }
+        const backX=new Float64Array(4),backY=new Float64Array(4),backXY=new Float64Array(4);
+        for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+          const atX=(x+.5)*acrossWidth/width-.5,atY=(y+.5)*downHeight/height-.5;
+          const insideX=clamp(atX,0,acrossWidth-1),insideY=clamp(atY,0,downHeight-1);
+          read(down,acrossWidth,downHeight,insideX+.5,insideY+.5,sum);
+          // The native final spread() continues the downsampled edge's slope
+          // rather than flattening the outer half-pixel with clamp-to-edge.
+          const overX=atX-insideX,overY=atY-insideY;
+          if(overX||overY){
+            const dx=Math.abs(overX),dy=Math.abs(overY),bx=-Math.sign(overX),by=-Math.sign(overY);
+            read(down,acrossWidth,downHeight,insideX+bx+.5,insideY+.5,backX);
+            read(down,acrossWidth,downHeight,insideX+.5,insideY+by+.5,backY);
+            read(down,acrossWidth,downHeight,insideX+bx+.5,insideY+by+.5,backXY);
+            for(let c=0;c<4;c++)sum[c]+=(sum[c]-backX[c])*dx+(sum[c]-backY[c])*dy+(sum[c]-backX[c]-backY[c]+backXY[c])*dx*dy;
+          }
+          write((y*width+x)*4,sum);
         }
       }
-    }else if(effect.id==='concat.gaussian-blur'){
-      if(!blurScratch){blurScratch={source:document.createElement('canvas'),target:document.createElement('canvas')};}
-      const {source,target}=blurScratch;
-      if(source.width!==width||source.height!==height){source.width=target.width=width;source.height=target.height=height;}
-      const input=source.getContext('2d',{willReadFrequently:true}),output=target.getContext('2d',{willReadFrequently:true});
-      if(!('filter' in output))throw new Error('This browser cannot render Gaussian blur with Canvas filters.');
-      input.putImageData(new ImageData(pixels,width,height),0,0);
-      output.clearRect(0,0,width,height);
-      output.filter=`blur(${clamp(effect.p.radius,1,50)}px)`;
-      output.drawImage(source,0,0);
-      output.filter='none';
-      pixels.set(output.getImageData(0,0,width,height).data);
     }else if(effect.id==='concat.sharpen'){
       // A separable five-tap Gaussian gives the same 5x5 unsharp-mask
       // footprint as the native effect without 25 reads per output pixel.
