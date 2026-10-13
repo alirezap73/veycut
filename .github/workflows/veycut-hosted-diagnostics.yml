@@ -1,5 +1,8 @@
 name: Diagnose public Web engine
 on:
+  push:
+    branches: [development/web-export-rates]
+    paths: ['.github/workflows/veycut-hosted-diagnostics.yml', 'scripts/veycut_web_hosted_diagnostic.js']
   workflow_dispatch:
 permissions:
   contents: read
