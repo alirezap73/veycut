@@ -1,0 +1,27 @@
+name: Diagnose public Web engine
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Inspect actual public editor
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
+          playwright-cli open https://alirezap73.github.io/veycut/ --browser=chromium
+          playwright-cli run-code --filename=scripts/veycut_web_hosted_diagnostic.js
+          cat hosted-diagnostic.json
+          playwright-cli close
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: Hosted-Web-diagnostic
+          path: hosted-diagnostic.json
