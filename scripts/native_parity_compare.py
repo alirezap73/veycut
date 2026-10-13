@@ -58,5 +58,5 @@ report = dict(nativeSource=native['nativeSource'], webSource=os.environ.get('GIT
               scope='Mac Metal native export rebuilt from released source versus actual browser exporter; not installed package UI, all effects, animations, HDR or platform breadth',
               results=results, passed=all(r['passed'] for r in results))
 (root / 'comparison.json').write_text(json.dumps(report, indent=2))
-print(json.dumps(report, indent=2))
+print(json.dumps(report))
 assert report['passed'], 'Material native/browser visual differences: ' + ', '.join(r['name'] for r in results if not r['passed'])
