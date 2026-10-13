@@ -8,7 +8,9 @@ from pathlib import Path
 
 root=Path('output/playwright')
 def run(args):
-    return subprocess.run(args,check=True,timeout=240,stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout
+    process=subprocess.run(args,timeout=240,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    if process.returncode:raise RuntimeError(process.stderr.decode(errors='replace'))
+    return process.stdout
 def probe(path):
     return json.loads(run(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(path)]))
 report=json.loads((root/'real-report.json').read_text());duration=report['seconds'];assert duration in [360,600]
@@ -24,6 +26,9 @@ assert json.loads((root/'real-project.json').read_text())==json.loads((root/'rea
 frames=json.loads(run(['ffprobe','-v','error','-select_streams','v','-show_frames','-show_entries','frame=best_effort_timestamp_time','-of','json',str(video)]))['frames']
 times=[float(f['best_effort_timestamp_time']) for f in frames]
 assert times==sorted(times) and len(times)>duration*24*.8 and duration-.3<times[-1]<duration+.5
+if report.get('mode')=='frames':
+    assert len(times)==duration*24,len(times)
+    assert max(abs(at-i/24) for i,at in enumerate(times))<.000002
 gap=max(b-a for a,b in zip(times,times[1:]));assert gap<.35,gap
 def pcm(path,offset):
     data=array.array('h');data.frombytes(run(['ffmpeg','-v','error','-ss',str(offset),'-i',str(path),'-t',str(duration),'-vn','-ac','1','-ar','8000','-f','s16le','-']));return data
@@ -42,5 +47,5 @@ errors=[]
 for at in [15,90,180,270,duration-30]:
     a,b=frame(source,at+30),frame(video,at);assert len(a)==len(b)==160*90*3
     mae=sum(abs(x-y) for x,y in zip(a,b))/len(a);assert mae<25,(at,mae);errors.append({'seconds':at,'meanPixelError':mae})
-result={'status':'passed','seconds':duration,'fullDecode':True,'videoFrames':len(times),'lastVideoPts':times[-1],'maxVideoGap':gap,'audioEnvelopeCorrelation':correlation,'pictureCheckpoints':errors,'streams':[{'type':s['codec_type'],'codec':s['codec_name']} for s in probe(video)['streams']],'sourceSHA256':hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),'fixture':report['fixture'],'scope':'One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers.'}
+result={'status':'passed','seconds':duration,'mode':report.get('mode','realtime'),'precision':report.get('precision','realtime'),'renderTiming':report['timing'],'fullDecode':True,'videoFrames':len(times),'lastVideoPts':times[-1],'maxVideoGap':gap,'audioEnvelopeCorrelation':correlation,'pictureCheckpoints':errors,'streams':[{'type':s['codec_type'],'codec':s['codec_name']} for s in probe(video)['streams']],'sourceSHA256':hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),'fixture':report['fixture'],'scope':'One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers.'}
 (root/'real-decoder-report.json').write_text(json.dumps(result,indent=2));print(json.dumps(result))
