@@ -34,7 +34,7 @@ window.VeyCutExporter = (() => {
     const {width,height,clips}=spec;
     if(!Number.isInteger(width)||!Number.isInteger(height)||width<2||height<2||width%2||height%2||Math.max(width,height)>LIMITS.longEdge)throw new Error('Export dimensions exceed the 1920-pixel limit or are not even.');
     if(!clips.length)throw new Error('Import and arrange media before exporting.');
-    if(spec.fps!==undefined && ![24,25,30,60].includes(spec.fps))throw new Error('Choose an export frame rate of 24, 25, 30 or 60.');
+    if(spec.fps!==undefined&&(!Number.isFinite(spec.fps)||spec.fps<1||spec.fps>60))throw new Error('Choose a finite export frame rate between 1 and 60.');
     const compositor=window.VeyCutCompositor;
     if(!compositor)throw new Error('The shared browser compositor did not load.');
     let end=0;
