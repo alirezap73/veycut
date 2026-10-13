@@ -19,7 +19,7 @@ This matrix describes the **public 0.3.1-beta.3 Mac download** and the separatel
 | Failure protection | Existing-output refusal, active Cancel and missing/corrupt-source restoration retry verified | Cancellation, disconnected-source refusal, decoded readback, clock/render faults, early quality-budget refusal and project preservation verified |
 | Installation | DMG, ad-hoc signed; not Apple-notarized | Hosted editor or extract the current ZIP and serve over HTTP |
 
-Both projects reference source media instead of embedding it. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
+Desktop folders and JSON-only Web saves reference source media; portable Web saves embed originals. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
 
 ## Current expanded Web editor · server-validated source
 
