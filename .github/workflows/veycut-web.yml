@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py']
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js']
   workflow_dispatch:
     inputs:
       long_export:
@@ -11,11 +11,19 @@ on:
         type: boolean
         default: false
       real_export:
-        description: Run six-minute real-footage MP4 export and full decoding
+        description: Run real-footage MP4 export and full decoding
         type: boolean
         default: false
+      real_seconds:
+        description: Real-footage output duration
+        type: choice
+        options: ['360', '600']
+        default: '360'
   workflow_call:
     inputs:
+      real_seconds:
+        type: string
+        default: '360'
       real_export:
         type: boolean
         default: false
@@ -104,6 +112,7 @@ jobs:
           node --check scripts/veycut_web_reliability_check.js
           node --check scripts/veycut_web_long_export_check.js
           node --check scripts/veycut_web_mp4_check.js
+          node --check scripts/veycut_web_quality_check.js
           node --check scripts/veycut_web_real_export_check.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
@@ -127,7 +136,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -418,6 +427,8 @@ jobs:
           assert max(pixel(10,10))<20 and max(pixel(40,320))<20
           PYSHAPES
           playwright-cli run-code --filename=scripts/veycut_web_reliability_check.js > output/playwright/reliability-check.log
+          playwright-cli run-code --filename=scripts/veycut_web_quality_check.js > output/playwright/quality-check.log
+          for quality in compact balanced detailed; do ffmpeg -v error -xerror -i "output/playwright/quality-${quality}.mp4" -f null -; done
           ffmpeg -v error -xerror -i output/playwright/reliable-video.webm -f null -
           ffmpeg -v error -xerror -i output/playwright/minimum-video.webm -f null -
           ffmpeg -v error -xerror -i output/playwright/fallback-video.webm -f null -
@@ -475,16 +486,22 @@ jobs:
           playwright-cli upload output/playwright/long-source.mp4
           timeout 420s playwright-cli run-code --filename=scripts/veycut_web_long_export_check.js > output/playwright/long-check.log
           python3 scripts/verify_web_long_export.py
-      - name: Real-footage six-minute MP4 export
+      - name: Real-footage MP4 export
         if: inputs.real_export == true
-        timeout-minutes: 18
+        env:
+          REAL_EXPORT_SECONDS: ${{ inputs.real_seconds || '360' }}
+        timeout-minutes: 22
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --location --retry 2 --max-time 180 --max-filesize 700000000 https://media.xiph.org/tearsofsteel/tears_of_steel_1080p.webm -o output/playwright/real-source.webm
           python3 - <<'PYCAPTION'
+          import json, os
           from pathlib import Path
-          Path('output/playwright/real-captions.srt').write_text('1\n00:05:50,000 --> 00:05:58,000\nسلام؛ پایان فیلم واقعی\n')
+          seconds=int(os.environ['REAL_EXPORT_SECONDS']);assert seconds in [360,600]
+          Path('web/real-export-config.json').write_text(json.dumps({'seconds':seconds}))
+          def stamp(at): return f'00:{at//60:02d}:{at%60:02d},000'
+          Path('output/playwright/real-captions.srt').write_text(f'1\n{stamp(seconds-10)} --> {stamp(seconds-2)}\nسلام؛ پایان فیلم واقعی\n')
           PYCAPTION
           python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/playwright/real-server.log 2>&1 &
           server_pid=$!
@@ -494,7 +511,7 @@ jobs:
               for log in output/playwright/mp4-check.log output/playwright/real-setup.log output/playwright/real-check.log; do tail -c 12000 "$log" || true; done
               playwright-cli snapshot --filename=output/playwright/real-failure.yml || true
             fi
-            rm -f output/playwright/real-source.webm
+            rm -f output/playwright/real-source.webm web/real-export-config.json
             kill "$server_pid" || true
             playwright-cli close || true
             exit "$result"
@@ -518,7 +535,7 @@ jobs:
           )
           playwright-cli click "$reconnect_ref"
           playwright-cli upload output/playwright/real-source.webm
-          timeout 480s playwright-cli run-code --filename=scripts/veycut_web_real_export_check.js > output/playwright/real-check.log
+          timeout 780s playwright-cli run-code --filename=scripts/veycut_web_real_export_check.js > output/playwright/real-check.log
           python3 scripts/verify_web_real_export.py
       - name: Retain browser evidence
         if: always()
