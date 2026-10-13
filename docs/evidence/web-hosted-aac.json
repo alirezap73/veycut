@@ -1,0 +1,27 @@
+{
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38374891661",
+  "publicSmoke": {
+    "status": "passed",
+    "build": {
+      "version": "0.3.1",
+      "channel": "web-preview",
+      "sourceCommit": "583c1600a48f48deac106c9f6173a77fb6863682",
+      "validatedOn": "GitHub Actions"
+    },
+    "encoding": {
+      "quality": "compact",
+      "videoBitsPerSecond": 2000000,
+      "audioBitsPerSecond": 128000,
+      "estimatedBytes": 558600,
+      "maxSeconds": 600,
+      "fits": true,
+      "audioCodec": "aac",
+      "audioEncoderBackend": "local-wasm",
+      "frames": 60
+    },
+    "precision": "fixed-frame-timestamps",
+    "scope": "Actual public page, two-second generated source on GitHub Chromium; not every browser or device."
+  },
+  "serverDecode": "Full ffmpeg -xerror video/audio decode passed; ffprobe reports H.264 video and AAC audio.",
+  "scope": "Actual hosted build and a short generated source; not an independent client-device benchmark or all browser proof."
+}
