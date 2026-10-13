@@ -14,9 +14,9 @@ This matrix describes the **public 0.3.1-beta.3 Mac download** and the separatel
 | Effects and transitions | Native tools retained; dedicated packaged checks vary | Thirteen picture effects and dissolve/black/white transitions |
 | Project storage | Desktop project folders referencing media | Downloaded browser JSON referencing media; reconnect after reopen |
 | Project interchange | Native project format | Browser envelope plus shared engine document; supported desktop manifest import with media reconnect |
-| Video export | Native H.264/AAC path verified with generated fixtures | Real-time VP8/Opus WebM path verified in Chromium with short generated media |
-| Export limits | Configurable native output; local 2-second and server 32-second output checked | 120 seconds; 1920-pixel long edge; 256 MiB; 16 simultaneous non-text media layers |
-| Failure protection | Existing-output refusal, active Cancel and missing/corrupt-source restoration retry verified | Cancellation, disconnected-source refusal and project preservation verified |
+| Video export | Native H.264/AAC path verified with generated fixtures | Real-time WebM and H.264/Opus MP4 verified in Chromium; short mixed layers and ten-minute real-footage output passed |
+| Export limits | Configurable native output; local 2-second and server 32-second output checked | 600 seconds; 1920-pixel long edge; 256 MiB; 16 simultaneous non-text media layers; requested 2/5/8 Mbps quality profiles |
+| Failure protection | Existing-output refusal, active Cancel and missing/corrupt-source restoration retry verified | Cancellation, disconnected-source refusal, decoded readback, clock/render faults, early quality-budget refusal and project preservation verified |
 | Installation | DMG, ad-hoc signed; not Apple-notarized | Hosted editor or extract the current ZIP and serve over HTTP |
 
 Both projects reference source media instead of embedding it. Their project envelopes and capabilities differ. Sharing the Rust editing engine does not establish matching UI, compositor or codec behavior. Browser timing can drift under load; it does not provide native frame-accurate offline rendering.
@@ -25,7 +25,7 @@ Both projects reference source media instead of embedding it. Their project enve
 
 The public Web editor uses English-only controls while retaining Persian/UTF-8 caption content, licensed fonts and content-level RTL direction. [English-interface browser checks](https://github.com/alirezap73/veycut/actions/runs/38203197508) and [public deployment](https://github.com/alirezap73/veycut/actions/runs/38203552214) passed. Earlier feature runs below remain scoped to their recorded revisions.
 
-The [five-minute and reliability checks](https://github.com/alirezap73/veycut/actions/runs/38333079698) passed on the current Web runtime source at app version 0.3.1. [Measured results](evidence/web-five-minute.json) include full video/audio decode, timed colour/audio markers, a late Persian caption, cancellation and fault refusal. The [hosted editor](https://alirezap73.github.io/veycut/) and [current ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) identify their exact published revision in [build-info.json](https://alirezap73.github.io/veycut/build-info.json); publication requires successful checks for that exact commit.
+The [five-minute and reliability checks](https://github.com/alirezap73/veycut/actions/runs/38333079698) passed on their recorded Web revision at app version 0.3.1. [Measured results](evidence/web-five-minute.json) include full video/audio decode, timed colour/audio markers, a late Persian caption, cancellation and fault refusal. The [ten-minute real-footage and quality checks](https://github.com/alirezap73/veycut/actions/runs/38339770104) also passed; [their evidence](evidence/web-ten-minute-mp4.json) records the current validation scope. The [hosted editor](https://alirezap73.github.io/veycut/) and [current ZIP](https://alirezap73.github.io/veycut/downloads/VeyCut-web.zip) identify their exact published revision in [build-info.json](https://alirezap73.github.io/veycut/build-info.json); publication requires successful checks for that exact commit.
 
 | Area | Verified Web implementation | Remaining limitation or validation |
 |---|---|---|
