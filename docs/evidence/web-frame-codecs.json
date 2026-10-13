@@ -1,0 +1,72 @@
+{
+  "runtimeSource": "3e317f2",
+  "linuxRun": "https://github.com/alirezap73/veycut/actions/runs/38378051423",
+  "macRun": "https://github.com/alirezap73/veycut/actions/runs/38378574857",
+  "checks": [
+    {
+      "status": "passed",
+      "platform": "Linux",
+      "arch": "x86_64",
+      "seconds": 2,
+      "results": [
+        {
+          "codec": "avc",
+          "supported": true,
+          "fullDecode": true,
+          "frames": 48,
+          "maxFrameTimestampError": 3.33333333379926e-07,
+          "audioBackend": "local-wasm"
+        },
+        {
+          "codec": "hevc",
+          "supported": false,
+          "refused": true,
+          "downloads": 0
+        },
+        {
+          "codec": "av1",
+          "supported": true,
+          "fullDecode": true,
+          "frames": 48,
+          "maxFrameTimestampError": 3.33333333379926e-07,
+          "audioBackend": "local-wasm"
+        }
+      ],
+      "scope": "Actual encoders on this runner; unavailable codecs are refused. SDR only, not universal codec/device support."
+    },
+    {
+      "status": "passed",
+      "platform": "Darwin",
+      "arch": "arm64",
+      "seconds": 2,
+      "results": [
+        {
+          "codec": "avc",
+          "supported": true,
+          "fullDecode": true,
+          "frames": 48,
+          "maxFrameTimestampError": 3.33333333379926e-07,
+          "audioBackend": "browser"
+        },
+        {
+          "codec": "hevc",
+          "supported": true,
+          "fullDecode": true,
+          "frames": 48,
+          "maxFrameTimestampError": 3.33333333379926e-07,
+          "audioBackend": "browser"
+        },
+        {
+          "codec": "av1",
+          "supported": true,
+          "fullDecode": true,
+          "frames": 48,
+          "maxFrameTimestampError": 3.33333333379926e-07,
+          "audioBackend": "browser"
+        }
+      ],
+      "scope": "Actual encoders on this runner; unavailable codecs are refused. SDR only, not universal codec/device support."
+    }
+  ],
+  "scope": "Two-second generated input on Chromium/Linux x86_64 and macOS arm64. H.264/AV1 passed on Linux; HEVC was refused. H.264/HEVC/AV1 passed on the Mac runner. No all-device or long HEVC/AV1 claim."
+}
