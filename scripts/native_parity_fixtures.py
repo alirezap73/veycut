@@ -31,4 +31,23 @@ for name, content, align, width in [
                  backgroundPaddingX=.018, backgroundPaddingY=.012,
                  lineHeight=1.2, tracking=0, maxWidth=width, maxHeight=0)
     cases.append({'name': 'text-' + name, 'effects': [], 'text': style})
+# Broaden comparison beyond opaque single layers: every native blend at
+# two partial opacities over the same source, transformed/exposed independently.
+for blend in ['normal', 'multiply', 'screen', 'add', 'lighten', 'darken']:
+    for opacity in [.25, .75]:
+        cases.append(dict(name=f'blend-{blend}-{int(opacity*100)}', effects=[], text=None,
+                          overlay=dict(blend=blend, opacity=opacity, scale=.7,
+                                       offsetX=.08, offsetY=-.05,
+                                       videoEffects=[dict(id='concat.exposure',params=dict(stops=-.7),enabled=True)])))
+# Existing six layouts did not cover these style fields.
+base = next(case['text'] for case in cases if case['name']=='text-mixed')
+for name, patch in [
+    ('shadow', dict(shadow=True, background='')),
+    ('outline', dict(strokeWidth=.006, strokeColor='#101030', background='')),
+    ('opacity', dict(opacity=.5, background='#152b4680')),
+    ('light-weight', dict(fontWeight=400)),
+    ('heavy-weight', dict(fontWeight=800)),
+    ('italic', dict(italic=True)),
+]:
+    cases.append(dict(name='text-'+name, effects=[], text={**base, **patch}))
 (root / 'cases.json').write_text(json.dumps(cases, ensure_ascii=False, indent=2))

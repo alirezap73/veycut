@@ -10,6 +10,10 @@ on:
         description: Optional complete native export artifact from the same pinned source and unchanged drivers/fixtures
         required: false
         type: string
+      human_source_run:
+        description: Optional complete checksummed Human-speech-source-fixtures artifact
+        required: false
+        type: string
       camera_fixture_run:
         description: Optional successful original-camera fixture probe run for real narration PCM
         required: false
@@ -148,7 +152,31 @@ jobs:
           cp output/native-parity/cases.json web/parity-fixtures/
           cmp web/fonts/Vazirmatn-Variable.ttf native-baseline/src/crates/concat-text/fonts/Vazirmatn-Variable.ttf
           echo "ready=true" >> "$GITHUB_OUTPUT"
+      - name: Verify reusable human source run
+        if: inputs.human_source_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.human_source_run }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/human-source-run.json"
+          python3 - <<'PYHUMAN'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'human-source-run.json').read_text())
+          assert run['status']=='completed'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert run['path']=='.github/workflows/veycut-native-web-parity.yml'
+          print('Source archive and individual file hashes are checked by human_cases.py; other job failures do not become speech-quality passes.')
+          PYHUMAN
+      - uses: actions/download-artifact@v5
+        if: inputs.human_source_run != ''
+        with:
+          name: Human-speech-source-fixtures
+          path: output/human-speech
+          run-id: ${{ inputs.human_source_run }}
+          github-token: ${{ github.token }}
       - name: Extract checksummed human speech on GitHub only
+        if: inputs.human_source_run == ''
         run: python3 scripts/veycut_speech_fixture.py
       - name: Native ramps and documented human speech from the same PCM
         id: audio_native
@@ -163,6 +191,7 @@ jobs:
           cp output/native-parity/audio-cases.json web/parity-fixtures/
           echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Actual Web frame exports from native saved documents
+        id: browser
         run: |
           set -euo pipefail
           npm install --global @playwright/cli@0.1.22
@@ -192,16 +221,20 @@ jobs:
             playwright-cli upload "$source_file"
             playwright-cli run-code --filename=scripts/native_parity_audio_browser.js
           done < "$RUNNER_TEMP/audio-sources.txt"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Decode both actual exporters and compare effects and bilingual text
-        if: (success() || failure()) && (steps.native.outputs.ready == 'true' || steps.reuse.outputs.ready == 'true')
+        if: (success() || failure()) && steps.browser.outputs.ready == 'true'
         run: |
           python3 -m pip install 'numpy==2.3.4'
           python3 scripts/native_parity_compare.py
       - name: Compare actual native and browser ramp and narration audio
-        if: (success() || failure()) && (steps.audio_native.outputs.ready == 'true' || steps.reuse.outputs.ready == 'true')
+        if: (success() || failure()) && steps.browser.outputs.ready == 'true'
         run: python3 scripts/native_parity_audio_compare.py
+      - name: Mapped fundamental-frequency retention of human voices
+        if: (success() || failure()) && steps.browser.outputs.ready == 'true'
+        run: python3 scripts/native_parity_human_pitch.py
       - name: Objective real-speech word retention using the existing local native recognizer
-        if: (success() || failure()) && (steps.audio_native.outputs.ready == 'true' || steps.reuse.outputs.ready == 'true')
+        if: (success() || failure()) && steps.browser.outputs.ready == 'true'
         run: |
           set -euo pipefail
           test -f output/native-parity/browser-audio-report.json

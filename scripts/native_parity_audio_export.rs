@@ -12,12 +12,17 @@ fn main() {
     let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap();
     let root = PathBuf::from(&args[2]);
     std::fs::create_dir_all(&root).unwrap();
+    let run = std::env::var("GITHUB_RUN_ID").expect("server-only example requires run identity");
+    let attempt = std::env::var("GITHUB_RUN_ATTEMPT").unwrap_or_else(|_| "1".into());
+    assert!(run.bytes().chain(attempt.bytes()).all(|b|b.is_ascii_digit()));
+    let projects_root = root.join(format!("native-audio-projects-{run}-{attempt}"));
+    std::fs::create_dir_all(&projects_root).unwrap();
     let mut results = Vec::new();
     for row in manifest.as_array().unwrap() {
         let name = row["name"].as_str().unwrap();
         assert!(name.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'-'));
         let source = std::fs::canonicalize(row["source"].as_str().unwrap()).unwrap();
-        let info = projects::create(root.to_str().unwrap(), name, 640, 360, 24, 1).unwrap();
+        let info = projects::create(projects_root.to_str().unwrap(), name, 640, 360, 24, 1).unwrap();
         let mut session = Session::open_info(&info).unwrap();
         let media_id = session.apply(Command::AddMedia { item: media::probe(source.to_str().unwrap()).unwrap().to_new_media() }).unwrap().created_id.unwrap();
         let clip_id = session.apply(Command::AddClipAtFirstFree { media_id, start: 0.0 }).unwrap().created_id.unwrap();

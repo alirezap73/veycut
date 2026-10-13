@@ -461,7 +461,11 @@ window.VeyCutCompositor = (() => {
         Math.max(0,number(style.backgroundRadius,.0135)*spec.height));ctx.fill();
     }
     ctx.lineJoin='round';ctx.fillStyle=style.color || '#fff';
-    ctx.shadowColor=style.shadow?'#000':'transparent';ctx.shadowBlur=style.shadow?font*.08:0;
+    // Native shadow offset/alpha/radius; Canvas and tiny-skia blur kernels
+    // still require an actual output comparison, rather than assumed equality.
+    ctx.shadowColor=style.shadow?'rgba(0,0,0,0.5882352941176471)':'transparent';
+    ctx.shadowOffsetX=style.shadow?font*.05:0;ctx.shadowOffsetY=style.shadow?font*.07:0;
+    ctx.shadowBlur=style.shadow?Math.max(1,Math.round(font*.04)):0;
     rows.forEach((row,index)=>{
       ctx.direction=row.direction;
       const indent=align==='left'?0:align==='right'?boxWidth-row.width:(boxWidth-row.width)/2;
@@ -481,23 +485,64 @@ window.VeyCutCompositor = (() => {
     text(ctx,{text:{content,fontSize:.037,fontWeight:600,color:'#fff',strokeWidth:.005,strokeColor:'#000',maxWidth:.86}},spec,time);
     ctx.restore();
   }
+  const linearFrames=new WeakMap();
+  const encodedLight=Float32Array.from({length:256},(_,level)=>Math.pow(level/255,2.4));
+  function blendPixels(under,source,mode='normal',opacity=1){
+    if(under.length*4!==source.length*3||!Object.hasOwn(blend,mode)||!Number.isFinite(opacity))throw Error('Invalid linear blend buffer or mode.');
+    opacity=clamp(opacity,0,1);
+    for(let pixel=0,at=0;at<source.length;pixel+=3,at+=4){
+      const alpha=source[at+3]/255*opacity;if(alpha<=0)continue;
+      for(let channel=0;channel<3;channel++){
+        const colour=encodedLight[source[at+channel]],ground=under[pixel+channel],over=colour*alpha;
+        if(mode==='multiply')under[pixel+channel]=over*ground+ground*(1-alpha);
+        else if(mode==='screen')under[pixel+channel]=over*(1-ground)+ground;
+        else if(mode==='add')under[pixel+channel]=over+ground;
+        else if(mode==='lighten')under[pixel+channel]=Math.max(colour,ground)*alpha+ground*(1-alpha);
+        else if(mode==='darken')under[pixel+channel]=Math.min(colour,ground)*alpha+ground*(1-alpha);
+        else under[pixel+channel]=over+ground*(1-alpha);
+      }
+    }
+    return under;
+  }
   function render(ctx,spec,time,sources) {
     spec=resolveTransitions(spec);
+    const destination=ctx,linear=typeof ctx.getImageData==='function'&&typeof ctx.putImageData==='function';
+    // Text-only arithmetic mocks have no actual canvas. A real renderer must
+    // have pixel access; it cannot silently use display-space blending.
+    if(ctx.canvas&&!linear)throw Error('SDR composition requires readable Canvas pixels.');
+    let scratch=null,paint=ctx;
+    if(linear){
+      scratch=linearFrames.get(ctx);
+      if(!scratch||scratch.width!==spec.width||scratch.height!==spec.height){
+        const canvas=scratch?.canvas||document.createElement('canvas');canvas.width=spec.width;canvas.height=spec.height;
+        const layer=canvas.getContext('2d',{willReadFrequently:true});if(!layer)throw Error('Layer composition canvas is unavailable.');
+        scratch={canvas,paint:layer,width:spec.width,height:spec.height,light:new Float32Array(spec.width*spec.height*3),result:ctx.createImageData?ctx.createImageData(spec.width,spec.height):ctx.getImageData(0,0,spec.width,spec.height)};
+        linearFrames.set(ctx,scratch);
+      }
+      scratch.light.fill(0);paint=scratch.paint;
+    }
     ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
     ctx.fillStyle='#000';ctx.fillRect(0,0,spec.width,spec.height);
     try {
     const tracks=spec.tracks || [];
     const clips=spec.clips.filter(clip=>clip.kind!=='audio' && time>=start(clip) && time<start(clip)+duration(clip))
       .slice().sort((a,b)=>(a[lane]??tracks.findIndex(track=>track.id===a.trackId)*2)-(b[lane]??tracks.findIndex(track=>track.id===b.trackId)*2));
-    const retained=stillCache.get(ctx), active=new Set(clips.map(clip=>clip.id));
+    const retained=stillCache.get(paint), active=new Set(clips.map(clip=>clip.id));
     if(retained)for(const id of retained.keys())if(!active.has(id))retained.delete(id);
-    for (const clip of clips) {
-      const track=tracks.find(track=>track.id===clip.trackId);
-      if (track?.visible===false || clip.hidden) continue;
+    for (const original of clips) {
+      const track=tracks.find(track=>track.id===original.trackId);
+      if (track?.visible===false || original.hidden) continue;
+      // Native title opacity multiplies the finished title image once, not
+      // each overlapping background/outline/glyph drawing operation.
+      const style=original.text||original.textStyle;
+      const ownOpacity=original.kind==='text'?clamp(number(style?.opacity,1),0,1):1;
+      const clip=linear&&original.kind==='text'?{...original,text:{...style,opacity:1}}:original;
+      const ctx=paint;
+      if(linear){ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,spec.width,spec.height);}
       ctx.save();
       try {
-        ctx.globalAlpha=opacityAt(clip,time);
-        ctx.globalCompositeOperation=blend[clip.blend || ''] || 'source-over';
+        ctx.globalAlpha=linear?1:opacityAt(clip,time);
+        ctx.globalCompositeOperation=linear?'source-over':blend[clip.blend || ''] || 'source-over';
         const x=spec.width*(.5+valueAt(clip,'offsetX',time));
         const y=spec.height*(.5+valueAt(clip,'offsetY',time));
         ctx.translate(x,y);ctx.rotate(valueAt(clip,'rotation',time)*Math.PI/180);
@@ -516,15 +561,21 @@ window.VeyCutCompositor = (() => {
         }
         else {
           const source=sources.get(clip.id);
-          if (!source) throw new Error('No prepared visual source for '+clip.id);
-          const canvas=layerCanvas(ctx,clip,source,spec,time);
-          ctx.drawImage(canvas,-canvas.width/2,-canvas.height/2);
+          if (!source) throw Error('No prepared visual source for '+clip.id);
+          const canvas=layerCanvas(ctx,clip,source,spec,time);ctx.drawImage(canvas,-canvas.width/2,-canvas.height/2);
         }
       } finally {ctx.restore();}
+      if(linear)blendPixels(scratch.light,ctx.getImageData(0,0,spec.width,spec.height).data,original.blend||'normal',opacityAt(original,time)*ownOpacity);
     }
-    legacyCaptions(ctx,spec,time);
+    if(linear){
+      paint.setTransform(1,0,0,1,0,0);paint.clearRect(0,0,spec.width,spec.height);paint.globalAlpha=1;paint.globalCompositeOperation='source-over';
+      legacyCaptions(paint,spec,time);blendPixels(scratch.light,paint.getImageData(0,0,spec.width,spec.height).data);
+      const pixels=scratch.result.data;
+      for(let pixel=0,at=0;at<pixels.length;pixel+=3,at+=4){for(let c=0;c<3;c++)pixels[at+c]=255*Math.pow(clamp(scratch.light[pixel+c],0,1),1/2.4);pixels[at+3]=255;}
+      destination.putImageData(scratch.result,0,0);
+    }else legacyCaptions(ctx,spec,time);
     } finally {ctx.restore();}
   }
-  return Object.freeze({render,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,speedAt,timelineTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
+  return Object.freeze({render,blendPixels,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,speedAt,timelineTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
     supportedEffects:Object.freeze([...effects]),supportedBlends:Object.freeze(Object.keys(blend)),shapeKinds});
 })();

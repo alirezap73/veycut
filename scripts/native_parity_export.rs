@@ -28,11 +28,18 @@ fn main() {
         let mut session = Session::open_info(&info).unwrap();
         session.apply(Command::AddFont { family: "Vazirmatn".into(), path: font.to_string_lossy().into_owned() }).unwrap();
         let id = session.apply(Command::AddMedia { item: media::probe(source.to_str().unwrap()).unwrap().to_new_media() }).unwrap().created_id.unwrap();
-        let clip = session.apply(Command::AddClipAtFirstFree { media_id: id, start: 0.0 }).unwrap().created_id.unwrap();
+        let clip = session.apply(Command::AddClipAtFirstFree { media_id: id.clone(), start: 0.0 }).unwrap().created_id.unwrap();
         let duration = session.project().active().clips[0].duration;
         session.apply(Command::TrimClip { clip_id: clip.clone(), edge: TrimEdge::End, delta: 1.0-duration, ripple: false }).unwrap();
         let patch: ClipPatch = serde_json::from_value(serde_json::json!({"videoEffects":case["effects"],"opacity":1.0})).unwrap();
         session.apply(Command::UpdateClip { clip_id: clip, patch }).unwrap();
+        if let Some(overlay) = case.get("overlay") {
+            let lane = session.apply(Command::AddTrack { bottom:false }).unwrap().created_id.unwrap();
+            let over = session.apply(Command::AddClip { media_id:id.clone(), track_id:lane, start:0.0, ripple:false }).unwrap().created_id.unwrap();
+            let span = session.project().active().clips.iter().find(|c| c.id==over).unwrap().duration;
+            session.apply(Command::TrimClip { clip_id:over.clone(), edge:TrimEdge::End, delta:1.0-span, ripple:false }).unwrap();
+            session.apply(Command::UpdateClip { clip_id:over, patch:serde_json::from_value(overlay.clone()).unwrap() }).unwrap();
+        }
         if !case["text"].is_null() {
             session.apply(Command::AddTextClip { track_id: None, above: true, start: 0.0, duration: Some(1.0), offset_y: Some(0.0), style: Some(serde_json::from_value(case["text"].clone()).unwrap()) }).unwrap();
         }

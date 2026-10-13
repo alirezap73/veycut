@@ -10,7 +10,7 @@ for report_file,cases_file in [('native-report.json','cases.json'),('native-audi
   assert 'Metal' in row['adapter'];name=case['name'];assert name.replace('-','').isalnum()
   for file in [root/f'native-{name}.mp4',root/f'{name}.json']:
    assert file.stat().st_size>0;hashes[file.name]=hashlib.file_digest(file.open('rb'),'sha256').hexdigest()
- assert len(cases)>=7 if 'audio' in report_file else len(cases)==20
+ assert len(cases)>=7 if 'audio' in report_file else len(cases)>=20
 for name in ['source.png','ramp-tone.wav']:
  file=root/name;assert file.stat().st_size>0;hashes[name]=hashlib.file_digest(file.open('rb'),'sha256').hexdigest()
 (root/'native-reference-reuse.json').write_text(json.dumps({'referenceRun':os.environ['REFERENCE_RUN'],'baseline':baseline,'nativeOutputSHA256':hashes,'scope':'Complete actual Mac Metal export files reused; source driver/fixture git diff checked before replay. Prior browser-stage failure does not become a native/Web parity pass.'},indent=2))

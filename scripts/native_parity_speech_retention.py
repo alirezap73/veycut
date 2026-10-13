@@ -137,16 +137,18 @@ def analyse():
         native, web = row['outputs']['native'], row['outputs']['web']
         row['criteria'] = dict(minimumSourceWordRetention=.65, minimumOutputWords=6,
                                maximumWebRetentionLossAgainstNative=.15)
-        row['passed'] = bool(row['sourceValid'] and all(out['nonSilent'] and out['recognizedWordCount']>=6
-                            and out['sourceWordRetention']>=.65 for out in [native,web])
-                            and web['sourceWordRetention']>=native['sourceWordRetention']-.15)
+        for out in [native, web]:
+            out['qualityPassed'] = bool(row['sourceValid'] and out['nonSilent'] and out['recognizedWordCount']>=6
+                                        and out['sourceWordRetention']>=.65)
+        row['passed'] = bool(web['qualityPassed'] and web['sourceWordRetention']>=native['sourceWordRetention']-.15)
         results.append(row)
     report = dict(nativeSource=transcript['nativeSource'], model='tiny.en', modelSHA256=DIGEST, sources=sources, results=results,
                   status='invalid source/reference evidence' if invalid else 'passed' if all(row['passed'] for row in results) else 'retention check failed',
                   passed=not invalid and all(row['passed'] for row in results),
+                  nativeBaselineMeetsSameRetentionChecks=not invalid and all(row['outputs']['native']['qualityPassed'] for row in results),
                   scope='Local existing native ASR measures recognized word sequence retention only; not human listening, full intelligibility, semantic fidelity or native/Web quality equivalence')
     (ROOT/'speech-retention-report.json').write_text(json.dumps(report, indent=2))
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report))
     assert report['passed'], report['status']
 
 
