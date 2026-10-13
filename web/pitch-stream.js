@@ -22,7 +22,7 @@ export async function createPitchStream({sampleRate=48000,tempo,sourceFrames,out
         // the integrated source map. Feed only enough for one hop; correct
         // rounding against consumed input rather than accumulating sample drift.
         if(curved){
-          const hop=processor.outputChunkSize,consumed=Math.max(0,input-processor.inputBuffer.frameCount-(output?Math.floor(sampleRate*.008/8)*8:0)),desired=sourceAtFrame(output+hop);
+          const hop=processor.outputChunkSize,consumed=Math.max(0,input-processor.inputBuffer.frameCount-Math.floor(sampleRate*.008/8)*8),desired=sourceAtFrame(output+hop);
           const next=(desired-consumed)/hop;if(!Number.isFinite(next)||next<=0)throw Error('Pitch curve must advance source time.');processor.tempo=Math.min(4,Math.max(.25,next));
         }
         const count=curved?Math.max(1,Math.min(2048,processor.inputChunkSize-processor.inputBuffer.frameCount)):2048,wanted=Math.max(0,Math.min(count,sourceFrames-input)),data=new Float32Array(count*2);
