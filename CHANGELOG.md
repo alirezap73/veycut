@@ -1,5 +1,9 @@
 # VeyCut changelog
 
+## 0.3.1 Web fixed-frame MP4 (2026-10-13)
+
+App version remains **0.3.1** and the Mac installer is unchanged. Web adds selectable fixed-frame H.264/AAC MP4, local worker AAC fallback, sequential audio decoding with bounded window history and Blob-backed output assembly. [Complete GitHub checks](https://github.com/alirezap73/veycut/actions/runs/38370497466) passed: nine-second mixed media/Persian captions/cancellation, both-mode decoded audio filters and window-boundary echo, unchanged short H.264/AAC input, and full ten-minute decoding with exactly 14,400 scheduled frames. [Evidence](docs/evidence/web-fixed-frame-mp4.json) records picture/audio correspondence and fixture scope. Long-film input audio is converted to Opus; the untouched MP4 test is separate. SDR/native-pixel differences, unsupported decoders, surround and pitch-preserving offline speed changes remain limits. This does not declare full Mac parity or a new numeric release.
+
 ## 0.3.1-beta.3 — public experimental Mac update (2026-10-12)
 
 The Apple silicon Mac app now uses an English-only interface while retaining Persian titles, subtitles and right-to-left content. The app version remains **0.3.1**. The [matching package](https://github.com/alirezap73/veycut/releases/tag/v0.3.1-beta.3) passed four packaged server checks and a light local Mac import, split, Undo/Redo, bilingual caption, save/reopen and H.264/AAC export test. The Web editor remains a separate hosted/ZIP build. See the release notes for the exact package source and checksum.
