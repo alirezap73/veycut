@@ -479,6 +479,10 @@ jobs:
           ffmpeg -v error -xerror -i output/playwright/bundle-video.mp4 -f null -
           playwright-cli run-code --filename=scripts/veycut_web_offline_check.js > output/playwright/offline-check.log
           python3 scripts/verify_web_offline.py
+          curl --fail --location --retry 2 --max-time 60 --max-filesize 20000000 https://media.w3.org/2010/05/sintel/trailer.mp4 -o output/playwright/mp4-input.mp4
+          playwright-cli run-code --filename=scripts/veycut_web_mp4_input_check.js > output/playwright/mp4-input-check.log
+          python3 scripts/verify_web_mp4_input.py
+          rm output/playwright/mp4-input.mp4
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Five-minute source and real browser export
