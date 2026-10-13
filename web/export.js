@@ -1,14 +1,15 @@
 'use strict';
 // Real-time browser export. No uploads, remote codecs, or simulated output.
 window.VeyCutExporter = (() => {
-  const LIMITS = Object.freeze({seconds:300,longEdge:1920,fps:30,bytes:256*1024*1024,simultaneous:16});
+  const LIMITS = Object.freeze({seconds:600,longEdge:1920,fps:30,bytes:256*1024*1024,simultaneous:16});
   function capability(format='webm') {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
-    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc3.42001f,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1.420028,mp4a.40.2'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
+    if(!['webm','mp4'].includes(format))return null;
+    const types = format==='mp4' ? ['video/mp4;codecs=avc1.42001f,mp4a.40.2','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc3.42001f,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1.420028,mp4a.40.2','video/mp4;codecs=avc1.42001f,opus','video/mp4;codecs=avc1,opus'] : ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
     const mime = types
       .find(type => MediaRecorder.isTypeSupported(type));
-    return mime ? {Audio,mime} : null;
+    return mime ? {Audio,mime,audioCodec:mime.includes('mp4a')?'AAC':'Opus',videoCodec:format==='mp4'?'H.264':mime.includes('vp9')?'VP9':'VP8'} : null;
   }
   const cancelled = () => new DOMException('Export cancelled','AbortError');
   function check(signal) {if(signal.aborted)throw signal.reason instanceof Error?signal.reason:cancelled();if(document.hidden)throw new Error('Keep this tab visible during real-time export.');}
@@ -40,7 +41,7 @@ window.VeyCutExporter = (() => {
       if(['video','audio'].includes(c.kind||'video') && !compositor.isHold(c) && (!Number.isFinite(c.in)||!Number.isFinite(c.out)||c.in<0||c.out-c.in<.05))throw new Error('Invalid source range.');
       end=Math.max(end,begin+seconds);
     }
-    if(end<=0||end>LIMITS.seconds)throw new Error('Export supports timelines up to 300 seconds.');
+    if(end<=0||end>LIMITS.seconds)throw new Error('Export supports timelines up to 600 seconds.');
     const times=clips.flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)]);
     for(const time of times){
       const count=clips.filter(c=>!['text','shape'].includes(c.kind)&&time>=compositor.start(c)&&time<compositor.start(c)+compositor.duration(c)).length;
@@ -219,6 +220,8 @@ window.VeyCutExporter = (() => {
       }
       checkRun();await event(recorder,'stop',signal,()=>recorder.stop(),5000);checkRun();
       let blob=new Blob(chunks,{type:recorder.mimeType||supported.mime});if(!blob.size)throw new Error('The browser returned an empty recording.');
+      if(spec.format==='mp4'&&!blob.type.startsWith('video/mp4'))throw Error('The browser did not produce the selected MP4 format.');
+      if(blob.type.startsWith('video/mp4')){const header=new Uint8Array(await blob.slice(0,12).arrayBuffer());if(header.length<12||String.fromCharCode(...header.slice(4,8))!=='ftyp')throw Error('The browser returned an invalid MP4 container.');}
       if(Math.abs(recordedSeconds-duration)>.5)throw Error('Recording accumulated too much timing error; no output was downloaded.');
       recordingComplete=true;clearTimeout(watchdog);
       for(const id of [...prepared.keys()])dispose(id);

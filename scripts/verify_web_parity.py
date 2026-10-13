@@ -35,7 +35,9 @@ for item in [report['webm'], report['mp4']]:
     if item['format'] == 'webm':
         assert videos[0]['codec_name'] in ['vp8', 'vp9'] and audios[0]['codec_name'] == 'opus'
     else:
-        assert videos[0]['codec_name'] == 'h264' and audios[0]['codec_name'] == 'aac'
+        expected_audio = 'opus' if 'opus' in item['mime'].lower() else 'aac'
+        assert videos[0]['codec_name'] == 'h264' and audios[0]['codec_name'] == expected_audio
+        assert 'mp4' in probe['format']['format_name']
     run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(path), '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'])
     frames = json.loads(run(['ffprobe', '-v', 'error', '-show_frames', '-show_entries', 'frame=media_type,best_effort_timestamp_time,pkt_duration_time', '-of', 'json', str(path)]))['frames']
     times = [float(f['best_effort_timestamp_time']) for f in frames if f['media_type'] == 'video']
