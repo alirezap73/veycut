@@ -22,9 +22,21 @@ jobs:
           playwright-cli open https://alirezap73.github.io/veycut/ --browser=chromium
           playwright-cli run-code --filename=scripts/veycut_web_hosted_diagnostic.js
           cat hosted-diagnostic.json
+          playwright-cli run-code --filename=scripts/veycut_web_hosted_check.js
+          ffmpeg -v error -xerror -i hosted-frame.mp4 -f null -
+          python3 - <<'PYHOST'
+          import json, subprocess
+          report=json.load(open('hosted-frame-report.json'))
+          assert report['build']['version']=='0.3.1' and report['encoding']['audioCodec']=='aac'
+          streams=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json','hosted-frame.mp4']))['streams']
+          assert {s['codec_type']:s['codec_name'] for s in streams}=={'video':'h264','audio':'aac'}
+          print(json.dumps(report))
+          PYHOST
           playwright-cli close
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: Hosted-Web-diagnostic
-          path: hosted-diagnostic.json
+          path: |
+            hosted-diagnostic.json
+            hosted-frame-report.json
