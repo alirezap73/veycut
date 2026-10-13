@@ -21,8 +21,9 @@ window.VeyCutOfflineExporter=(()=>{
     const quality=new MB.Quality({bitrate:encoding.videoBitsPerSecond}),videoCodec=spec.videoCodec||'avc',codecNames={avc:'H.264',hevc:'HEVC',av1:'AV1'};
     if(!codecNames[videoCodec])throw Error('Choose H.264, HEVC or AV1 for frame export.');
     if(!await wait(MB.canEncodeVideo(videoCodec,{width:spec.width,height:spec.height,quality,frameRate:fps}),'video encoder capability'))throw Error(codecNames[videoCodec]+' frame encoding is unavailable on this device. Choose H.264 or real-time export.');
-    const nativeAac=await wait(MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000}),'AAC encoder capability');
-    if(!nativeAac&&!localAacRegistered){const fallback=await wait(import('./vendor/mediabunny-aac-encoder.min.mjs'),'AAC codec module');fallback.registerAacEncoder();localAacRegistered=true;}
+    // Use the bundled encoder on every platform: its actual packet PTS
+    // carries priming into the MP4 edit list, with no guessed browser delay.
+    if(!localAacRegistered){const fallback=await wait(import('./vendor/mediabunny-aac-encoder.min.mjs'),'AAC codec module');fallback.registerAacEncoder();localAacRegistered=true;}
     const audioCodec=await wait(MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000}),'AAC encoder capability')?'aac':null;
     if(!audioCodec)throw Error('No supported frame-export audio encoder. Use real-time export.');
     const canvas=document.createElement('canvas');canvas.width=spec.width;canvas.height=spec.height;const context=canvas.getContext('2d',{alpha:false});if(!context)throw Error('Canvas rendering is unavailable.');
