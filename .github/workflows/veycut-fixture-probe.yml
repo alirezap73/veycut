@@ -1,0 +1,63 @@
+name: Probe original camera and narrated speech fixtures
+on:
+  workflow_dispatch:
+  push:
+    branches: [validation/web-original-camera, development/web-ramp-parity]
+    paths:
+      - scripts/veycut_fixture*
+      - docs/evidence/fixture-sources.json
+      - .github/workflows/veycut-fixture-probe.yml
+permissions:
+  contents: read
+concurrency:
+  group: fixture-probe-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  original-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install server-only probing tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Verify unchanged owner originals and measure timing
+        run: python3 scripts/veycut_fixture_probe.py
+      - name: Install server browser
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Test original camera edits through the public application
+        run: |
+          playwright-cli open https://alirezap73.github.io/veycut/ --browser=chromium
+          playwright-cli run-code --filename=scripts/veycut_fixture_ui_check.js
+          python3 scripts/veycut_fixture_verify.py
+          playwright-cli close
+      - name: Publish bounded probe summary
+        if: always()
+        run: |
+          if test -f output/fixtures/probe-report.json; then
+            python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r=json.load(open('output/fixtures/probe-report.json'))
+          print('Original source integrity and timing probe; application/native parity remains a separate test.')
+          for f in r['fixtures']:
+            print(f"- {f['id']}: {f['integrity']['bytes']} bytes; measured variable timing: {f['packetTiming']['measuredVariableTiming']}; exact SHA-256 checked.")
+          PY
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-camera-fixture-probe
+          retention-days: 3
+          path: |
+            output/fixtures/probe-report.json
+            output/fixtures/SOURCE-README.md
+            output/fixtures/SOURCE-metadata.csv
+            output/fixtures/*.vtt
+            output/fixtures/*-speech-derived.wav
+            output/fixtures/fixture-ui.json
+            output/fixtures/fixture-output-report.json
+            output/fixtures/*-output.mp4
+          if-no-files-found: warn
