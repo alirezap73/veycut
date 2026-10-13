@@ -50,12 +50,13 @@ window.VeyCutOfflineExporter=(()=>{
         const audio=await wait(media.getPrimaryAudioTrack(),'audio track');
         if(audio){
           if(!await wait(audio.canDecode(),'audio decoder capability')||await audio.getNumberOfChannels()>2)throw Error('This audio codec or channel layout needs real-time export.');
-          if(clip.preservePitch!==false&&clip.speedCurve?.length)throw Error('Pitch-preserved speed ramps need real-time export.');
-          if(clip.preservePitch!==false&&(clip.speed||1)!==1&&((clip.speed||1)<.25||(clip.speed||1)>4))throw Error('Pitch-preserved frame export supports constant speeds from 0.25 to 4. Use real-time export for this speed.');
+          const curved=Array.isArray(clip.speedCurve)&&clip.speedCurve.length>0;if(clip.preservePitch!==false&&curved&&clip.speedCurve.some(p=>!Number.isFinite(p.speed)||p.speed<.25||p.speed>4))throw Error('Pitch-preserved frame export supports ramp speeds from 0.25 to 4.');
+          if(clip.preservePitch!==false&&!curved&&(clip.speed||1)!==1&&((clip.speed||1)<.25||(clip.speed||1)>4))throw Error('Pitch-preserved frame export supports constant speeds from 0.25 to 4. Use real-time export for this speed.');
           value.audio=new MB.AudioBufferSink(audio);value.audioBuffers=[];value.audioIndex=0;
-          if(clip.preservePitch!==false&&(clip.speed||1)!==1){
-            const {createPitchStream}=await wait(import('./pitch-stream.js'),'pitch module'),rate=48000;
-            value.pitch=await createPitchStream({sampleRate:rate,tempo:clip.speed,sourceFrames:Math.round((clip.out-clip.in)*rate),outputFrames:Math.round((compositor.start(clip)+compositor.duration(clip))*rate)-Math.round(compositor.start(clip)*rate),check,feed:async(first,count)=>{
+          if(clip.preservePitch!==false&&(curved||(clip.speed||1)!==1)){
+            const {createPitchStream}=await wait(import('./pitch-stream.js'),'pitch module'),rate=48000,sourceFrames=Math.round((clip.out-clip.in)*rate),outputFrames=Math.round((compositor.start(clip)+compositor.duration(clip))*rate)-Math.round(compositor.start(clip)*rate);
+            const sourceAtFrame=curved?frame=>frame>outputFrames?sourceFrames+(frame-outputFrames)*compositor.speedAt(clip,compositor.start(clip)+compositor.duration(clip)):(compositor.sourceTime(clip,compositor.start(clip)+compositor.duration(clip)*frame/outputFrames)-clip.in)*sourceFrames/(clip.out-clip.in):undefined;
+            value.pitch=await createPitchStream({sampleRate:rate,tempo:curved?compositor.speedAt(clip,compositor.start(clip)):clip.speed,sourceFrames,outputFrames,sourceAtFrame,check,feed:async(first,count)=>{
               const origin=clip.in+first/rate;await prepareAudio(value,origin,origin+(count-1)/rate);const data=new Float32Array(count*2);
               for(let index=0;index<count;index++){if(index%2048===0)check();const pair=sample(value,origin+index/rate);data[index*2]=pair[0];data[index*2+1]=pair[1];}return data;
             }});
