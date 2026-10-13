@@ -9,6 +9,10 @@ on:
         description: Successful Web workflow run with identical browser implementation
         required: true
         type: string
+      native_reference_run:
+        description: Optional complete native export artifact from the same pinned source and unchanged drivers/fixtures
+        required: false
+        type: string
       camera_fixture_run:
         description: Optional successful original-camera fixture probe run for real narration PCM
         required: false
@@ -108,8 +112,34 @@ jobs:
           workspaces: native-baseline/src
           key: native-web-parity-macos-released-source
           cache-on-failure: true
+      - name: Reuse complete pinned native Metal exports on the server
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REFERENCE_RUN: ${{ inputs.native_reference_run || (github.event_name == 'push' && '38405908653') || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REFERENCE_RUN" ]; then exit 0; fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REFERENCE_RUN" > "$RUNNER_TEMP/native-reference-run.json"
+          source_commit=$(python3 - <<'PYREF'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'native-reference-run.json').read_text())
+          assert run['status']=='completed'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY'] and run['path']=='.github/workflows/veycut-native-web-parity.yml'
+          print(run['head_sha'])
+          PYREF
+          )
+          git diff --exit-code "$source_commit" HEAD -- scripts/native_parity_export.rs scripts/native_parity_fixtures.py scripts/native_parity_audio_export.rs scripts/native_parity_audio_fixtures.py
+          gh run download "$REFERENCE_RUN" --repo "$GITHUB_REPOSITORY" --name Native-Web-visual-comparison --dir output/native-parity
+          python3 scripts/native_parity_validate_reference.py
+          mkdir -p web/parity-fixtures
+          cp output/native-parity/cases.json output/native-parity/audio-cases.json web/parity-fixtures/
+          cmp web/fonts/Vazirmatn-Variable.ttf native-baseline/src/crates/concat-text/fonts/Vazirmatn-Variable.ttf
+          echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Canonical fixtures and actual native GPU exports
         id: native
+        if: steps.reuse.outputs.ready != 'true'
         run: |
           set -euo pipefail
           python3 scripts/native_parity_fixtures.py
@@ -123,6 +153,7 @@ jobs:
           echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Native ramp and optional real speech from the same PCM
         id: audio_native
+        if: steps.reuse.outputs.ready != 'true'
         run: |
           set -euo pipefail
           ffmpeg -v error -f lavfi -i "aevalsrc=if(between(t\,1\,1.15)+between(t\,3\,3.15)+between(t\,5\,5.15)+between(t\,7\,7.15)\,.4\,.05)*sin(2*PI*880*t)|.25*sin(2*PI*660*t):s=48000:d=8" -c:a pcm_s16le -y output/native-parity/ramp-tone.wav
@@ -144,20 +175,33 @@ jobs:
             sleep 1
           done
           playwright-cli open http://127.0.0.1:4173/ --browser=chromium
-          result=0
-          playwright-cli run-code --filename=scripts/native_parity_browser.js || result=1
-          playwright-cli run-code --filename=scripts/native_parity_audio_browser.js || result=1
-          exit "$result"
+          python3 -c "import json;print(len(json.load(open('output/native-parity/cases.json'))))" > "$RUNNER_TEMP/visual-count"
+          for ((case_index=0;case_index<$(cat "$RUNNER_TEMP/visual-count");case_index++)); do
+            playwright-cli run-code --filename=scripts/native_parity_browser.js
+            playwright-cli run-code 'async page => { await page.locator("#reselect").click(); }'
+            playwright-cli upload output/native-parity/source.png
+            playwright-cli run-code --filename=scripts/native_parity_browser.js
+          done
+          python3 - <<'PYFILES' > "$RUNNER_TEMP/audio-sources.txt"
+          import json
+          for case in json.load(open('output/native-parity/audio-cases.json')): print(case['source'])
+          PYFILES
+          while IFS= read -r source_file; do
+            playwright-cli run-code --filename=scripts/native_parity_audio_browser.js
+            playwright-cli run-code 'async page => { await page.locator("#reselect").click(); }'
+            playwright-cli upload "$source_file"
+            playwright-cli run-code --filename=scripts/native_parity_audio_browser.js
+          done < "$RUNNER_TEMP/audio-sources.txt"
       - name: Decode both actual exporters and compare effects and bilingual text
-        if: (success() || failure()) && steps.native.outputs.ready == 'true'
+        if: (success() || failure()) && (steps.native.outputs.ready == 'true' || steps.reuse.outputs.ready == 'true')
         run: |
           python3 -m pip install 'numpy==2.3.4'
           python3 scripts/native_parity_compare.py
       - name: Compare actual native and browser ramp and narration audio
-        if: (success() || failure()) && steps.audio_native.outputs.ready == 'true'
+        if: (success() || failure()) && (steps.audio_native.outputs.ready == 'true' || steps.reuse.outputs.ready == 'true')
         run: python3 scripts/native_parity_audio_compare.py
       - name: Objective real-speech word retention using the existing local native recognizer
-        if: (success() || failure()) && steps.audio_native.outputs.ready == 'true'
+        if: (success() || failure()) && (steps.audio_native.outputs.ready == 'true' || steps.reuse.outputs.ready == 'true')
         run: |
           set -euo pipefail
           test -f output/native-parity/browser-audio-report.json

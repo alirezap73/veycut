@@ -1,18 +1,18 @@
-// Actual saved native document -> file reconnection -> UI MP4 frame export.
-async page => {
-  const assert=(ok,message)=>{if(!ok)throw Error(message);};
-  await page.goto('http://127.0.0.1:4173/');
-  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
-  const cases=await page.evaluate(async()=>{const response=await fetch('./parity-fixtures/cases.json');if(!response.ok)throw Error('Missing comparison fixtures');return response.json();});
-  const results=[];
-  for(const fixture of cases){
-    const name=fixture.name;
+// Reconnect through separate CLI click/upload calls; native chooser is a tool modal.
+async page=>{
+ const assert=(ok,message)=>{if(!ok)throw Error(message);};
+ let task=await page.evaluate(()=>window.__nativeVisualTask||null);
+ if(!task){await page.goto('http://127.0.0.1:4173/');await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');const cases=await page.evaluate(async()=>await(await fetch('./parity-fixtures/cases.json')).json());task={cases,index:0,phase:'prepare',results:[]};}
+ const fixture=task.cases[task.index],name=fixture?.name;
+ if(task.phase==='prepare'){
     await page.locator('#project-input').setInputFiles('output/native-parity/'+name+'.json');
     await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length>0&&!document.querySelector('#import').disabled);
     const state=await page.evaluate(()=>window.VeyCutWeb.snapshot());
     const image=state.clips.find(c=>c.kind==='image');assert(image,'Native image must survive browser open');
     await page.locator(`#timeline .timeline-clip[data-clip-id="${image.id}"]`).click();
-    const chosen=page.waitForEvent('filechooser');await page.locator('#reselect').click();await(await chosen).setFiles('output/native-parity/source.png');
+  task.image=image;task.phase='export';await page.evaluate(task=>window.__nativeVisualTask=task,task);return;
+ }
+ const image=task.image;
     await page.waitForFunction(id=>window.VeyCutWeb.media().get(id)?.url?.startsWith('blob:')&&!document.querySelector('#import').disabled,image.mediaId);
     await page.evaluate(async()=>{await document.fonts.load('600 32px Vazirmatn');await document.fonts.ready;if(!document.fonts.check('600 32px Vazirmatn'))throw Error('Shared font did not load');});
     const before=await page.evaluate(()=>JSON.stringify(window.VeyCutWeb.engineDocument()));
@@ -25,7 +25,7 @@ async page => {
     const encoding=JSON.parse(await page.locator('#export-status').getAttribute('data-encoding'));
     assert(encoding.frames===24&&encoding.videoCodec==='avc',name+': scheduled frame grid');
     assert(before===await page.evaluate(()=>JSON.stringify(window.VeyCutWeb.engineDocument())),name+': export changed document');
-    results.push({name,encoding});
-  }
-  const pending=page.waitForEvent('download');await page.evaluate(value=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)])),a=document.createElement('a');a.href=url;a.download='browser-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},{results,scope:'Exact native saved edit, original PNG, same font, actual browser frame MP4'});await(await pending).saveAs('output/native-parity/browser-report.json');
+    task.results.push({name,encoding});
+ task.index++;task.phase='prepare';await page.evaluate(task=>window.__nativeVisualTask=task,task);
+ if(task.index===task.cases.length){const event=page.waitForEvent('download');await page.evaluate(report=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(report)]));a.download='browser-report.json';a.click();},{results:task.results,scope:'Exact native saved edit, original PNG, same font, actual browser frame MP4'});await(await event).saveAs('output/native-parity/browser-report.json');}
 }
