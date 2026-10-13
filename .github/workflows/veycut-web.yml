@@ -491,7 +491,7 @@ jobs:
           cleanup_real() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              tail -c 18000 output/playwright/real-check.log || true
+              for log in output/playwright/mp4-check.log output/playwright/real-setup.log output/playwright/real-check.log; do tail -c 12000 "$log" || true; done
               playwright-cli snapshot --filename=output/playwright/real-failure.yml || true
             fi
             rm -f output/playwright/real-source.webm
