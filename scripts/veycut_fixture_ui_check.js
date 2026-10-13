@@ -6,7 +6,7 @@ async page=>{
   for(const [id,extension] of cases){
     await page.goto(target);
     await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
-    const build=await page.evaluate(async()=>await(await fetch('build-info.json',{cache:'no-store'})).json());
+    const build=await page.evaluate(async()=>{const response=await fetch('build-info.json',{cache:'no-store'});if(!response.ok)throw Error('Missing verified build identity');return response.json();});
     await page.locator('#project-format').selectOption('1280x720');await page.locator('#apply-project-format').click();
     await page.locator('#media-input').setInputFiles(`output/fixtures/${id}.${extension}`);
     await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1&&!document.querySelector('#video-export').disabled,null,{timeout:90000});

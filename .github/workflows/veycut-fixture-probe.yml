@@ -79,6 +79,11 @@ jobs:
           git fetch origin "$source_commit"
           git diff --exit-code "$source_commit" HEAD -- web src/crates/veycut-web src/crates/concat-project src/crates/concat-core
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name VeyCut-web-prototype --dir candidate-web
+          python3 - "$source_commit" "$SOURCE_RUN" <<'PYIDENTITY'
+          import json,sys
+          from pathlib import Path
+          Path('candidate-web/build-info.json').write_text(json.dumps({'version':'0.3.1','channel':'candidate','sourceCommit':sys.argv[1],'validatedOn':'GitHub Actions','validatedRun':sys.argv[2]}))
+          PYIDENTITY
           echo "FIXTURE_URL=http://127.0.0.1:4173/" >> "$GITHUB_ENV"
       - name: Test original camera edits through the public application
         if: inputs.diagnostic_run == ''
