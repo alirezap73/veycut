@@ -29,7 +29,7 @@ The [current Web checks](https://github.com/alirezap73/veycut/actions/runs/38274
 
 | Area | Verified Web implementation | Remaining limitation or validation |
 |---|---|---|
-| Timeline and media | Video/audio/image/text on mixed tracks; grouped placement/clipboard/duplicate, ripple removal, multiple timelines and Undo/Redo | Shared Wasm engine required for advanced edits; short Chromium scenarios passed; other browsers and longer footage unverified |
+| Timeline and media | Video/audio/image/text and seven generated shapes on mixed tracks; grouped placement/clipboard/duplicate, ripple removal, multiple timelines and Undo/Redo | Shared Wasm engine required for advanced edits; short Chromium scenarios passed; other browsers and longer footage unverified |
 | Titles and captions | Shared-engine text clips, timing/appearance, SRT/plain-text WebVTT, find/replace and per-timeline caption roles | Browser fonts differ from Mac; bulk import needs non-overlapping times, 512 total project clips and a 1 MiB request; ordinary group edits have a 32-command bound |
 | Transform and animation | Position/scale/rotation/opacity/crop and supported property keyframes | Keyed opacity and transformed still output passed the short mixed-layer check |
 | Picture effects and transitions | Thirteen effects: exposure, contrast, saturation, warm/cool, vibrance, posterize, pixelate, sharpen, Gaussian blur, chroma key, mono without grain and vignette; dissolve and black/white dips | Full native catalogue, grain, HDR and model tools remain gaps; source-handle preroll/frozen holds preserve original project data |
