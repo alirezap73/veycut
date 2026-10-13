@@ -109,6 +109,9 @@ jobs:
           folder = Path('output/playwright')
           (folder / 'captions.srt').write_text('1\n00:00:00,000 --> 00:00:00,800\nسلام جهان\n\n2\n00:00:00,800 --> 00:00:01,600\nEnglish caption\n')
           (folder / 'invalid.json').write_text('{"format":"unrelated"}')
+          def stamp(ms):
+              return f'00:00:{ms//1000:02d},{ms%1000:03d}'
+          (folder / 'dense-captions.srt').write_text('\n\n'.join(f'{i+1}\n{stamp(i*100)} --> {stamp((i+1)*100)}\nکپشن {i+1}' for i in range(20)))
           PY
           python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/playwright/server.log 2>&1 &
           server_pid=$!
@@ -407,6 +410,9 @@ jobs:
           PYSHAPES
           playwright-cli run-code --filename=scripts/veycut_web_reliability_check.js > output/playwright/reliability-check.log
           ffmpeg -v error -xerror -i output/playwright/reliable-video.webm -f null -
+          ffmpeg -v error -xerror -i output/playwright/minimum-video.webm -f null -
+          ffmpeg -v error -xerror -i output/playwright/fallback-video.webm -f null -
+          ffmpeg -v error -xerror -i output/playwright/dense-video.webm -f null -
           python3 - <<'PYRELIABLE'
           import json, subprocess
           meta=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','json','output/playwright/reliable-video.webm']))

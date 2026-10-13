@@ -39,6 +39,7 @@ async page=>{
     const timing=JSON.parse(await page.locator('#export-status').getAttribute('data-timing'));
     assert(verification.frameCallbacks&&verification.decodedEnd>299.5&&Math.abs(verification.duration-300)<.5,'Final decoded video coverage: '+JSON.stringify(verification));
     assert(timing.maxSourceDrift<=.35&&timing.maxRenderGap<=.35,'Bounded long-recording drift: '+JSON.stringify(timing));
+    assert(timing.captureMode==='manual'&&timing.drawnFrames<9000,'Image rendering stays near the selected 24 fps: '+JSON.stringify(timing));
     await download('#save','output/playwright/long-project-after.json');
     assert(expected===await page.evaluate(()=>JSON.stringify(window.VeyCutWeb.engineDocument())),'Five-minute export preserves project');
     const report={status:'passed',seconds:300,requestedFps:24,verification,timing,cancellationDownloaded:false,source:'Synthetic five-minute colour/audio markers and a late Persian caption; not a real-camera or cross-browser test.'};

@@ -41,8 +41,10 @@ window.VeyCutOutputCheck=(()=>{
       if(!Number.isFinite(video.duration)||Math.abs(video.duration-seconds)>.5)throw Error('Recorded duration does not match the timeline.');
       if(seconds>120&&typeof video.requestVideoFrameCallback!=='function')throw Error('This browser cannot verify long exports. Try a current Chromium browser.');
       const margin=Math.min(seconds/4,Math.max(.1,3/fps));
-      await frame(margin);await frame(seconds/2);const decodedEnd=await frame(seconds-margin);
-      return {duration:video.duration,decodedEnd,frameCallbacks:decodedEnd!==null,checkpoints:3};
+      // A sub-three-frame clip cannot provide three distinct decoded samples.
+      const points=seconds<3/fps?[seconds/2]:[margin,seconds/2,seconds-margin];
+      let decodedEnd=null;for(const at of points)decodedEnd=await frame(at);
+      return {duration:video.duration,decodedEnd,frameCallbacks:decodedEnd!==null,checkpoints:points.length};
     }finally{video.pause();video.removeAttribute('src');video.load();video.remove();URL.revokeObjectURL(url);}
   }
   return Object.freeze({verify});

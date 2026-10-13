@@ -59,21 +59,24 @@ window.VeyCutExporter = (() => {
     const ctx=canvas.getContext('2d',{alpha:false});
     const compositor=window.VeyCutCompositor;
     const prepared=new Map(),sources=new Map(),clipsById=new Map(spec.clips.map(c=>[c.id,c])),tracksById=new Map((spec.tracks||[]).map(t=>[t.id,t]));
-    let stream=null,recorder=null,destination=null,silence=null,animation=0,watchdog=0,bytes=0,chunks=[],failure=null;
+    let stream=null,captureTrack=null,recorder=null,destination=null,silence=null,animation=0,watchdog=0,bytes=0,chunks=[],failure=null;
     let recordingComplete=false,recordedFrom=null,recordedSeconds=0,maxSourceDrift=0,maxRenderGap=0,drawnFrames=0;
     const fail=error=>{failure=error;controller.abort(error);};
     userSignal.addEventListener('abort',userAbort,{once:true});
     const hide=()=>{if(document.hidden)fail(new Error('Export stopped because this tab became hidden.'));};document.addEventListener('visibilitychange',hide);
     const abort=()=>{for(const item of prepared.values())item.element.pause?.();};signal.addEventListener('abort',abort,{once:true});
     const checkRun=()=>{check(signal);if(failure)throw failure;if(!recordingComplete&&audio.state!=='running')throw Error('The audio clock stopped; export was cancelled to protect timing.');if(!recordingComplete&&stream?.getTracks().some(track=>track.readyState!=='live'))throw Error('An output media track ended before export completed.');};
-    function draw(time){
-      compositor.render(ctx,spec,time,sources);drawnFrames++;
+    function gains(time){
       for(const [id,item] of prepared){
         if(item.gain){
           const clip=clipsById.get(id),track=tracksById.get(clip.trackId)||{};
           item.gain.gain.setValueAtTime(compositor.audioGain(clip,time,track),audio.currentTime);
         }
       }
+    }
+    function draw(time){
+      compositor.render(ctx,spec,time,sources);drawnFrames++;gains(time);
+      captureTrack?.requestFrame();
     }
     async function recording(active){
       checkRun();
@@ -124,7 +127,7 @@ window.VeyCutExporter = (() => {
     }
     async function play(active){await Promise.all(active.map(clip=>{const item=prepared.get(clip.id);return item?.element.play&&!compositor.isHold(clip)?item.element.play():undefined;}));}
     function segment(begin,seconds,begun){return new Promise((resolve,reject)=>{
-      let lastTick=begun;
+      let lastTick=begun,lastPaint=Math.floor(begin*(spec.fps||LIMITS.fps));
       function stop(error){signal.removeEventListener('abort',abortSegment);cancelAnimationFrame(animation);error?reject(error):resolve();}
       const abortSegment=()=>stop(signal.reason instanceof Error?signal.reason:cancelled());signal.addEventListener('abort',abortSegment,{once:true});
       function tick(){try{
@@ -151,7 +154,9 @@ window.VeyCutExporter = (() => {
             }
           }
         }
-        draw(Math.min(begin+seconds-.000001,at));onProgress(.98*Math.min(1,at/duration));
+        const paintTime=Math.min(begin+seconds-.000001,at),frame=Math.floor(at*(spec.fps||LIMITS.fps));
+        if(frame>lastPaint||elapsed>=seconds-.004){draw(paintTime);lastPaint=frame;}else gains(paintTime);
+        onProgress(.98*Math.min(1,at/duration));
         if(elapsed>=seconds-.004){stop();return;}animation=requestAnimationFrame(tick);
       }catch(error){stop(error);}}animation=requestAnimationFrame(tick);
     });}
@@ -176,7 +181,12 @@ window.VeyCutExporter = (() => {
       // Prepare the real first frame before recording, so source preparation
       // cannot become a fake black frame at the head of the downloaded file.
       await prepare(.0000001);draw(0);
-      const canvasStream=canvas.captureStream(spec.fps||LIMITS.fps);stream=new MediaStream([...canvasStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
+      let canvasStream=canvas.captureStream(0);captureTrack=canvasStream.getVideoTracks()[0];
+      if(typeof captureTrack?.requestFrame!=='function'){
+        canvasStream.getTracks().forEach(track=>track.stop());captureTrack=null;
+        canvasStream=canvas.captureStream(spec.fps||LIMITS.fps);
+      }
+      stream=new MediaStream([...canvasStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
       recorder=new MediaRecorder(stream,{mimeType:supported.mime,videoBitsPerSecond:2000000,audioBitsPerSecond:128000});
       recorder.addEventListener('error',()=>fail(new Error('Browser recording failed.')));
       recorder.addEventListener('dataavailable',e=>{if(!e.data.size)return;bytes+=e.data.size;if(bytes>LIMITS.bytes){fail(new Error('Export exceeded the 256 MiB output limit.'));return;}chunks.push(e.data);});
@@ -190,19 +200,21 @@ window.VeyCutExporter = (() => {
           recorder.start(500);
           const firstFrames=()=>{
             draw(0);
-            canvasStream.getVideoTracks()[0].requestFrame?.();
             startupFrame=requestAnimationFrame(firstFrames);
           };
           firstFrames();
         },3000);
       } finally {cancelAnimationFrame(startupFrame);}recordedFrom=audio.currentTime;
       await recording(false);
-      const boundaries=[...new Set([0,duration,...spec.clips.flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)])])].sort((a,b)=>a-b);
+      // Generated text/shape changes need no decoder preparation. Keeping
+      // their cue boundaries inside one recording segment avoids hundreds of
+      // pause/resume cycles in a long captioned video.
+      const boundaries=[...new Set([0,duration,...spec.clips.filter(c=>!['text','shape'].includes(c.kind)).flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)])])].sort((a,b)=>a-b);
       for(let index=0;index<boundaries.length-1;index++){
         const begin=boundaries[index],seconds=boundaries[index+1]-begin;
         if(seconds<=0)continue;
         const active=await prepare(begin+.0000001);draw(begin);checkRun();
-        await recording(true);const begun=audio.currentTime;onState('recording');await play(active);await segment(begin,seconds,begun);await recording(false);
+        await recording(true);const begun=audio.currentTime;draw(begin);onState('recording');await play(active);await segment(begin,seconds,begun);await recording(false);
         for(const item of prepared.values())item.element.pause?.();
       }
       checkRun();await event(recorder,'stop',signal,()=>recorder.stop(),5000);checkRun();
@@ -217,7 +229,7 @@ window.VeyCutExporter = (() => {
       if(blob.type.startsWith('video/webm'))blob=await window.VeyCutWebmMetadata.withDuration(blob,recordedSeconds);
       if(blob.size>LIMITS.bytes)throw Error('Final output exceeded the 256 MiB output limit.');
       const verification=await window.VeyCutOutputCheck.verify(blob,{width:spec.width,height:spec.height,seconds:duration,fps:spec.fps||LIMITS.fps,signal});checkRun();
-      onProgress(1);return {blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:spec.fps||LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime',verification,timing:{recordedSeconds,maxSourceDrift,maxRenderGap,drawnFrames}};
+      onProgress(1);return {blob,mimeType:blob.type,width:spec.width,height:spec.height,requestedFps:spec.fps||LIMITS.fps,timelineSeconds:duration,audioSampleRate:audio.sampleRate,precision:'realtime',verification,timing:{recordedSeconds,maxSourceDrift,maxRenderGap,drawnFrames,captureMode:captureTrack?'manual':'automatic'}};
     } finally {
       clearTimeout(watchdog);cancelAnimationFrame(animation);document.removeEventListener('visibilitychange',hide);signal.removeEventListener('abort',abort);userSignal.removeEventListener('abort',userAbort);for(const item of prepared.values())item.element.pause?.();if(recorder&&recorder.state!=='inactive'){try{recorder.stop();}catch{}}
       if(silence){silence.stop();silence.disconnect();}if(stream)stream.getTracks().forEach(track=>track.stop());if(destination)destination.stream.getTracks().forEach(track=>track.stop());for(const id of [...prepared.keys()])dispose(id);if(audio.state!=='closed')await audio.close().catch(()=>{});chunks=[];
