@@ -23,6 +23,10 @@ jobs:
           playwright-cli run-code --filename=scripts/veycut_web_hosted_diagnostic.js
           cat hosted-diagnostic.json
           playwright-cli run-code --filename=scripts/veycut_web_hosted_check.js
+          if ! command -v ffmpeg > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
           ffmpeg -v error -xerror -i hosted-frame.mp4 -f null -
           python3 - <<'PYHOST'
           import json, subprocess
