@@ -1,0 +1,77 @@
+{
+  "sourceCommit": "8f68aaa",
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38391119748",
+  "encodedOutput": {
+    "status": "passed",
+    "results": [
+      {
+        "speed": 0.25,
+        "seconds": 32,
+        "frames": 768,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      },
+      {
+        "speed": 0.5,
+        "seconds": 16,
+        "frames": 384,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      },
+      {
+        "speed": 1.5,
+        "seconds": 5.333333333333333,
+        "frames": 128,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      },
+      {
+        "speed": 2,
+        "seconds": 4,
+        "frames": 96,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      },
+      {
+        "speed": 4,
+        "seconds": 2,
+        "frames": 48,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      },
+      {
+        "speed": 1.5,
+        "seconds": 5.010424333333334,
+        "frames": 121,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      },
+      {
+        "speed": 2,
+        "seconds": 4,
+        "frames": 96,
+        "leftPitch": 880,
+        "rightPitch": 660,
+        "fullDecode": true
+      }
+    ],
+    "unsupportedRangeRefused": true,
+    "cancellationDownloaded": false,
+    "decodeAbortCleanup": {
+      "inputDispose": 1,
+      "pitchClear": 1,
+      "returnCalled": 1
+    },
+    "retrySucceeded": true,
+    "lateBitmapClosed": true,
+    "scope": "Short synthetic WAV through real Web edits and H.264/AAC output; not real speech, speed ramps or native Mac package equivalence."
+  },
+  "sourceAvailability": "Unmodified npm DSP modules are SHA-512 pinned; preferred TypeScript sources are bundled from release commit d9e39a7ddcf74c7a145bbba45856f30068c82b79.",
+  "scope": "Real Web application edits and H.264/AAC output from synthetic stereo WAV. Not real speech, ramps, long pitch sessions or released-Mac equivalence."
+}
