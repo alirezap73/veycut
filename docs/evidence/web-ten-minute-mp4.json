@@ -1,0 +1,50 @@
+{
+  "sourceCommit": "33aad12035b0b16512c0571164f8db7523b2778e",
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38339770104",
+  "realFootage": {
+    "status": "passed",
+    "seconds": 600,
+    "fullDecode": true,
+    "videoFrames": 14405,
+    "lastVideoPts": 600.0316,
+    "maxVideoGap": 0.06836700000002338,
+    "audioEnvelopeCorrelation": 0.9984215655260444,
+    "pictureCheckpoints": [
+      {
+        "seconds": 15,
+        "meanPixelError": 4.194490740740741
+      },
+      {
+        "seconds": 90,
+        "meanPixelError": 5.537013888888889
+      },
+      {
+        "seconds": 180,
+        "meanPixelError": 24.088819444444443
+      },
+      {
+        "seconds": 270,
+        "meanPixelError": 12.01349537037037
+      },
+      {
+        "seconds": 570,
+        "meanPixelError": 7.291875
+      }
+    ],
+    "streams": [
+      {
+        "type": "video",
+        "codec": "h264"
+      },
+      {
+        "type": "audio",
+        "codec": "opus"
+      }
+    ],
+    "sourceSHA256": "328253280a05e6b14a92f1f43d818d9b7d38ab5d3f6d5d98606198fd3daef2ff",
+    "fixture": "Tears of Steel, Blender Foundation / Mango project, CC BY 3.0; live-action and CGI, original 1080p source; licensed excerpt for testing only; https://mango.blender.org/about/",
+    "scope": "One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers."
+  },
+  "qualityChecks": "Compact 2 Mbps, Balanced 5 Mbps and Detailed 8 Mbps each recorded with the requested encoder options and fully decoded. Detailed 600-second request refused before encoder creation or download.",
+  "scope": "One 1080p live-action/CGI source, 640x360 requested 24 fps Chromium MP4 output. Quality tests use short generated media. Other camera codecs/browsers, AAC recording and offline frame-exact output are not established."
+}
