@@ -1,0 +1,72 @@
+{
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38397562462",
+  "testCommit": "99753e75a913e0177b317a6472441321e143ccc1",
+  "report": {
+    "status": "passed",
+    "build": {
+      "version": "0.3.1",
+      "channel": "web-preview",
+      "sourceCommit": "bcc18e6f231a3756e6144ff48a27d34db57775d9",
+      "validatedOn": "GitHub Actions"
+    },
+    "tempo": 2,
+    "seconds": 600,
+    "windows": 600,
+    "checkpoints": [
+      {
+        "second": 1,
+        "left": {
+          "frequency": 878,
+          "rms": 0.2828413142358734
+        },
+        "right": {
+          "frequency": 660,
+          "rms": 0.1767759104488429
+        }
+      },
+      {
+        "second": 59,
+        "left": {
+          "frequency": 878,
+          "rms": 0.28284131804944596
+        },
+        "right": {
+          "frequency": 658,
+          "rms": 0.17677590640945295
+        }
+      },
+      {
+        "second": 299,
+        "left": {
+          "frequency": 878,
+          "rms": 0.2828423912697257
+        },
+        "right": {
+          "frequency": 658,
+          "rms": 0.17677655270315323
+        }
+      },
+      {
+        "second": 599,
+        "left": {
+          "frequency": 878,
+          "rms": 0.28209459290940425
+        },
+        "right": {
+          "frequency": 658,
+          "rms": 0.17623320250842167
+        }
+      }
+    ],
+    "stats": {
+      "inputFrames": 57610240,
+      "processedFrames": 28803648,
+      "targetFrames": 28800000,
+      "peakBufferedFrames": 9152,
+      "peakCachedBytes": 913152,
+      "tempo": 2
+    },
+    "wallSeconds": 44.11440000000001,
+    "scope": "Synthetic ten-minute PCM DSP stream; not a ten-minute encoded pitch export, real speech, speed ramps or native package equivalence."
+  }
+}
