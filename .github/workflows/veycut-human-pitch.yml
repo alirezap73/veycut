@@ -1,5 +1,8 @@
 name: Human speech mapped pitch retention
 on:
+  push:
+    branches: [development/web-ramp-parity]
+    paths: ['scripts/native_parity_human_pitch.py', '.github/workflows/veycut-human-pitch.yml']
   workflow_dispatch:
     inputs:
       export_run:
@@ -21,7 +24,7 @@ jobs:
       - name: Require completed actual comparison outputs
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPORT_RUN: ${{ inputs.export_run }}
+          EXPORT_RUN: ${{ inputs.export_run || '38413920519' }}
         run: |
           set -euo pipefail
           for attempt in {1..160}; do
@@ -43,13 +46,13 @@ jobs:
         with:
           name: Native-Web-visual-comparison
           path: output/native-parity
-          run-id: ${{ inputs.export_run }}
+          run-id: ${{ inputs.export_run || '38413920519' }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v5
         with:
           name: Human-speech-source-fixtures
           path: output/human-speech
-          run-id: ${{ inputs.export_run }}
+          run-id: ${{ inputs.export_run || '38413920519' }}
           github-token: ${{ github.token }}
       - name: Decode and measure actual human voiced pitch
         run: |
