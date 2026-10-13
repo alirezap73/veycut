@@ -2,7 +2,7 @@ name: Verify public media output
 on:
   push:
     branches: [validation/web-pitch-hosted]
-    paths: ['.github/workflows/veycut-web-hosted-pitch.yml', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_footage_check.js', 'scripts/verify_web_footage.py']
+    paths: ['.github/workflows/veycut-web-hosted-pitch.yml', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_footage_check.js', 'scripts/verify_web_footage.py', 'scripts/veycut_web_pitch_long_stream_check.js']
   workflow_dispatch:
 permissions:
   contents: read
@@ -63,6 +63,15 @@ jobs:
           expected=json.loads((Path(os.environ['RUNNER_TEMP'])/'public-build.json').read_text())
           assert json.load(open('output/playwright/footage-report.json'))['build']==expected
           PYBUILD
+          playwright-cli run-code --filename=scripts/veycut_web_pitch_long_stream_check.js
+          python3 - <<'PYLONG'
+          import json,os
+          from pathlib import Path
+          expected=json.loads((Path(os.environ['RUNNER_TEMP'])/'public-build.json').read_text())
+          report=json.load(open('output/playwright/pitch-long-stream.json'))
+          assert report['status']=='passed' and report['seconds']==600 and report['windows']==600 and report['build']==expected
+          print(json.dumps(report))
+          PYLONG
           playwright-cli close
       - uses: actions/upload-artifact@v7
         if: always()
