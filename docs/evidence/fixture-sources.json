@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "version": "0.3.1",
+  "status": "sources selected; server probe and application checks pending",
+  "sourcePage": "https://huggingface.co/datasets/humyn-labs/APAC-Egocentric-Residential-Voiceover",
+  "revision": "aa83686ce5ed67808dc1dd2bafb78c581cd4e036",
+  "license": "CC-BY-4.0",
+  "licenseURL": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "HumynLabs, APAC Egocentric Residential (with Voiceover), 2026",
+  "provenance": "Publisher identifies videos/ files as original captures, renamed during curation. This is a publisher provenance statement, not independent proof of every capture/processing step. Our downloaded inputs remain byte-identical, with full LFS SHA-256 checks. Preview and captioned derivatives are excluded.",
+  "scope": "Narrated camera captures with real wearer speech. No speaker identification. Variable frame timing, device metadata, rotation and edit lists must be measured, never inferred from filenames or nominal fps. No native/Web equivalence is claimed by a fixture probe.",
+  "fixtures": [
+    {
+      "id": "camera-mov-narration",
+      "path": "videos/05_gardening_raw.mov",
+      "file": "camera-mov-narration.mov",
+      "bytes": 371151335,
+      "sha256": "3fc0a8cd1659c7f8ebf23bd06822c570fcc51af0b8d397f533d988f49eca5e7c",
+      "publisherCodec": "h264",
+      "publisherDuration": 185.67,
+      "captionPath": "captions/05_gardening.vtt",
+      "requiredVideoCodec": "h264",
+      "requiredAudioCodec": "aac",
+      "testTrim": {"in": 10.137931, "out": 16.137931},
+      "coverage": ["unchanged MOV", "real narration", "non-keyframe trim", "source timing probe"]
+    },
+    {
+      "id": "camera-vfr-candidate",
+      "path": "videos/10_peeling_cutting_raw.mp4",
+      "file": "camera-vfr-candidate.mp4",
+      "bytes": 797391366,
+      "sha256": "6e9f5ffa4910927d0db244ceccb09e8790301940c353d58e22c9cf64d89a5ef5",
+      "publisherCodec": "h264",
+      "publisherDuration": 184.06,
+      "captionPath": "captions/10_peeling_cutting.vtt",
+      "requiredVideoCodec": "h264",
+      "requiredAudioCodec": "aac",
+      "testTrim": {"in": 10.137931, "out": 16.137931},
+      "coverage": ["unchanged MP4", "real narration", "candidate variable timestamps; not yet verified"]
+    }
+  ]
+}

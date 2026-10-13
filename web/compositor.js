@@ -211,30 +211,77 @@ window.VeyCutCompositor = (() => {
     const width=geometry.width,height=geometry.height;
     if(!(Number.isInteger(width)&&Number.isInteger(height)&&width>0&&height>0&&width*height*4===pixels.length))
       throw new Error('Spatial effect requires exact image dimensions.');
-    if(effect.id==='concat.pixelate'){
-      const size=clamp(Math.round(effect.p.size),2,64);
-      for(let y=0;y<height;y+=size)for(let x=0;x<width;x+=size){
-        const edgeX=Math.min(x+size,width),edgeY=Math.min(y+size,height),sum=[0,0,0,0];
-        for(let yy=y;yy<edgeY;yy++)for(let xx=x;xx<edgeX;xx++){
-          const i=(yy*width+xx)*4;for(let c=0;c<4;c++)sum[c]+=pixels[i+c];
+    if(effect.id==='concat.pixelate'||effect.id==='concat.gaussian-blur'){
+      // Native spatial packages filter scene-linear, premultiplied light.
+      // Premultiply before bilinear interpolation: transparent RGB is not light.
+      const light=new Float32Array(pixels.length);
+      for(let i=0;i<pixels.length;i+=4){const alpha=pixels[i+3]/255;light[i+3]=alpha;for(let c=0;c<3;c++)light[i+c]=Math.pow(pixels[i+c]/255,2.4)*alpha;}
+      const read=(data,w,h,x,y,result)=>{
+        const xx=x-.5,yy=y-.5,firstX=Math.floor(xx),firstY=Math.floor(yy),fx=xx-firstX,fy=yy-firstY;
+        const x0=clamp(firstX,0,w-1),x1=clamp(firstX+1,0,w-1),y0=clamp(firstY,0,h-1),y1=clamp(firstY+1,0,h-1);
+        const a=(y0*w+x0)*4,b=(y0*w+x1)*4,c=(y1*w+x0)*4,d=(y1*w+x1)*4;
+        for(let channel=0;channel<4;channel++)result[channel]=(data[a+channel]*(1-fx)+data[b+channel]*fx)*(1-fy)+(data[c+channel]*(1-fx)+data[d+channel]*fx)*fy;
+        return result;
+      };
+      const write=(at,rgba)=>{const alpha=clamp(rgba[3],0,1);for(let c=0;c<3;c++)pixels[at+c]=255*Math.pow(clamp(rgba[c]/Math.max(alpha,1e-6),0,1),1/2.4);pixels[at+3]=alpha*255;};
+      const tap=new Float64Array(4),sum=new Float64Array(4);
+      if(effect.id==='concat.pixelate'){
+        const size=clamp(Math.round(effect.p.size),2,64);
+        for(let y=0;y<height;y+=size)for(let x=0;x<width;x+=size){
+          sum.fill(0);
+          // Sixteen bilinear taps at the native square's quarter-cell centres,
+          // including clamped taps beyond a partial block at the frame edge.
+          for(let yy=0;yy<4;yy++)for(let xx=0;xx<4;xx++){
+            read(light,width,height,x+(xx+.5)*size/4,y+(yy+.5)*size/4,tap);
+            for(let c=0;c<4;c++)sum[c]+=tap[c]/16;
+          }
+          for(let yy=y;yy<Math.min(y+size,height);yy++)for(let xx=x;xx<Math.min(x+size,width);xx++)write((yy*width+xx)*4,sum);
         }
-        const count=(edgeX-x)*(edgeY-y);
-        for(let yy=y;yy<edgeY;yy++)for(let xx=x;xx<edgeX;xx++){
-          const i=(yy*width+xx)*4;for(let c=0;c<4;c++)pixels[i+c]=sum[c]/count;
+      }else{
+        const sigma=clamp(effect.p.radius,1,50),reach=3*sigma,pairs=Math.ceil(reach)+1;
+        const shrink=Math.pow(2,Math.floor(Math.log2(Math.max(1,sigma/3))));
+        const acrossWidth=Math.ceil(width/shrink),across=new Float32Array(acrossWidth*height*4);
+        // Native across() reads source pixel centres through a +/-three-sigma
+        // Gaussian. Pair weighting equals these individual premultiplied taps.
+        const weights=centre=>{
+          const first=Math.floor(centre-reach-.5)+.5,result=[];let total=0;
+          for(let k=0;k<2*pairs;k++){const at=first+k,w=Math.exp(-(at-centre)*(at-centre)/(2*sigma*sigma));result.push([at,w]);total+=w;}
+          return result.map(([at,w])=>[at,w/total]);
+        };
+        for(let x=0;x<acrossWidth;x++){
+          const taps=weights((x+.5)*width/acrossWidth);
+          for(let y=0;y<height;y++){
+            sum.fill(0);for(const [at,w] of taps){read(light,width,height,at,y+.5,tap);for(let c=0;c<4;c++)sum[c]+=tap[c]*w;}
+            across.set(sum,(y*acrossWidth+x)*4);
+          }
+        }
+        const full=width/acrossWidth<1.5,downHeight=full?height:Math.ceil(height/shrink);
+        const down=new Float32Array(acrossWidth*downHeight*4);
+        for(let y=0;y<downHeight;y++){
+          const taps=weights((y+.5)*height/downHeight);
+          for(let x=0;x<acrossWidth;x++){
+            sum.fill(0);for(const [at,w] of taps){read(across,acrossWidth,height,x+.5,at,tap);for(let c=0;c<4;c++)sum[c]+=tap[c]*w;}
+            down.set(sum,(y*acrossWidth+x)*4);
+          }
+        }
+        const backX=new Float64Array(4),backY=new Float64Array(4),backXY=new Float64Array(4);
+        for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+          const atX=(x+.5)*acrossWidth/width-.5,atY=(y+.5)*downHeight/height-.5;
+          const insideX=clamp(atX,0,acrossWidth-1),insideY=clamp(atY,0,downHeight-1);
+          read(down,acrossWidth,downHeight,insideX+.5,insideY+.5,sum);
+          // The native final spread() continues the downsampled edge's slope
+          // rather than flattening the outer half-pixel with clamp-to-edge.
+          const overX=atX-insideX,overY=atY-insideY;
+          if(overX||overY){
+            const dx=Math.abs(overX),dy=Math.abs(overY),bx=-Math.sign(overX),by=-Math.sign(overY);
+            read(down,acrossWidth,downHeight,insideX+bx+.5,insideY+.5,backX);
+            read(down,acrossWidth,downHeight,insideX+.5,insideY+by+.5,backY);
+            read(down,acrossWidth,downHeight,insideX+bx+.5,insideY+by+.5,backXY);
+            for(let c=0;c<4;c++)sum[c]+=(sum[c]-backX[c])*dx+(sum[c]-backY[c])*dy+(sum[c]-backX[c]-backY[c]+backXY[c])*dx*dy;
+          }
+          write((y*width+x)*4,sum);
         }
       }
-    }else if(effect.id==='concat.gaussian-blur'){
-      if(!blurScratch){blurScratch={source:document.createElement('canvas'),target:document.createElement('canvas')};}
-      const {source,target}=blurScratch;
-      if(source.width!==width||source.height!==height){source.width=target.width=width;source.height=target.height=height;}
-      const input=source.getContext('2d',{willReadFrequently:true}),output=target.getContext('2d',{willReadFrequently:true});
-      if(!('filter' in output))throw new Error('This browser cannot render Gaussian blur with Canvas filters.');
-      input.putImageData(new ImageData(pixels,width,height),0,0);
-      output.clearRect(0,0,width,height);
-      output.filter=`blur(${clamp(effect.p.radius,1,50)}px)`;
-      output.drawImage(source,0,0);
-      output.filter='none';
-      pixels.set(output.getImageData(0,0,width,height).data);
     }else if(effect.id==='concat.sharpen'){
       // A separable five-tap Gaussian gives the same 5x5 unsharp-mask
       // footprint as the native effect without 25 reads per output pixel.
@@ -368,39 +415,65 @@ window.VeyCutCompositor = (() => {
   function text(ctx, clip, spec, time) {
     const style=clip.text || clip.textStyle;
     if (!style || !style.content) return;
-    const font=Math.max(1,number(style.fontSize,.055)*spec.height);
-    ctx.font=`${style.italic?'italic ':''}${number(style.fontWeight,600)} ${font}px ${style.fontFamily || 'system-ui, sans-serif'}`;
-    const align=style.align || 'center';ctx.textAlign=align;ctx.textBaseline='middle';
-    ctx.direction=/[\u0590-\u08ff]/.test(style.content)?'rtl':'ltr';
-    const max=number(style.maxWidth,0)>0?style.maxWidth*spec.width:spec.width*.9;
+    const font=Math.max(1,number(style.fontSize,.09)*spec.height);
+    ctx.font=`${style.italic?'italic ':''}${number(style.fontWeight,700)} ${font}px ${style.fontFamily || '"Cabinet Grotesk", sans-serif'}`;
+    const align=style.align || 'center';ctx.textAlign='left';ctx.textBaseline='alphabetic';
+    // Native paragraphs choose their base direction from the first strong
+    // character. Digits and punctuation do not turn mixed English into RTL.
+    const direction=paragraph=>{
+      const strong=[...paragraph].find(character=>/[\p{Letter}\u200e\u200f]/u.test(character));
+      return strong && (strong==='\u200f' || /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}\p{Script=Samaritan}\p{Script=Mandaic}]/u.test(strong))?'rtl':'ltr';
+    };
+    const maxWidth=Math.max(0,number(style.maxWidth,0))*spec.width;
+    const maxHeight=Math.max(0,number(style.maxHeight,0))*spec.height;
+    // Sized native boxes already include their plate's padding on that axis.
+    const padX=style.background && maxWidth<=0?Math.max(0,number(style.backgroundPaddingX,.0315))*spec.height:0;
+    const padY=style.background && maxHeight<=0?Math.max(0,number(style.backgroundPaddingY,.018))*spec.height:0;
+    const wrap=maxWidth>0?maxWidth:Math.max(font,spec.width*(align==='center'?1:.5)-2*padX);
     const rows=[];
-    for (const paragraph of style.content.split('\n')) {
+    const paragraphs=style.content.replace(/\r\n/g,'\n').split('\n');
+    if(paragraphs.at(-1)==='' && style.content.endsWith('\n'))paragraphs.pop();
+    for (const paragraph of paragraphs) {
+      const dir=direction(paragraph);ctx.direction=dir;
       let row='';
-      for (const word of paragraph.split(' ')) {
+      for (const word of paragraph.trim().split(' ')) {
         const next=row?row+' '+word:word;
-        if (row && ctx.measureText(next).width>max) {rows.push(row);row=word;} else row=next;
+        if (row && ctx.measureText(next).width>wrap) {rows.push({content:row,direction:dir,width:ctx.measureText(row).width});row=word;} else row=next;
       }
-      rows.push(row);
+      rows.push({content:row,direction:dir,width:ctx.measureText(row).width});
     }
-    const spacing=font*Math.max(.5,number(style.lineHeight,1.3));
-    const x=spec.width*.5, y=spec.height*.5;
-    const width=style.maxWidth>0?max:Math.min(max,Math.max(...rows.map(row=>ctx.measureText(row).width)));
-    const left=align==='left'?x:align==='right'?x-width:x-width/2;
-    const padX=number(style.backgroundPaddingX,.015)*spec.height;
-    const padY=number(style.backgroundPaddingY,.01)*spec.height;
-    const height=Math.max(rows.length*spacing,number(style.maxHeight,0)*spec.height);
+    const wordsWidth=Math.max(0,...rows.map(row=>row.width));if(wordsWidth<=0)return;
+    // Shared font's em metrics, rather than the height of a particular glyph
+    // or one extra line pitch, determine native title and background height.
+    const metrics=ctx.measureText('Hg');
+    const ascent=number(metrics.fontBoundingBoxAscent,font*.8),descent=number(metrics.fontBoundingBoxDescent,font*.2);
+    const pitch=font*Math.max(.5,number(style.lineHeight,1.2));
+    const wordsHeight=(rows.length-1)*pitch+ascent+descent;
+    const boxWidth=Math.max(maxWidth,wordsWidth),boxHeight=Math.max(maxHeight,wordsHeight);
+    const outerWidth=boxWidth+2*padX,outerHeight=boxHeight+2*padY;
+    const x=spec.width*.5,y=spec.height*.5;
+    const outerLeft=align==='left'?x:align==='right'?x-outerWidth:x-outerWidth/2;
+    const left=outerLeft+padX,top=y-outerHeight/2+padY+(boxHeight-wordsHeight)/2;
     ctx.globalAlpha*=clamp(number(style.opacity,1),0,1);
     if (style.background) {
       ctx.fillStyle=style.background;ctx.beginPath();
-      ctx.roundRect(left-padX,y-height/2-padY,width+2*padX,height+2*padY,
-        Math.max(0,number(style.backgroundRadius,.01)*spec.height));ctx.fill();
+      ctx.roundRect(outerLeft,y-outerHeight/2,outerWidth,outerHeight,
+        Math.max(0,number(style.backgroundRadius,.0135)*spec.height));ctx.fill();
     }
     ctx.lineJoin='round';ctx.fillStyle=style.color || '#fff';
-    ctx.shadowColor=style.shadow?'#000':'transparent';ctx.shadowBlur=style.shadow?font*.08:0;
+    // Native shadow offset/alpha/radius; Canvas and tiny-skia blur kernels
+    // still require an actual output comparison, rather than assumed equality.
+    ctx.shadowColor=style.shadow?'rgba(0,0,0,0.5882352941176471)':'transparent';
+    ctx.shadowOffsetX=style.shadow?font*.05:0;ctx.shadowOffsetY=style.shadow?font*.07:0;
+    ctx.shadowBlur=style.shadow?Math.max(1,Math.round(font*.04)):0;
     rows.forEach((row,index)=>{
-      const at=y+(index-(rows.length-1)/2)*spacing;
-      if (style.strokeWidth>0) {ctx.strokeStyle=style.strokeColor || '#000';ctx.lineWidth=style.strokeWidth*spec.height;ctx.strokeText(row,x,at,max);}
-      ctx.fillText(row,x,at,max);
+      ctx.direction=row.direction;
+      const indent=align==='left'?0:align==='right'?boxWidth-row.width:(boxWidth-row.width)/2;
+      const baseline=top+ascent+index*pitch;
+      if (style.strokeWidth>0) {ctx.strokeStyle=style.strokeColor || '#000';ctx.lineWidth=2*style.strokeWidth*spec.height;ctx.strokeText(row.content,left+indent,baseline);}
+      // A word wider than its box remains intact and clips at the frame edge;
+      // Canvas maxWidth would squeeze it, changing the native glyph geometry.
+      ctx.fillText(row.content,left+indent,baseline);
     });
   }
   function legacyCaptions(ctx,spec,time) {
@@ -412,23 +485,64 @@ window.VeyCutCompositor = (() => {
     text(ctx,{text:{content,fontSize:.037,fontWeight:600,color:'#fff',strokeWidth:.005,strokeColor:'#000',maxWidth:.86}},spec,time);
     ctx.restore();
   }
+  const linearFrames=new WeakMap();
+  const encodedLight=Float32Array.from({length:256},(_,level)=>Math.pow(level/255,2.4));
+  function blendPixels(under,source,mode='normal',opacity=1){
+    if(under.length*4!==source.length*3||!Object.hasOwn(blend,mode)||!Number.isFinite(opacity))throw Error('Invalid linear blend buffer or mode.');
+    opacity=clamp(opacity,0,1);
+    for(let pixel=0,at=0;at<source.length;pixel+=3,at+=4){
+      const alpha=source[at+3]/255*opacity;if(alpha<=0)continue;
+      for(let channel=0;channel<3;channel++){
+        const colour=encodedLight[source[at+channel]],ground=under[pixel+channel],over=colour*alpha;
+        if(mode==='multiply')under[pixel+channel]=over*ground+ground*(1-alpha);
+        else if(mode==='screen')under[pixel+channel]=over*(1-ground)+ground;
+        else if(mode==='add')under[pixel+channel]=over+ground;
+        else if(mode==='lighten')under[pixel+channel]=Math.max(colour,ground)*alpha+ground*(1-alpha);
+        else if(mode==='darken')under[pixel+channel]=Math.min(colour,ground)*alpha+ground*(1-alpha);
+        else under[pixel+channel]=over+ground*(1-alpha);
+      }
+    }
+    return under;
+  }
   function render(ctx,spec,time,sources) {
     spec=resolveTransitions(spec);
+    const destination=ctx,linear=typeof ctx.getImageData==='function'&&typeof ctx.putImageData==='function';
+    // Text-only arithmetic mocks have no actual canvas. A real renderer must
+    // have pixel access; it cannot silently use display-space blending.
+    if(ctx.canvas&&!linear)throw Error('SDR composition requires readable Canvas pixels.');
+    let scratch=null,paint=ctx;
+    if(linear){
+      scratch=linearFrames.get(ctx);
+      if(!scratch||scratch.width!==spec.width||scratch.height!==spec.height){
+        const canvas=scratch?.canvas||document.createElement('canvas');canvas.width=spec.width;canvas.height=spec.height;
+        const layer=canvas.getContext('2d',{willReadFrequently:true});if(!layer)throw Error('Layer composition canvas is unavailable.');
+        scratch={canvas,paint:layer,width:spec.width,height:spec.height,light:new Float32Array(spec.width*spec.height*3),result:ctx.createImageData?ctx.createImageData(spec.width,spec.height):ctx.getImageData(0,0,spec.width,spec.height)};
+        linearFrames.set(ctx,scratch);
+      }
+      scratch.light.fill(0);paint=scratch.paint;
+    }
     ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
     ctx.fillStyle='#000';ctx.fillRect(0,0,spec.width,spec.height);
     try {
     const tracks=spec.tracks || [];
     const clips=spec.clips.filter(clip=>clip.kind!=='audio' && time>=start(clip) && time<start(clip)+duration(clip))
       .slice().sort((a,b)=>(a[lane]??tracks.findIndex(track=>track.id===a.trackId)*2)-(b[lane]??tracks.findIndex(track=>track.id===b.trackId)*2));
-    const retained=stillCache.get(ctx), active=new Set(clips.map(clip=>clip.id));
+    const retained=stillCache.get(paint), active=new Set(clips.map(clip=>clip.id));
     if(retained)for(const id of retained.keys())if(!active.has(id))retained.delete(id);
-    for (const clip of clips) {
-      const track=tracks.find(track=>track.id===clip.trackId);
-      if (track?.visible===false || clip.hidden) continue;
+    for (const original of clips) {
+      const track=tracks.find(track=>track.id===original.trackId);
+      if (track?.visible===false || original.hidden) continue;
+      // Native title opacity multiplies the finished title image once, not
+      // each overlapping background/outline/glyph drawing operation.
+      const style=original.text||original.textStyle;
+      const ownOpacity=original.kind==='text'?clamp(number(style?.opacity,1),0,1):1;
+      const clip=linear&&original.kind==='text'?{...original,text:{...style,opacity:1}}:original;
+      const ctx=paint;
+      if(linear){ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,spec.width,spec.height);}
       ctx.save();
       try {
-        ctx.globalAlpha=opacityAt(clip,time);
-        ctx.globalCompositeOperation=blend[clip.blend || ''] || 'source-over';
+        ctx.globalAlpha=linear?1:opacityAt(clip,time);
+        ctx.globalCompositeOperation=linear?'source-over':blend[clip.blend || ''] || 'source-over';
         const x=spec.width*(.5+valueAt(clip,'offsetX',time));
         const y=spec.height*(.5+valueAt(clip,'offsetY',time));
         ctx.translate(x,y);ctx.rotate(valueAt(clip,'rotation',time)*Math.PI/180);
@@ -447,15 +561,21 @@ window.VeyCutCompositor = (() => {
         }
         else {
           const source=sources.get(clip.id);
-          if (!source) throw new Error('No prepared visual source for '+clip.id);
-          const canvas=layerCanvas(ctx,clip,source,spec,time);
-          ctx.drawImage(canvas,-canvas.width/2,-canvas.height/2);
+          if (!source) throw Error('No prepared visual source for '+clip.id);
+          const canvas=layerCanvas(ctx,clip,source,spec,time);ctx.drawImage(canvas,-canvas.width/2,-canvas.height/2);
         }
       } finally {ctx.restore();}
+      if(linear)blendPixels(scratch.light,ctx.getImageData(0,0,spec.width,spec.height).data,original.blend||'normal',opacityAt(original,time)*ownOpacity);
     }
-    legacyCaptions(ctx,spec,time);
+    if(linear){
+      paint.setTransform(1,0,0,1,0,0);paint.clearRect(0,0,spec.width,spec.height);paint.globalAlpha=1;paint.globalCompositeOperation='source-over';
+      legacyCaptions(paint,spec,time);blendPixels(scratch.light,paint.getImageData(0,0,spec.width,spec.height).data);
+      const pixels=scratch.result.data;
+      for(let pixel=0,at=0;at<pixels.length;pixel+=3,at+=4){for(let c=0;c<3;c++)pixels[at+c]=255*Math.pow(clamp(scratch.light[pixel+c],0,1),1/2.4);pixels[at+3]=255;}
+      destination.putImageData(scratch.result,0,0);
+    }else legacyCaptions(ctx,spec,time);
     } finally {ctx.restore();}
   }
-  return Object.freeze({render,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,speedAt,timelineTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
+  return Object.freeze({render,blendPixels,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,speedAt,timelineTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
     supportedEffects:Object.freeze([...effects]),supportedBlends:Object.freeze(Object.keys(blend)),shapeKinds});
 })();

@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "version": "0.3.1",
+  "status": "authoritative source selected; GitHub extraction and application/native comparison pending",
+  "source": "LibriSpeech ASR corpus, OpenSLR SLR12, test-clean split",
+  "sourcePage": "https://www.openslr.org/12/",
+  "archiveURL": "https://www.openslr.org/resources/12/test-clean.tar.gz",
+  "archiveMirrors": [
+    "https://openslr.trmal.net/resources/12/test-clean.tar.gz",
+    "https://openslr.elda.org/resources/12/test-clean.tar.gz"
+  ],
+  "archiveMD5": "32fa31d27d2e1cad72775fee3f4849a9",
+  "checksumSource": "https://www.openslr.org/resources/12/md5sum.txt",
+  "license": "CC-BY-4.0",
+  "licenseURL": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "LibriSpeech, Vassil Panayotov, Daniel Povey and collaborators; read audiobook recordings from LibriVox, distributed by OpenSLR, 2015.",
+  "provenance": "Documented human-read English audiobook corpus. FLAC members are retained unchanged from the publisher archive; corpus recordings were segmented/aligned from LibriVox recordings before distribution. They are not untouched microphone capture files. Publisher transcript is retained for each selected member.",
+  "selection": "First two archive members between 20.137931 and 25 seconds, from distinct speaker IDs, at least 16000Hz mono; selection is deterministic in archive order. Actual member names and source SHA-256 values are recorded by the server extraction report.",
+  "maxArchiveBytes": 419430400,
+  "maxMemberBytes": 4000000,
+  "derivative": {
+    "sourceStartSeconds": 0.137931,
+    "durationSeconds": 20,
+    "format": "WAV PCM signed 16-bit, stereo 48000Hz",
+    "modifications": "Fractional trim, decoding, resampling and mono-to-stereo duplication only. No generated speech, voice model, denoising, normalization, silence padding or remote transcription service. Original FLAC stays available separately."
+  },
+  "scope": "Human-source provenance and deterministic fixtures only. Source membership, human transcription agreement, perceptual quality and output retention are separate checks. MD5 is the publisher's archive integrity identifier; newly measured SHA-256 hashes provide reproducibility rather than a pre-existing publisher SHA-256 guarantee."
+}

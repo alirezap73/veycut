@@ -1,0 +1,66 @@
+name: Human speech mapped pitch retention
+on:
+  push:
+    branches: [development/web-ramp-parity]
+    paths: ['scripts/native_parity_human_pitch.py', '.github/workflows/veycut-human-pitch.yml']
+  workflow_dispatch:
+    inputs:
+      export_run:
+        description: Complete actual native and Web exports from the comparison workflow
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Require completed actual comparison outputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPORT_RUN: ${{ inputs.export_run || '38413920519' }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..160}; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EXPORT_RUN" > "$RUNNER_TEMP/export-run.json"
+            state=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/export-run.json'))['status'])")
+            if [ "$state" = completed ]; then break; fi
+            sleep 15
+          done
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'export-run.json').read_text())
+          assert run['status']=='completed'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert run['path']=='.github/workflows/veycut-native-web-parity.yml'
+          print('Export run conclusion:', run['conclusion'], '; individual file identity and measurements are checked separately. No failed comparison is relabelled as passing.')
+          PY
+      - uses: actions/download-artifact@v5
+        with:
+          name: Native-Web-visual-comparison
+          path: output/native-parity
+          run-id: ${{ inputs.export_run || '38413920519' }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v5
+        with:
+          name: Human-speech-source-fixtures
+          path: output/human-speech
+          run-id: ${{ inputs.export_run || '38413920519' }}
+          github-token: ${{ github.token }}
+      - name: Decode and measure actual human voiced pitch
+        run: |
+          python3 -m pip install 'numpy==2.3.4'
+          python3 scripts/native_parity_human_pitch.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: Human-voiced-pitch-measurements
+          path: output/native-parity/human-pitch-report.json
+          retention-days: 7

@@ -1,0 +1,266 @@
+{
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38406688721",
+  "testedRuntime": "b7af03e174d650c527a951c2d6c7c6af0e04db61",
+  "report": {
+    "status": "passed",
+    "diagnosticReuse": false,
+    "failures": [],
+    "fixtures": [
+      {
+        "id": "camera-mov-narration",
+        "build": {
+          "version": "0.3.1",
+          "channel": "candidate",
+          "sourceCommit": "b7af03e174d650c527a951c2d6c7c6af0e04db61",
+          "validatedOn": "GitHub Actions",
+          "validatedRun": "38405434013"
+        },
+        "inputSHA256": "3fc0a8cd1659c7f8ebf23bd06822c570fcc51af0b8d397f533d988f49eca5e7c",
+        "inputTranscoded": false,
+        "originalBundleSHA256Verified": true,
+        "measuredVariableTiming": false,
+        "sourceRotationSideData": [],
+        "sourceEditListCount": 8,
+        "freshPageReopen": true,
+        "fullOutputDecode": true,
+        "frames": 156,
+        "seconds": 6.500000000002733,
+        "pictureErrors": [
+          4.5240277777777775,
+          4.922129629629629,
+          7.735787037037037,
+          4.524907407407407,
+          4.856435185185185,
+          5.972939814814815,
+          8.707800925925927,
+          7.586620370370371,
+          7.021805555555556,
+          6.350092592592593
+        ],
+        "speechEnvelopeCorrelations": [
+          0.999948634900397,
+          0.9999140945220618
+        ],
+        "audioTimingDiagnostics": [
+          {
+            "clip": {
+              "duration": 2.999999999997276,
+              "fadeIn": 0,
+              "fadeOut": 0,
+              "filters": [],
+              "id": "c2",
+              "kind": "video",
+              "mediaId": "m1",
+              "name": "camera-mov-narration.mov",
+              "offsetX": 0,
+              "offsetY": 0,
+              "opacity": 1,
+              "preservePitch": true,
+              "rotation": 0,
+              "scale": 1,
+              "sourceStart": 10.137931,
+              "speed": 1,
+              "start": 0,
+              "trackId": "T1",
+              "videoEffects": [],
+              "volume": 1,
+              "in": 10.137931,
+              "out": 13.137930999997277,
+              "timelineStart": 0,
+              "textStyle": null
+            },
+            "decodedSampleCount": 48000,
+            "sourceSeekVsFullDecodeSliceCorrelation": 1.0,
+            "outputVsFullDecodeSliceZeroLagCorrelation": 0.9999488676028544,
+            "seekReferenceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.9999492582083339,
+              "zeroLagCorrelation": 0.9999492582083339,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            },
+            "fullDecodeSliceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.9999492582083339,
+              "zeroLagCorrelation": 0.9999492582083339,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            }
+          },
+          {
+            "clip": {
+              "duration": 3.000000000002733,
+              "fadeIn": 0,
+              "fadeOut": 0,
+              "filters": [],
+              "id": "c3",
+              "kind": "video",
+              "mediaId": "m1",
+              "name": "camera-mov-narration.mov",
+              "offsetX": 0,
+              "offsetY": 0,
+              "opacity": 1,
+              "preservePitch": true,
+              "rotation": 0,
+              "scale": 1,
+              "sourceStart": 13.137930999997277,
+              "speed": 1,
+              "start": 3.5,
+              "trackId": "T1",
+              "videoEffects": [],
+              "volume": 1,
+              "in": 13.137930999997277,
+              "out": 16.13793100000001,
+              "timelineStart": 3.5,
+              "textStyle": null
+            },
+            "decodedSampleCount": 48000,
+            "sourceSeekVsFullDecodeSliceCorrelation": 1.0,
+            "outputVsFullDecodeSliceZeroLagCorrelation": 0.9999135366078087,
+            "seekReferenceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.999915579552532,
+              "zeroLagCorrelation": 0.999915579552532,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            },
+            "fullDecodeSliceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.999915579552532,
+              "zeroLagCorrelation": 0.999915579552532,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            }
+          }
+        ],
+        "gapAudioRMS": 0.0,
+        "gapPictureMean": 6.944444444444444e-05
+      },
+      {
+        "id": "camera-vfr-candidate",
+        "build": {
+          "version": "0.3.1",
+          "channel": "candidate",
+          "sourceCommit": "b7af03e174d650c527a951c2d6c7c6af0e04db61",
+          "validatedOn": "GitHub Actions",
+          "validatedRun": "38405434013"
+        },
+        "inputSHA256": "6e9f5ffa4910927d0db244ceccb09e8790301940c353d58e22c9cf64d89a5ef5",
+        "inputTranscoded": false,
+        "originalBundleSHA256Verified": true,
+        "measuredVariableTiming": true,
+        "sourceRotationSideData": [],
+        "sourceEditListCount": 0,
+        "freshPageReopen": true,
+        "fullOutputDecode": true,
+        "frames": 156,
+        "seconds": 6.500000000002733,
+        "pictureErrors": [
+          4.573842592592593,
+          4.29775462962963,
+          6.271875,
+          6.761736111111111,
+          6.678842592592592,
+          4.384884259259259,
+          4.821319444444445,
+          4.7634490740740745,
+          5.043240740740741,
+          10.166851851851852
+        ],
+        "speechEnvelopeCorrelations": [
+          0.9938096232830815,
+          0.9983744079157995
+        ],
+        "audioTimingDiagnostics": [
+          {
+            "clip": {
+              "duration": 2.999999999997276,
+              "fadeIn": 0,
+              "fadeOut": 0,
+              "filters": [],
+              "id": "c2",
+              "kind": "video",
+              "mediaId": "m1",
+              "name": "camera-vfr-candidate.mp4",
+              "offsetX": 0,
+              "offsetY": 0,
+              "opacity": 1,
+              "preservePitch": true,
+              "rotation": 0,
+              "scale": 1,
+              "sourceStart": 10.137931,
+              "speed": 1,
+              "start": 0,
+              "trackId": "T1",
+              "videoEffects": [],
+              "volume": 1,
+              "in": 10.137931,
+              "out": 13.137930999997277,
+              "timelineStart": 0,
+              "textStyle": null
+            },
+            "decodedSampleCount": 48000,
+            "sourceSeekVsFullDecodeSliceCorrelation": 1.0,
+            "outputVsFullDecodeSliceZeroLagCorrelation": 0.9938015799985527,
+            "seekReferenceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.9940476962687268,
+              "zeroLagCorrelation": 0.9940476962687268,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            },
+            "fullDecodeSliceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.9940476962687268,
+              "zeroLagCorrelation": 0.9940476962687268,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            }
+          },
+          {
+            "clip": {
+              "duration": 3.000000000002733,
+              "fadeIn": 0,
+              "fadeOut": 0,
+              "filters": [],
+              "id": "c3",
+              "kind": "video",
+              "mediaId": "m1",
+              "name": "camera-vfr-candidate.mp4",
+              "offsetX": 0,
+              "offsetY": 0,
+              "opacity": 1,
+              "preservePitch": true,
+              "rotation": 0,
+              "scale": 1,
+              "sourceStart": 13.137930999997277,
+              "speed": 1,
+              "start": 3.5,
+              "trackId": "T1",
+              "videoEffects": [],
+              "volume": 1,
+              "in": 13.137930999997277,
+              "out": 16.13793100000001,
+              "timelineStart": 3.5,
+              "textStyle": null
+            },
+            "decodedSampleCount": 48000,
+            "sourceSeekVsFullDecodeSliceCorrelation": 1.0,
+            "outputVsFullDecodeSliceZeroLagCorrelation": 0.9983745430359332,
+            "seekReferenceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.9983772576202329,
+              "zeroLagCorrelation": 0.9983772576202329,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            },
+            "fullDecodeSliceLag": {
+              "bestLagSeconds": 0.0,
+              "bestCorrelation": 0.9983772576202329,
+              "zeroLagCorrelation": 0.9983772576202329,
+              "lagMeaning": "Positive means output content occurs later than source; diagnostic only, never used to align acceptance criteria."
+            }
+          }
+        ],
+        "gapAudioRMS": 0.0,
+        "gapPictureMean": 0.0
+      }
+    ],
+    "cameraVFRVerified": true,
+    "scope": "Two owner-published unchanged camera originals; actual Web trim/split/gap/bundle/reopen/H264AAC output. Speech envelope timing and pictures checked, not perceptual pitch quality or released Mac equivalence. Best-lag correlations are diagnostics, not criteria-aligned acceptance."
+  },
+  "attribution": "HumynLabs, APAC Egocentric Residential (with Voiceover), CC BY4.0; immutable source in fixture-sources.json."
+}

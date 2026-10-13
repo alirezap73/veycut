@@ -2,8 +2,8 @@ name: VeyCut Web
 
 on:
   push:
-    branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'scripts/veycut_web_mp4_input_check.js', 'scripts/verify_web_mp4_input.py', 'scripts/veycut_web_rate_check.js', 'scripts/verify_web_rates.py', 'scripts/veycut_web_codec_check.js', 'scripts/verify_web_codecs.py', 'scripts/veycut_web_pitch_prototype_check.js', 'scripts/verify_web_pitch_prototype.py', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_audio_tone_check.js', 'scripts/verify_web_audio_tone.py', 'THIRD_PARTY_NOTICES.md']
+    branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface, development/web-ramp-parity]
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'scripts/veycut_web_mp4_input_check.js', 'scripts/verify_web_mp4_input.py', 'scripts/veycut_web_rate_check.js', 'scripts/verify_web_rates.py', 'scripts/veycut_web_codec_check.js', 'scripts/verify_web_codecs.py', 'scripts/veycut_web_pitch_prototype_check.js', 'scripts/verify_web_pitch_prototype.py', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/patch_aac_pts.py', 'scripts/native_parity_text_layout.js', 'scripts/native_parity_spatial.js', 'scripts/native_parity_blend.js', 'scripts/native_parity_title_controls.js', 'scripts/veycut_web_ramp_pitch_check.js', 'scripts/verify_web_ramp_pitch.py', 'scripts/veycut_web_audio_tone_check.js', 'scripts/verify_web_audio_tone.py', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
     inputs:
       long_export:
@@ -66,6 +66,11 @@ jobs:
         with:
           path: ~/.cargo/bin/wasm-bindgen
           key: wasm-bindgen-cli-0.2.127-linux-x64
+      - name: Verify shared native text geometry contracts
+        run: |
+          node scripts/native_parity_text_layout.js
+          node scripts/native_parity_spatial.js
+          node scripts/native_parity_blend.js
       - name: Check portable bridge
         working-directory: src
         run: |
@@ -111,6 +116,14 @@ jobs:
           tar -xOf "$RUNNER_TEMP/mediabunny.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny.txt
           tar -xOf "$RUNNER_TEMP/aac-encoder.tgz" package/dist/bundles/mediabunny-aac-encoder.min.mjs > web/vendor/mediabunny-aac-encoder.min.mjs
           tar -xOf "$RUNNER_TEMP/aac-encoder.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny-aac-encoder.txt
+      - name: Retain AAC priming packet timestamps and preferred modified source
+        run: |
+          mkdir -p web/vendor/aac-source
+          for file in encoder.ts encode.worker.ts bridge.c shared.ts index.ts; do
+            curl --fail --silent --show-error --retry 2 --max-time 60 --max-filesize 100000 "https://raw.githubusercontent.com/Vanilagy/mediabunny/d901f02d5fdd33d7a7488bd8b9393f76a98b2eb1/packages/aac-encoder/src/$file" -o "web/vendor/aac-source/$file"
+          done
+          cp web/vendor/LICENSE-mediabunny-aac-encoder.txt web/vendor/aac-source/LICENSE
+          python3 scripts/patch_aac_pts.py
       - name: Bundle pinned experimental pitch DSP
         run: |
           set -euo pipefail
@@ -175,6 +188,7 @@ jobs:
           node --check scripts/veycut_web_effects_check.js
           node --check scripts/veycut_web_speed_curve_check.js
           node --check scripts/veycut_web_shapes_check.js
+          node --check scripts/native_parity_title_controls.js
           node scripts/test_web_compositor.js
           node scripts/test_webm_metadata.js
           node --check scripts/veycut_web_reliability_check.js
@@ -204,7 +218,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log output/playwright/bundle-check.log output/playwright/offline-check.log output/playwright/mp4-input-check.log output/playwright/rate-check.log output/playwright/codec-check.log output/playwright/pitch-prototype-check.log output/playwright/pitch-export-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log output/playwright/reliability-check.log output/playwright/quality-check.log output/playwright/bundle-check.log output/playwright/offline-check.log output/playwright/mp4-input-check.log output/playwright/rate-check.log output/playwright/codec-check.log output/playwright/pitch-prototype-check.log output/playwright/pitch-export-check.log output/playwright/title-controls-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -525,6 +539,23 @@ jobs:
           ffmpeg -v error -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=8" -f lavfi -i "sine=frequency=660:sample_rate=48000:duration=8" -filter_complex "[0:a][1:a]amerge=inputs=2[a]" -map "[a]" -c:a pcm_s16le -y output/playwright/pitch-tone.wav
           playwright-cli run-code --filename=scripts/veycut_web_pitch_export_check.js > output/playwright/pitch-export-check.log
           python3 scripts/verify_web_pitch_export.py
+          ffmpeg -v error -f lavfi -i "aevalsrc=if(between(t\,1\,1.15)+between(t\,3\,3.15)+between(t\,5\,5.15)+between(t\,7\,7.15)\,.4\,.05)*sin(2*PI*880*t)|.25*sin(2*PI*660*t):s=48000:d=8" -c:a pcm_s16le -y output/playwright/ramp-tone.wav
+          playwright-cli run-code --filename=scripts/veycut_web_ramp_pitch_check.js > output/playwright/ramp-pitch-check.log
+          python3 scripts/verify_web_ramp_pitch.py
+          playwright-cli run-code --filename=scripts/native_parity_title_controls.js > output/playwright/title-controls-check.log
+          ffmpeg -v error -xerror -i output/native-parity/title-controls-output.mp4 -f null -
+          ffprobe -v error -count_frames -show_streams -of json output/native-parity/title-controls-output.mp4 > output/playwright/title-controls-probe.json
+          python3 - <<'PYTITLE'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('output/native-parity/title-controls-report.json').read_text())
+          streams=json.loads(Path('output/playwright/title-controls-probe.json').read_text())['streams']
+          video=next(s for s in streams if s['codec_type']=='video')
+          assert report['status']=='passed' and int(video['nb_read_frames'])==72
+          assert video['codec_name']=='h264' and abs(float(video['duration'])-3)<.001
+          print('Expanded title UI, atomic history, save/reopen and fully decoded 72-frame H.264 output passed.')
+          PYTITLE
+          cp output/native-parity/title-controls-* output/playwright/
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Five-minute source and real browser export
