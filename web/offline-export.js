@@ -40,21 +40,30 @@ window.VeyCutOfflineExporter=(()=>{
         if(audio){
           if(!await audio.canDecode()||await audio.getNumberOfChannels()>2)throw Error('This audio codec or channel layout needs real-time export.');
           if(clip.preservePitch!==false&&((clip.speed||1)!==1||clip.speedCurve?.length))throw Error('Pitch-preserved speed changes need real-time export.');
-          value.audio=new MB.AudioBufferSink(audio);
+          value.audio=new MB.AudioBufferSink(audio);value.audioBuffers=[];value.audioIndex=0;
         }
       }
       return value;
     }
-    function sample(value,at){
-      function values(wrapped){
-        const pair=value.pair||(value.pair=[0,0]);
-        if(!wrapped||at<wrapped.timestamp||at>=wrapped.timestamp+wrapped.buffer.duration){pair[0]=pair[1]=0;return pair;}
-        const buffer=wrapped.buffer,index=Math.max(0,Math.min(buffer.length-1,(at-wrapped.timestamp)*buffer.sampleRate)),first=Math.floor(index),next=Math.min(buffer.length-1,first+1),mix=index-first;
-        for(let channel=0;channel<2;channel++){const data=buffer.getChannelData(Math.min(channel,buffer.numberOfChannels-1));pair[channel]=data[first]*(1-mix)+data[next]*mix;}return pair;
+    async function prepareAudio(value,first,last){
+      // Decode sequentially once. Random getBuffer calls create a decoder per compressed packet.
+      if(!value.audioIterator)value.audioIterator=value.audio.buffers(first);
+      value.audioBuffers=value.audioBuffers.filter(w=>w.timestamp+w.buffer.duration>first);
+      let tail=value.audioBuffers.at(-1);
+      while(!value.audioEnded&&(!tail||tail.timestamp+tail.buffer.duration<=last)){
+        check();const next=await value.audioIterator.next();check();
+        if(next.done){value.audioEnded=true;break;}
+        value.audioBuffers.push(next.value);tail=next.value;
       }
-      const wrapped=value.cached;
-      if(wrapped&&at>=wrapped.timestamp&&at<wrapped.timestamp+wrapped.buffer.duration)return values(wrapped);
-      return value.audio.getBuffer(at).then(next=>{value.cached=next;return values(next);});
+      value.audioIndex=0;
+    }
+    function sample(value,at){
+      const list=value.audioBuffers,pair=value.pair||(value.pair=[0,0]);
+      while(value.audioIndex+1<list.length&&list[value.audioIndex+1].timestamp<=at)value.audioIndex++;
+      const wrapped=list[value.audioIndex];
+      if(!wrapped||at<wrapped.timestamp||at>=wrapped.timestamp+wrapped.buffer.duration){pair[0]=pair[1]=0;return pair;}
+      const buffer=wrapped.buffer,index=Math.max(0,Math.min(buffer.length-1,(at-wrapped.timestamp)*buffer.sampleRate)),first=Math.floor(index),next=Math.min(buffer.length-1,first+1),mix=index-first;
+      for(let channel=0;channel<2;channel++){const data=buffer.getChannelData(Math.min(channel,buffer.numberOfChannels-1));pair[channel]=data[first]*(1-mix)+data[next]*mix;}return pair;
     }
     async function audioWindow(begin,end){
       // Feed-forward echo is bounded to 1 s; extra history lets filters/compression settle.
@@ -64,7 +73,8 @@ window.VeyCutOfflineExporter=(()=>{
         const first=Math.max(origin,compositor.start(clip)),last=Math.min(end,compositor.start(clip)+compositor.duration(clip));if(last<=first)continue;
         const value=await item(clip);if(!value.audio)continue;
         const length=Math.max(1,Math.round((last-first)*rate)),buffer=offline.createBuffer(2,length,rate),left=buffer.getChannelData(0),right=buffer.getChannelData(1);
-        for(let index=0;index<length;index++){if(index%2048===0)check();const next=sample(value,compositor.sourceTime(clip,first+index/rate)),pair=next?.then?await next:next;left[index]=pair[0];right[index]=pair[1];}
+        await prepareAudio(value,compositor.sourceTime(clip,first),compositor.sourceTime(clip,first+(length-1)/rate));
+        for(let index=0;index<length;index++){if(index%2048===0)check();const pair=sample(value,compositor.sourceTime(clip,first+index/rate));left[index]=pair[0];right[index]=pair[1];}
         const source=offline.createBufferSource(),gain=offline.createGain();source.buffer=buffer;gain.connect(offline.destination);
         const pair={source,gain};window.VeyCutAudioFilters.rewire(offline,pair,clip.filters);
         const curve=new Float32Array(Math.max(2,Math.ceil((end-origin)*1000)+1)),track=tracks.get(clip.trackId)||{};
@@ -75,7 +85,7 @@ window.VeyCutOfflineExporter=(()=>{
       for(let channel=0;channel<2;channel++)result.copyToChannel(rendered.getChannelData(channel).subarray(offset,offset+length),channel);
       return result;
     }
-    async function dispose(id){const value=items.get(id);if(!value)return;await value.video?.return();value.image?.close();items.delete(id);sources.delete(id);}
+    async function dispose(id){const value=items.get(id);if(!value)return;await value.video?.return();await value.audioIterator?.return();value.image?.close();items.delete(id);sources.delete(id);}
     const abort=()=>{output?.cancel().catch(()=>{});};signal.addEventListener('abort',abort,{once:true});
     try{
       const fonts=spec.clips.filter(c=>c.kind==='text').map(c=>{const style=c.text||c.textStyle||{};return document.fonts.load(`${style.fontWeight||600} ${Math.max(1,(style.fontSize||.055)*spec.height)}px ${style.fontFamily||'system-ui'}`,'سلام VeyCut');});
