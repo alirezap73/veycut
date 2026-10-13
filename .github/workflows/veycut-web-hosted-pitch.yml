@@ -2,14 +2,14 @@ name: Verify public media output
 on:
   push:
     branches: [validation/web-pitch-hosted]
-    paths: ['.github/workflows/veycut-web-hosted-pitch.yml', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_footage_check.js', 'scripts/verify_web_footage.py', 'scripts/veycut_web_pitch_long_stream_check.js']
+    paths: ['.github/workflows/veycut-web-hosted-pitch.yml', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_footage_check.js', 'scripts/verify_web_footage.py', 'scripts/veycut_web_pitch_long_stream_check.js', 'scripts/veycut_web_pitch_long_export_check.js', 'scripts/verify_web_pitch_long_export.py']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -72,6 +72,16 @@ jobs:
           assert report['status']=='passed' and report['seconds']==600 and report['windows']==600 and report['build']==expected
           print(json.dumps(report))
           PYLONG
+          ffmpeg -v error -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=600" -f lavfi -i "sine=frequency=660:sample_rate=48000:duration=600" -filter_complex "[0:a][1:a]amerge=inputs=2[a]" -map "[a]" -c:a aac -b:a 128k -y output/playwright/pitch-long.m4a
+          playwright-cli run-code --filename=scripts/veycut_web_pitch_long_export_check.js
+          python3 scripts/verify_web_pitch_long_export.py
+          python3 - <<'PYLONGEXPORT'
+          import json,os
+          from pathlib import Path
+          expected=json.loads((Path(os.environ['RUNNER_TEMP'])/'public-build.json').read_text())
+          report=json.load(open('output/playwright/pitch-long-export-report.json'))
+          assert report['status']=='passed' and report['build']==expected
+          PYLONGEXPORT
           playwright-cli close
       - uses: actions/upload-artifact@v7
         if: always()
