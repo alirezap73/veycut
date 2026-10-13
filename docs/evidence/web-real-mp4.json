@@ -1,0 +1,84 @@
+{
+  "sourceCommit": "b409c06a4e08cdaa9f047a0dc6f17503d4ef8ba1",
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38337206323",
+  "browser": "Chromium on GitHub Ubuntu",
+  "realFootage": {
+    "status": "passed",
+    "seconds": 360,
+    "fullDecode": true,
+    "videoFrames": 8646,
+    "lastVideoPts": 360.027967,
+    "maxVideoGap": 0.06839999999999691,
+    "audioEnvelopeCorrelation": 0.9975178672913619,
+    "pictureCheckpoints": [
+      {
+        "seconds": 15,
+        "meanPixelError": 4.177175925925926
+      },
+      {
+        "seconds": 90,
+        "meanPixelError": 5.545925925925926
+      },
+      {
+        "seconds": 180,
+        "meanPixelError": 24.126574074074075
+      },
+      {
+        "seconds": 270,
+        "meanPixelError": 11.963657407407407
+      },
+      {
+        "seconds": 330,
+        "meanPixelError": 7.170069444444445
+      }
+    ],
+    "streams": [
+      {
+        "type": "video",
+        "codec": "h264"
+      },
+      {
+        "type": "audio",
+        "codec": "opus"
+      }
+    ],
+    "sourceSHA256": "328253280a05e6b14a92f1f43d818d9b7d38ab5d3f6d5d98606198fd3daef2ff",
+    "fixture": "Tears of Steel, Blender Foundation / Mango project, CC BY 3.0; live-action and CGI, original 1080p source; six-minute excerpt for testing only",
+    "scope": "One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers."
+  },
+  "mixedLayers": [
+    {
+      "format": "webm",
+      "fullDecode": true,
+      "dimensions": [
+        360,
+        640
+      ],
+      "videoFrames": 71,
+      "lastVideoPts": 2.084,
+      "audioRms": 0.026071033915041987,
+      "audio880HzAmplitude": 0.03618216778299008,
+      "transformedImageRedPixels": 55756,
+      "nativeTitleBrightPixels": 2685,
+      "source": "output/playwright/parity-video.webm"
+    },
+    {
+      "format": "mp4",
+      "fullDecode": true,
+      "dimensions": [
+        360,
+        640
+      ],
+      "videoFrames": 72,
+      "lastVideoPts": 2.0737,
+      "audioRms": 0.0254380715753766,
+      "audio880HzAmplitude": 0.03455822829023131,
+      "transformedImageRedPixels": 55899,
+      "nativeTitleBrightPixels": 2660,
+      "source": "output/playwright/parity-video.mp4"
+    }
+  ],
+  "timelineCeilingSeconds": 600,
+  "refusedTimelineSeconds": 601,
+  "limitations": "Six-minute output tested from one long 1080p film. Ten-minute output, other cameras/browsers, AAC recording and frame-exact offline export are not established by this run."
+}

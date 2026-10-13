@@ -41,7 +41,7 @@ Open a supported desktop JSON manifest directly. Its original paths, all timelin
 
 ## Real-time export in development
 
-Current limits are **600 seconds (ten minutes)**, **1920-pixel long edge**, **256 MiB of recorded output**, and **16 simultaneous decoded media layers**. The preview also bounds needed active/selected media sources to 16. The server workflow includes an optional five-minute source/reopen/cancel/export scenario with timed colour and audio markers and a late Persian caption. Higher-resolution/many-layer performance, real camera sources and the byte ceiling still need stress tests.
+Current limits are **600 seconds (ten minutes)**, **1920-pixel long edge**, **256 MiB of recorded output**, and **16 simultaneous decoded media layers**. The preview also bounds needed active/selected media sources to 16. The server workflow includes an optional five-minute source/reopen/cancel/export scenario with timed colour and audio markers and a late Persian caption. A separate real-footage scenario imports a long 1080p live-action/CGI film and checks a six-minute 640×360 H.264/Opus MP4. Ten-minute output, higher-resolution/many-layer performance, other camera codecs and the byte ceiling still need stress tests.
 
 Export uses browser Canvas capture, MediaRecorder and Web Audio. Select WebM, or **H.264 MP4 only when the browser explicitly reports codec support** (AAC preferred, Opus fallback shown in the interface). Unsupported formats are disabled; MP4 is not a bundled offline H.264 encoder or a promise of universal browser support. Available codecs follow MediaRecorder support. Requested output frame rates are 24, 25, 30 or 60 fps; delivered frame timing can drift.
 
@@ -59,7 +59,7 @@ The shipped Web prototype has **120-second / 960-pixel / 64-MiB** limits, sequen
 
 The [expanded editing checks](https://github.com/alirezap73/veycut/actions/runs/38192514807) passed on `c538f3f6a8fa0606ae127cacba866de307bfe22a`: eight shared-engine tests, arithmetic/refusal regressions, 16 baseline browser checks, 12 mixed-media editing/export checks and four legacy-project checks. The mixed 360×640 VP8/Opus WebM fully decoded with 64 video frames, a final video timestamp of 2.078 seconds, separate 880 Hz audio, a transformed/keyframed still and native title text. Cancellation, disconnected-media refusal, preserved projects and a rejected 121-second timeline remained covered. MP4 was correctly unavailable on the tested Chromium recorder because explicit H.264/AAC recording was not supported; that path is not a passed MP4 proof.
 
-Safari/Firefox, longer real footage, high-resolution/many-layer performance and the enlarged byte cap remain unverified. All builds, browser runs and video decoding ran on GitHub; no local browser, video recording or native build was run.
+Current [six-minute real-footage MP4 evidence](../docs/evidence/web-real-mp4.json) records full decoding, audio-envelope correspondence, five picture checkpoints and project preservation. [Reproduction instructions](../docs/WEB-REAL-FOOTAGE-TEST.md) include source attribution. Safari/Firefox, AAC recording, ten-minute output, other camera codecs, high-resolution/many-layer performance and the enlarged byte cap remain unverified. All builds, browser runs and video decoding ran on GitHub; no local browser, video recording or native build was run.
 
 ## Current parity validation
 
