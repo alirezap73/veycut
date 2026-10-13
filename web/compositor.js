@@ -368,39 +368,61 @@ window.VeyCutCompositor = (() => {
   function text(ctx, clip, spec, time) {
     const style=clip.text || clip.textStyle;
     if (!style || !style.content) return;
-    const font=Math.max(1,number(style.fontSize,.055)*spec.height);
-    ctx.font=`${style.italic?'italic ':''}${number(style.fontWeight,600)} ${font}px ${style.fontFamily || 'system-ui, sans-serif'}`;
-    const align=style.align || 'center';ctx.textAlign=align;ctx.textBaseline='middle';
-    ctx.direction=/[\u0590-\u08ff]/.test(style.content)?'rtl':'ltr';
-    const max=number(style.maxWidth,0)>0?style.maxWidth*spec.width:spec.width*.9;
+    const font=Math.max(1,number(style.fontSize,.09)*spec.height);
+    ctx.font=`${style.italic?'italic ':''}${number(style.fontWeight,700)} ${font}px ${style.fontFamily || '"Cabinet Grotesk", sans-serif'}`;
+    const align=style.align || 'center';ctx.textAlign='left';ctx.textBaseline='alphabetic';
+    // Native paragraphs choose their base direction from the first strong
+    // character. Digits and punctuation do not turn mixed English into RTL.
+    const direction=paragraph=>{
+      const strong=[...paragraph].find(character=>/[\p{Letter}\u200e\u200f]/u.test(character));
+      return strong && (strong==='\u200f' || /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}\p{Script=Samaritan}\p{Script=Mandaic}]/u.test(strong))?'rtl':'ltr';
+    };
+    const maxWidth=Math.max(0,number(style.maxWidth,0))*spec.width;
+    const maxHeight=Math.max(0,number(style.maxHeight,0))*spec.height;
+    // Sized native boxes already include their plate's padding on that axis.
+    const padX=style.background && maxWidth<=0?Math.max(0,number(style.backgroundPaddingX,.0315))*spec.height:0;
+    const padY=style.background && maxHeight<=0?Math.max(0,number(style.backgroundPaddingY,.018))*spec.height:0;
+    const wrap=maxWidth>0?maxWidth:Math.max(font,spec.width*(align==='center'?1:.5)-2*padX);
     const rows=[];
-    for (const paragraph of style.content.split('\n')) {
+    const paragraphs=style.content.replace(/\r\n/g,'\n').split('\n');
+    if(paragraphs.at(-1)==='' && style.content.endsWith('\n'))paragraphs.pop();
+    for (const paragraph of paragraphs) {
+      const dir=direction(paragraph);ctx.direction=dir;
       let row='';
-      for (const word of paragraph.split(' ')) {
+      for (const word of paragraph.trim().split(' ')) {
         const next=row?row+' '+word:word;
-        if (row && ctx.measureText(next).width>max) {rows.push(row);row=word;} else row=next;
+        if (row && ctx.measureText(next).width>wrap) {rows.push({content:row,direction:dir,width:ctx.measureText(row).width});row=word;} else row=next;
       }
-      rows.push(row);
+      rows.push({content:row,direction:dir,width:ctx.measureText(row).width});
     }
-    const spacing=font*Math.max(.5,number(style.lineHeight,1.3));
-    const x=spec.width*.5, y=spec.height*.5;
-    const width=style.maxWidth>0?max:Math.min(max,Math.max(...rows.map(row=>ctx.measureText(row).width)));
-    const left=align==='left'?x:align==='right'?x-width:x-width/2;
-    const padX=number(style.backgroundPaddingX,.015)*spec.height;
-    const padY=number(style.backgroundPaddingY,.01)*spec.height;
-    const height=Math.max(rows.length*spacing,number(style.maxHeight,0)*spec.height);
+    const wordsWidth=Math.max(0,...rows.map(row=>row.width));if(wordsWidth<=0)return;
+    // Shared font's em metrics, rather than the height of a particular glyph
+    // or one extra line pitch, determine native title and background height.
+    const metrics=ctx.measureText('Hg');
+    const ascent=number(metrics.fontBoundingBoxAscent,font*.8),descent=number(metrics.fontBoundingBoxDescent,font*.2);
+    const pitch=font*Math.max(.5,number(style.lineHeight,1.2));
+    const wordsHeight=(rows.length-1)*pitch+ascent+descent;
+    const boxWidth=Math.max(maxWidth,wordsWidth),boxHeight=Math.max(maxHeight,wordsHeight);
+    const outerWidth=boxWidth+2*padX,outerHeight=boxHeight+2*padY;
+    const x=spec.width*.5,y=spec.height*.5;
+    const outerLeft=align==='left'?x:align==='right'?x-outerWidth:x-outerWidth/2;
+    const left=outerLeft+padX,top=y-outerHeight/2+padY+(boxHeight-wordsHeight)/2;
     ctx.globalAlpha*=clamp(number(style.opacity,1),0,1);
     if (style.background) {
       ctx.fillStyle=style.background;ctx.beginPath();
-      ctx.roundRect(left-padX,y-height/2-padY,width+2*padX,height+2*padY,
-        Math.max(0,number(style.backgroundRadius,.01)*spec.height));ctx.fill();
+      ctx.roundRect(outerLeft,y-outerHeight/2,outerWidth,outerHeight,
+        Math.max(0,number(style.backgroundRadius,.0135)*spec.height));ctx.fill();
     }
     ctx.lineJoin='round';ctx.fillStyle=style.color || '#fff';
     ctx.shadowColor=style.shadow?'#000':'transparent';ctx.shadowBlur=style.shadow?font*.08:0;
     rows.forEach((row,index)=>{
-      const at=y+(index-(rows.length-1)/2)*spacing;
-      if (style.strokeWidth>0) {ctx.strokeStyle=style.strokeColor || '#000';ctx.lineWidth=style.strokeWidth*spec.height;ctx.strokeText(row,x,at,max);}
-      ctx.fillText(row,x,at,max);
+      ctx.direction=row.direction;
+      const indent=align==='left'?0:align==='right'?boxWidth-row.width:(boxWidth-row.width)/2;
+      const baseline=top+ascent+index*pitch;
+      if (style.strokeWidth>0) {ctx.strokeStyle=style.strokeColor || '#000';ctx.lineWidth=2*style.strokeWidth*spec.height;ctx.strokeText(row.content,left+indent,baseline);}
+      // A word wider than its box remains intact and clips at the frame edge;
+      // Canvas maxWidth would squeeze it, changing the native glyph geometry.
+      ctx.fillText(row.content,left+indent,baseline);
     });
   }
   function legacyCaptions(ctx,spec,time) {

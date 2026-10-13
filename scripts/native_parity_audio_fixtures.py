@@ -18,6 +18,10 @@ if Path('output/fixtures/probe-report.json').exists():
     sources = json.loads(Path('docs/evidence/fixture-sources.json').read_text())
     assert len(speech_sources)==2, 'Both licensed derived narration fixtures required'
     expected = {entry['id']:entry for entry in sources['fixtures']}
+    assert len(report['fixtures'])==len(expected)
+    assert {entry['id'] for entry in report['fixtures']}==set(expected)
+    assert report['sourceRevision']==sources['revision']
+    assert report['license']==sources['license']
     for entry in report['fixtures']:
         assert entry['integrity']['sha256']==expected[entry['id']]['sha256']
         derived = entry['speechDerivative']
