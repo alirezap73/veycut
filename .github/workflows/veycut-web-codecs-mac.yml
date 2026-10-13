@@ -1,0 +1,76 @@
+name: Web frame codecs on macOS
+on:
+  push:
+    branches: [development/web-frame-codecs]
+    paths: ['.github/workflows/veycut-web-codecs-mac.yml']
+  workflow_dispatch:
+    inputs:
+      validated_run:
+        description: Successful Web run with the same browser/runtime implementation
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  browser:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require matching tested browser implementation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.validated_run || '38378051423' }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/web-run.json"
+            state=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/web-run.json'))['status'])")
+            if [ "$state" = 'completed' ]; then break; fi
+            sleep 30
+          done
+          source_commit=$(python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          run=json.loads((Path(os.environ['RUNNER_TEMP'])/'web-run.json').read_text())
+          assert run['status']=='completed' and run['conclusion']=='success'
+          assert run['repository']['full_name']==os.environ['GITHUB_REPOSITORY'] and run['path']=='.github/workflows/veycut-web.yml'
+          print(run['head_sha'])
+          PY
+          )
+          git diff --exit-code "$source_commit" HEAD -- web src scripts/veycut_web_codec_check.js scripts/verify_web_codecs.py docs/beta-samples/portrait-2s.mp4
+          echo "Testing validated runtime $source_commit on $(uname -m)"
+      - uses: actions/download-artifact@v5
+        with:
+          name: VeyCut-web-prototype
+          path: web
+          run-id: ${{ inputs.validated_run || '38378051423' }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Actual Chromium codec output and full decode
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg > /dev/null; then brew install ffmpeg; fi
+          npm install --global @playwright/cli@0.1.22
+          node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install chromium
+          mkdir -p output/playwright
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/playwright/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" || true; playwright-cli close || true' EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          playwright-cli open http://127.0.0.1:4173/ --browser=chromium
+          playwright-cli run-code --filename=scripts/veycut_web_codec_check.js
+          python3 scripts/verify_web_codecs.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: Web-macOS-codec-checks
+          path: output/playwright/
