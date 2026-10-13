@@ -1,6 +1,11 @@
 name: Probe original camera and narrated speech fixtures
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic_run:
+        description: 'Optional previous fixture run ID; reuse its outputs for diagnosis only, without repeating browser edits.'
+        required: false
+        type: string
   push:
     branches: [validation/web-original-camera, development/web-ramp-parity]
     paths:
@@ -9,6 +14,7 @@ on:
       - .github/workflows/veycut-fixture-probe.yml
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: fixture-probe-${{ github.ref }}
   cancel-in-progress: false
@@ -24,11 +30,26 @@ jobs:
           sudo apt-get install -y ffmpeg
       - name: Verify unchanged owner originals and measure timing
         run: python3 scripts/veycut_fixture_probe.py
+      - name: Reuse previous short outputs for diagnosis on server
+        if: inputs.diagnostic_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAGNOSTIC_RUN: ${{ inputs.diagnostic_run }}
+        run: |
+          [[ "$DIAGNOSTIC_RUN" =~ ^[0-9]+$ ]]
+          gh run view "$DIAGNOSTIC_RUN" --repo "$GITHUB_REPOSITORY" --json workflowName --jq '.workflowName' > /tmp/fixture-workflow-name
+          test "$(cat /tmp/fixture-workflow-name)" = "Probe original camera and narrated speech fixtures"
+          gh run download "$DIAGNOSTIC_RUN" --repo "$GITHUB_REPOSITORY" --name original-camera-fixture-probe --dir /tmp/previous-fixture-output
+          cp /tmp/previous-fixture-output/fixture-ui.json output/fixtures/
+          cp /tmp/previous-fixture-output/*-output.mp4 output/fixtures/
+          python3 scripts/veycut_fixture_verify.py --diagnostic-reuse
       - name: Install server browser
+        if: inputs.diagnostic_run == ''
         run: |
           npm install --global @playwright/cli@0.1.22
           node "$(npm root -g)/@playwright/cli/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Test original camera edits through the public application
+        if: inputs.diagnostic_run == ''
         run: |
           playwright-cli open https://alirezap73.github.io/veycut/ --browser=chromium
           playwright-cli run-code --filename=scripts/veycut_fixture_ui_check.js

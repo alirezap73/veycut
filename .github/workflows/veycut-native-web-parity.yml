@@ -119,7 +119,9 @@ jobs:
           mkdir -p web/parity-fixtures
           cp output/native-parity/cases.json web/parity-fixtures/
           cmp web/fonts/Vazirmatn-Variable.ttf native-baseline/src/crates/concat-text/fonts/Vazirmatn-Variable.ttf
+          echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Native ramp and optional real speech from the same PCM
+        id: audio_native
         run: |
           set -euo pipefail
           ffmpeg -v error -f lavfi -i "aevalsrc=if(between(t\,1\,1.15)+between(t\,3\,3.15)+between(t\,5\,5.15)+between(t\,7\,7.15)\,.4\,.05)*sin(2*PI*880*t)|.25*sin(2*PI*660*t):s=48000:d=8" -c:a pcm_s16le -y output/native-parity/ramp-tone.wav
@@ -151,7 +153,7 @@ jobs:
           python3 -m pip install 'numpy==2.3.4'
           python3 scripts/native_parity_compare.py
       - name: Compare actual native and browser ramp and narration audio
-        if: (success() || failure()) && steps.native.outputs.ready == 'true'
+        if: (success() || failure()) && steps.audio_native.outputs.ready == 'true'
         run: python3 scripts/native_parity_audio_compare.py
       - uses: actions/upload-artifact@v7
         if: always()
