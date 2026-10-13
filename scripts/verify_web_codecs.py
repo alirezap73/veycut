@@ -18,5 +18,5 @@ for entry in report['results']:
     frames=json.loads(run(['ffprobe','-v','error','-select_streams','v','-show_frames','-show_entries','frame=best_effort_timestamp_time','-of','json',str(path)]))['frames'];assert len(frames)==48
     error=max(abs(float(frame['best_effort_timestamp_time'])-i/24) for i,frame in enumerate(frames));assert error<.000002,error
     results.append({'codec':entry['codec'],'supported':True,'fullDecode':True,'frames':len(frames),'maxFrameTimestampError':error,'audioBackend':entry['encoding']['audioEncoderBackend']})
-result={'status':'passed','platform':platform.system(),'arch':platform.machine(),'seconds':2,'results':results,'scope':report['scope']}
+result={'status':'passed','platform':platform.system(),'arch':platform.machine(),'publicPage':report.get('publicPage',False),'build':report.get('build'),'seconds':2,'results':results,'scope':report['scope']}
 (root/'codec-decoder-report.json').write_text(json.dumps(result,indent=2));print(json.dumps(result))
