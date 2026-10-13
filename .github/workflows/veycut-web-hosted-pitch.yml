@@ -1,8 +1,8 @@
-name: Verify public pitch output
+name: Verify public media output
 on:
   push:
     branches: [validation/web-pitch-hosted]
-    paths: ['.github/workflows/veycut-web-hosted-pitch.yml', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py']
+    paths: ['.github/workflows/veycut-web-hosted-pitch.yml', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_footage_check.js', 'scripts/verify_web_footage.py']
   workflow_dispatch:
 permissions:
   contents: read
@@ -48,6 +48,21 @@ jobs:
           assert report['publicPage'] and report['build']==expected
           assert report['build']['version']=='0.3.1'
           PYHOST
+          curl --fail --location --retry 2 --max-time 60 --max-filesize 2000000 https://raw.githubusercontent.com/mdn/interactive-examples/main/live-examples/media/cc0-videos/flower.mp4 -o output/playwright/footage.mp4
+          python3 - <<'PYFIX'
+          import hashlib
+          from pathlib import Path
+          data=Path('output/playwright/footage.mp4').read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()=='bd91051dc5b10dc351ea06e5430dd335fb1ffb14'
+          PYFIX
+          playwright-cli run-code --filename=scripts/veycut_web_footage_check.js
+          python3 scripts/verify_web_footage.py
+          python3 - <<'PYBUILD'
+          import json,os
+          from pathlib import Path
+          expected=json.loads((Path(os.environ['RUNNER_TEMP'])/'public-build.json').read_text())
+          assert json.load(open('output/playwright/footage-report.json'))['build']==expected
+          PYBUILD
           playwright-cli close
       - uses: actions/upload-artifact@v7
         if: always()
