@@ -1,7 +1,8 @@
 'use strict';
 // Explicit frame timestamps and bounded audio windows; no playback clock or screen recording.
 window.VeyCutOfflineExporter=(()=>{
-  const available=()=>!!(window.VideoEncoder&&window.VideoDecoder&&window.AudioEncoder&&window.OfflineAudioContext);
+  let localAacRegistered=false;
+  const available=()=>!!(window.VideoEncoder&&window.VideoDecoder&&window.OfflineAudioContext&&window.Worker&&window.WebAssembly);
   async function exportTimeline(original,{signal,onProgress=()=>{},onState=()=>{}}){
     const check=()=>{if(signal.aborted)throw signal.reason||new DOMException('Cancelled','AbortError');if(document.hidden)throw Error('Keep this tab visible during export.');};
     check();if(!available())throw Error('Frame export requires supported WebCodecs and offline audio.');
@@ -9,7 +10,9 @@ window.VeyCutOfflineExporter=(()=>{
     onState('preparing');const MB=await import('./vendor/mediabunny.min.mjs');check();
     const quality=new MB.Quality({bitrate:encoding.videoBitsPerSecond});
     if(!await MB.canEncodeVideo('avc',{width:spec.width,height:spec.height,quality,frameRate:fps}))throw Error('H.264 frame encoding is unavailable on this device. Use real-time export.');
-    const audioCodec=await MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000})?'aac':await MB.canEncodeAudio('opus',{numberOfChannels:2,sampleRate:48000})?'opus':null;
+    const nativeAac=await MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000});
+    if(!nativeAac&&!localAacRegistered){const fallback=await import('./vendor/mediabunny-aac-encoder.min.mjs');fallback.registerAacEncoder();localAacRegistered=true;}
+    const audioCodec=await MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000})?'aac':null;
     if(!audioCodec)throw Error('No supported frame-export audio encoder. Use real-time export.');
     const canvas=document.createElement('canvas');canvas.width=spec.width;canvas.height=spec.height;const context=canvas.getContext('2d',{alpha:false});if(!context)throw Error('Canvas rendering is unavailable.');
     const inputs=new Map(),items=new Map(),sources=new Map(),tracks=new Map((spec.tracks||[]).map(t=>[t.id,t]));
@@ -84,7 +87,7 @@ window.VeyCutOfflineExporter=(()=>{
       let audioEnd=0;
       for(let frame=0;frame<frames;frame++){
         check();const time=frame/fps;
-                const wanted=new Set();
+        const wanted=new Set();
         for(const clip of spec.clips){const [first,last]=bounds(clip);if(frame<first||frame>=last||['text','shape','audio'].includes(clip.kind))continue;wanted.add(clip.id);const value=await item(clip);if(value.image)sources.set(clip.id,value.image);else if(value.video){const next=await value.video.next();if(next.done||!next.value)throw Error('A source frame is missing at '+time.toFixed(3)+' seconds.');sources.set(clip.id,next.value.canvas);}}
         compositor.render(context,spec,time,sources);await video.add(time,Math.min(1/fps,duration-time));if(time>=audioEnd-1e-8){const end=Math.min(duration,audioEnd+1);await audio.add(await audioWindow(audioEnd,end));audioEnd=end;}check();onProgress(.98*(frame+1)/frames);
         for(const [id,value] of items)if(!wanted.has(id)&&time>compositor.start(value.clip)+compositor.duration(value.clip)+1.25)await dispose(id);
@@ -93,7 +96,7 @@ window.VeyCutOfflineExporter=(()=>{
       const mime=await output.getMimeType(),blob=writer.blob(mime);onState('verifying');
       for(const id of [...items.keys()])await dispose(id);for(const media of inputs.values())media.dispose();inputs.clear();
       const verification=await window.VeyCutOutputCheck.verify(blob,{width:spec.width,height:spec.height,seconds:duration,fps,signal});check();onProgress(1);
-      return {blob,mimeType:mime,encoding:{...encoding,audioCodec,frames},precision:'fixed-frame-timestamps',verification,timing:{renderedFrames:frames,wallSeconds:(performance.now()-started)/1000,timelineSeconds:duration}};
+      return {blob,mimeType:mime,encoding:{...encoding,audioCodec,audioEncoderBackend:localAacRegistered?'local-wasm':'browser',frames},precision:'fixed-frame-timestamps',verification,timing:{renderedFrames:frames,wallSeconds:(performance.now()-started)/1000,timelineSeconds:duration}};
     }catch(error){if(signal.aborted)throw signal.reason||new DOMException('Cancelled','AbortError');throw error;}
     finally{signal.removeEventListener('abort',abort);if(output&&!complete)await output.cancel().catch(()=>{});for(const id of [...items.keys()])await dispose(id).catch(()=>{});for(const media of inputs.values())media.dispose();writer.clear();}
   }

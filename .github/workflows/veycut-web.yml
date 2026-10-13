@@ -14,6 +14,10 @@ on:
         description: Run real-footage MP4 export and full decoding
         type: boolean
         default: false
+      frame_export:
+        description: Render real footage using fixed frame timestamps and local AAC
+        type: boolean
+        default: false
       real_seconds:
         description: Real-footage output duration
         type: choice
@@ -21,6 +25,9 @@ on:
         default: '360'
   workflow_call:
     inputs:
+      frame_export:
+        type: boolean
+        default: false
       real_seconds:
         type: string
         default: '360'
@@ -92,9 +99,18 @@ jobs:
               digest=base64.b64encode(hashlib.file_digest(source,'sha512').digest()).decode()
           assert digest=='gZPBi40ldiZGeU2DJxT/Q3hlNiaxfpwNYTfmi0Maq3SoBJT64+W+ySc0Z7t+2JUGxNbkXnLFrDkSS2OQuweOhA==', 'Unexpected codec package'
           PYCODEC
+          curl --fail --silent --show-error --retry 2 --max-time 60 --max-filesize 10000000 https://registry.npmjs.org/@mediabunny/aac-encoder/-/aac-encoder-1.61.4.tgz -o "$RUNNER_TEMP/aac-encoder.tgz"
+          python3 - <<'PYAAC'
+          import base64, hashlib, os
+          with open(os.environ['RUNNER_TEMP']+'/aac-encoder.tgz','rb') as source:
+              digest=base64.b64encode(hashlib.file_digest(source,'sha512').digest()).decode()
+          assert digest=='BXqI+lQhpgPuiXMF4CIm/7isfkeUXjX2ysPtjN35dfI4L1RwW1//6VuJNsNMKw5vBPNjz31JeDd8ffFhJ2KipA==', 'Unexpected AAC encoder package'
+          PYAAC
           mkdir -p web/vendor
           tar -xOf "$RUNNER_TEMP/mediabunny.tgz" package/dist/bundles/mediabunny.min.mjs > web/vendor/mediabunny.min.mjs
           tar -xOf "$RUNNER_TEMP/mediabunny.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny.txt
+          tar -xOf "$RUNNER_TEMP/aac-encoder.tgz" package/dist/bundles/mediabunny-aac-encoder.min.mjs > web/vendor/mediabunny-aac-encoder.min.mjs
+          tar -xOf "$RUNNER_TEMP/aac-encoder.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny-aac-encoder.txt
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -513,6 +529,7 @@ jobs:
         if: inputs.real_export == true
         env:
           REAL_EXPORT_SECONDS: ${{ inputs.real_seconds || '360' }}
+          FRAME_EXPORT: ${{ inputs.frame_export || false }}
         timeout-minutes: 22
         shell: bash
         run: |
@@ -522,10 +539,16 @@ jobs:
           import json, os
           from pathlib import Path
           seconds=int(os.environ['REAL_EXPORT_SECONDS']);assert seconds in [360,600]
-          Path('web/real-export-config.json').write_text(json.dumps({'seconds':seconds}))
+          Path('web/real-export-config.json').write_text(json.dumps({'seconds':seconds,'mode':'frames' if os.environ['FRAME_EXPORT']=='true' else 'realtime'}))
           def stamp(at): return f'00:{at//60:02d}:{at%60:02d},000'
           Path('output/playwright/real-captions.srt').write_text(f'1\n{stamp(seconds-10)} --> {stamp(seconds-2)}\nسلام؛ پایان فیلم واقعی\n')
           PYCAPTION
+          if [ "$FRAME_EXPORT" = 'true' ]; then
+            mv output/playwright/real-source.webm output/playwright/real-original.webm
+            # Preserve the real picture stream; convert Vorbis to a WebCodecs-decodable audio track.
+            ffmpeg -v error -i output/playwright/real-original.webm -map 0:v:0 -map 0:a:0 -c:v copy -c:a libopus -b:a 128k -avoid_negative_ts make_zero -y output/playwright/real-source.webm
+            rm -f output/playwright/real-original.webm
+          fi
           python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/playwright/real-server.log 2>&1 &
           server_pid=$!
           cleanup_real() {

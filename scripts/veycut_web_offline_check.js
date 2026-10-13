@@ -14,7 +14,7 @@ async page=>{
   await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:85000});
   assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());await(await next).saveAs('output/playwright/offline-video.mp4');
   const precision=await page.locator('#export-status').getAttribute('data-precision'),encoding=JSON.parse(await page.locator('#export-status').getAttribute('data-encoding')),timing=JSON.parse(await page.locator('#export-status').getAttribute('data-timing'));
-  assert(precision==='fixed-frame-timestamps'&&encoding.frames===216&&timing.timelineSeconds===9,'Nine seconds must contain exactly 216 scheduled frames');
+  assert(precision==='fixed-frame-timestamps'&&encoding.frames===216&&encoding.audioCodec==='aac'&&timing.timelineSeconds===9,'Nine seconds must contain exactly 216 scheduled frames');
   assert(await page.evaluate(()=>window.__recorderCalls)===0,'No playback recorder used');assert(expected===await page.evaluate(()=>JSON.stringify(window.VeyCutWeb.engineDocument())),'Frame rendering preserves edits');
   await fresh();await page.evaluate(async()=>{const MB=await import('./vendor/mediabunny.min.mjs'),native=MB.CanvasSource.prototype.add;MB.CanvasSource.prototype.add=async function(...args){await new Promise(resolve=>setTimeout(resolve,50));return native.apply(this,args);};});
   const downloads=[];const observe=item=>downloads.push(item.suggestedFilename());page.on('download',observe);
