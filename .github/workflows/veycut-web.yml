@@ -3,15 +3,22 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py']
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py']
   workflow_dispatch:
     inputs:
       long_export:
         description: Run the five-minute real browser recording and full decode
         type: boolean
         default: false
+      real_export:
+        description: Run six-minute real-footage MP4 export and full decoding
+        type: boolean
+        default: false
   workflow_call:
     inputs:
+      real_export:
+        type: boolean
+        default: false
       long_export:
         type: boolean
         default: false
@@ -27,7 +34,7 @@ jobs:
   browser:
     name: Shared engine and Chromium editing
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -96,6 +103,8 @@ jobs:
           node scripts/test_webm_metadata.js
           node --check scripts/veycut_web_reliability_check.js
           node --check scripts/veycut_web_long_export_check.js
+          node --check scripts/veycut_web_mp4_check.js
+          node --check scripts/veycut_web_real_export_check.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
           node --check scripts/veycut_web_legacy_check.js
@@ -165,8 +174,8 @@ jobs:
           project['clips'], native['clips'] = [], []
           project['cues'], project['cueIds'] = [], []
           project['timelineCueIds'] = {timeline['id']: [] for timeline in native['timelines']}
-          for index in range(376):
-              identifier, position = 'browser-limit-' + str(index), .2 + index * duration
+          for index in range(501):
+              identifier, position = 'browser-limit-' + str(index), .2 + index * 1.2
               ui_clip, native_clip = copy.deepcopy(ui_source), copy.deepcopy(native_source)
               ui_clip.update(id=identifier, timelineStart=position, start=position)
               native_clip.update(id=identifier, start=position)
@@ -175,7 +184,7 @@ jobs:
           active = [timeline for timeline in native['timelines'] if timeline['id'] == native['activeTimelineId']]
           assert len(active) == 1
           active[0]['clips'] = copy.deepcopy(native['clips'])
-          assert abs(native['clips'][-1]['start'] + duration - 301) < .002
+          assert abs(native['clips'][-1]['start'] + duration - 601) < .002
           (folder / 'limit-project.json').write_text(json.dumps(project))
           PY
           playwright-cli snapshot --filename=output/playwright/reconnect.yml
@@ -212,7 +221,7 @@ jobs:
           assert report['captions'] == 2 and report['language'] == 'en' and report['persianContentRTL'] is True
           assert len(report['checks']) == 16
           assert report['export']['precision'] == 'realtime'
-          assert report['durationLimit'] == {'timelineSeconds': 301, 'limitSeconds': 300, 'downloaded': False}
+          assert report['durationLimit'] == {'timelineSeconds': 601, 'limitSeconds': 600, 'downloaded': False}
           project = json.loads(Path('output/playwright/project.json').read_text())
           assert len(project['clips']) == 4
           assert project['engine'] == 'wasm'
@@ -466,6 +475,51 @@ jobs:
           playwright-cli upload output/playwright/long-source.mp4
           timeout 420s playwright-cli run-code --filename=scripts/veycut_web_long_export_check.js > output/playwright/long-check.log
           python3 scripts/verify_web_long_export.py
+      - name: Real-footage six-minute MP4 export
+        if: inputs.real_export == true
+        timeout-minutes: 18
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 --max-time 180 --max-filesize 700000000 https://media.xiph.org/tearsofsteel/tears_of_steel_1080p.webm -o output/playwright/real-source.webm
+          python3 - <<'PYCAPTION'
+          from pathlib import Path
+          Path('output/playwright/real-captions.srt').write_text('1\n00:05:50,000 --> 00:05:58,000\nسلام؛ پایان فیلم واقعی\n')
+          PYCAPTION
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory web > output/playwright/real-server.log 2>&1 &
+          server_pid=$!
+          cleanup_real() {
+            result=$?
+            if [ "$result" -ne 0 ]; then
+              tail -c 18000 output/playwright/real-check.log || true
+              playwright-cli snapshot --filename=output/playwright/real-failure.yml || true
+            fi
+            rm -f output/playwright/real-source.webm
+            kill "$server_pid" || true
+            playwright-cli close || true
+            exit "$result"
+          }
+          trap cleanup_real EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          playwright-cli open http://127.0.0.1:4173/ --browser=chromium > output/playwright/real-open.log
+          playwright-cli run-code --filename=scripts/veycut_web_mp4_check.js > output/playwright/mp4-check.log
+          playwright-cli run-code --filename=scripts/veycut_web_real_export_check.js > output/playwright/real-setup.log
+          playwright-cli snapshot --filename=output/playwright/real-reconnect.yml
+          reconnect_ref=$(python3 - <<'PYREF'
+          import re
+          from pathlib import Path
+          refs=re.findall(r'button "Reconnect selected media" \[ref=(\w+)\]',Path('output/playwright/real-reconnect.yml').read_text())
+          assert len(refs)==1,refs
+          print(refs[0])
+          PYREF
+          )
+          playwright-cli click "$reconnect_ref"
+          playwright-cli upload output/playwright/real-source.webm
+          timeout 480s playwright-cli run-code --filename=scripts/veycut_web_real_export_check.js > output/playwright/real-check.log
+          python3 scripts/verify_web_real_export.py
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@v7
