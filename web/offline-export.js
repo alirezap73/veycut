@@ -8,8 +8,9 @@ window.VeyCutOfflineExporter=(()=>{
     check();if(!available())throw Error('Frame export requires supported WebCodecs and offline audio.');
     const compositor=window.VeyCutCompositor,spec=compositor.resolveTransitions(original),duration=window.VeyCutExporter.validate(spec),encoding=window.VeyCutExporter.budget(duration,spec.quality),fps=spec.fps||30;
     onState('preparing');const MB=await import('./vendor/mediabunny.min.mjs');check();
-    const quality=new MB.Quality({bitrate:encoding.videoBitsPerSecond});
-    if(!await MB.canEncodeVideo('avc',{width:spec.width,height:spec.height,quality,frameRate:fps}))throw Error('H.264 frame encoding is unavailable on this device. Use real-time export.');
+    const quality=new MB.Quality({bitrate:encoding.videoBitsPerSecond}),videoCodec=spec.videoCodec||'avc',codecNames={avc:'H.264',hevc:'HEVC',av1:'AV1'};
+    if(!codecNames[videoCodec])throw Error('Choose H.264, HEVC or AV1 for frame export.');
+    if(!await MB.canEncodeVideo(videoCodec,{width:spec.width,height:spec.height,quality,frameRate:fps}))throw Error(codecNames[videoCodec]+' frame encoding is unavailable on this device. Choose H.264 or real-time export.');
     const nativeAac=await MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000});
     if(!nativeAac&&!localAacRegistered){const fallback=await import('./vendor/mediabunny-aac-encoder.min.mjs');fallback.registerAacEncoder();localAacRegistered=true;}
     const audioCodec=await MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000})?'aac':null;
@@ -92,7 +93,7 @@ window.VeyCutOfflineExporter=(()=>{
       let fontTimer;try{await Promise.race([Promise.all(fonts),new Promise((_,reject)=>{fontTimer=setTimeout(()=>reject(Error('Fonts did not load for frame export.')),8000);})]);}finally{clearTimeout(fontTimer);}check();
       const target=new MB.StreamTarget(new WritableStream({write(value){check();writer.write(value);}}),{chunked:true,chunkSize:1024*1024});
       output=new MB.Output({format:new MB.Mp4OutputFormat({fastStart:false}),target});
-      const video=new MB.CanvasSource(canvas,{codec:'avc',quality,frameRate:fps}),audio=new MB.AudioBufferSource({codec:audioCodec,quality:new MB.Quality({bitrate:128000})});
+      const video=new MB.CanvasSource(canvas,{codec:videoCodec,quality,frameRate:fps}),audio=new MB.AudioBufferSource({codec:audioCodec,quality:new MB.Quality({bitrate:128000})});
       output.addVideoTrack(video,{frameRate:fps});output.addAudioTrack(audio);await output.start();check();onState('rendering');
       let audioEnd=0;
       for(let frame=0;frame<frames;frame++){
@@ -106,7 +107,7 @@ window.VeyCutOfflineExporter=(()=>{
       const mime=await output.getMimeType(),blob=writer.blob(mime);onState('verifying');
       for(const id of [...items.keys()])await dispose(id);for(const media of inputs.values())media.dispose();inputs.clear();
       const verification=await window.VeyCutOutputCheck.verify(blob,{width:spec.width,height:spec.height,seconds:duration,fps,signal});check();onProgress(1);
-      return {blob,mimeType:mime,encoding:{...encoding,audioCodec,audioEncoderBackend:localAacRegistered?'local-wasm':'browser',frames},precision:'fixed-frame-timestamps',verification,timing:{renderedFrames:frames,wallSeconds:(performance.now()-started)/1000,timelineSeconds:duration}};
+      return {blob,mimeType:mime,encoding:{...encoding,videoCodec,audioCodec,audioEncoderBackend:localAacRegistered?'local-wasm':'browser',frames},precision:'fixed-frame-timestamps',verification,timing:{renderedFrames:frames,wallSeconds:(performance.now()-started)/1000,timelineSeconds:duration}};
     }catch(error){if(signal.aborted)throw signal.reason||new DOMException('Cancelled','AbortError');throw error;}
     finally{signal.removeEventListener('abort',abort);if(output&&!complete)await output.cancel().catch(()=>{});for(const id of [...items.keys()])await dispose(id).catch(()=>{});for(const media of inputs.values())media.dispose();writer.clear();}
   }
