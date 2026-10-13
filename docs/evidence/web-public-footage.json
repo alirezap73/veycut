@@ -1,0 +1,71 @@
+{
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38396978170",
+  "testCommit": "265c072dcf6da594004839b3855c4d61a4a47a39",
+  "report": {
+    "build": {
+      "version": "0.3.1",
+      "channel": "web-preview",
+      "sourceCommit": "bcc18e6f231a3756e6144ff48a27d34db57775d9",
+      "validatedOn": "GitHub Actions"
+    },
+    "freshPageReopen": true,
+    "originalMediaEmbedded": true,
+    "trim": [
+      0.37,
+      2.87
+    ],
+    "encoding": {
+      "quality": "compact",
+      "videoBitsPerSecond": 2000000,
+      "audioBitsPerSecond": 128000,
+      "estimatedBytes": 698250,
+      "maxSeconds": 600,
+      "fits": true,
+      "videoCodec": "avc",
+      "audioCodec": "aac",
+      "audioEncoderBackend": "local-wasm",
+      "frames": 60
+    },
+    "audioEnvelopeCorrelation": null,
+    "audioEnvelopeWindowSeconds": 0.02,
+    "inputAudioSilent": true,
+    "outputAudioPeakEnvelope": 0.0,
+    "status": "passed",
+    "inputTranscoded": false,
+    "sourceSHA256": "0cd83d944a6ca7822b4a8306cecc60a36e859b041f6702c6a1ad9ead78924451",
+    "sourceStreams": [
+      {
+        "codec_type": "video",
+        "codec_name": "h264",
+        "width": 960,
+        "height": 540,
+        "r_frame_rate": "30000/1001",
+        "avg_frame_rate": "30000/1001",
+        "duration": "5.005000"
+      },
+      {
+        "codec_type": "audio",
+        "codec_name": "aac",
+        "width": null,
+        "height": null,
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "duration": "5.055000"
+      }
+    ],
+    "frames": 60,
+    "seconds": 2.5,
+    "fullOutputDecode": true,
+    "pictureErrors": [
+      2.1909722222222223,
+      2.2243055555555555,
+      1.5166435185185185,
+      1.7970601851851853,
+      1.7264814814814815
+    ],
+    "fixture": "MDN interactive-examples/cc0-videos/flower.mp4; CC0 1.0; distributed bytes unchanged",
+    "scope": "Short photographic sample, fractional trim, fresh-page portable reopen and output. Silent AAC fixture does not prove audible cut synchronization. Not raw camera MOV, VFR, long input or native Mac equivalence."
+  },
+  "licenseSource": "https://github.com/mdn/interactive-examples/blob/main/LICENSE",
+  "fixtureSource": "https://github.com/mdn/interactive-examples/blob/main/live-examples/media/cc0-videos/flower.mp4"
+}

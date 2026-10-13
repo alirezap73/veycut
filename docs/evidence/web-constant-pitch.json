@@ -128,5 +128,10 @@
       "scope": "One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers."
     },
     "scope": "Ordinary speed=1 path regression of changed exporter; not a ten-minute pitch/stretch test."
+  },
+  "publicOutput": {
+    "run": "https://github.com/alirezap73/veycut/actions/runs/38396978170",
+    "buildCommit": "bcc18e6f231a3756e6144ff48a27d34db57775d9",
+    "verified": "All five speeds, fractional trim/start, cancellation, pending decoder cleanup, retry and late bitmap release. Actual public page outputs fully decoded."
   }
 }
