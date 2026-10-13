@@ -36,14 +36,14 @@ window.VeyCutExporter = (() => {
       if(ids.has(c.id))throw new Error('Duplicate clip identity in export.');ids.add(c.id);
       const begin=compositor.start(c), seconds=compositor.duration(c);
       if(!Number.isFinite(begin)||!Number.isFinite(seconds)||begin<0||seconds<1/60)throw new Error('Invalid timeline range.');
-      if(c.kind!=='text' && (!c.url||!c.url.startsWith('blob:')))throw new Error('Reconnect every original media file before exporting.');
-      if(c.kind!=='text' && c.kind!=='image' && !compositor.isHold(c) && (!Number.isFinite(c.in)||!Number.isFinite(c.out)||c.in<0||c.out-c.in<.05))throw new Error('Invalid source range.');
+      if(!['text','shape'].includes(c.kind) && (!c.url||!c.url.startsWith('blob:')))throw new Error('Reconnect every original media file before exporting.');
+      if(['video','audio'].includes(c.kind||'video') && !compositor.isHold(c) && (!Number.isFinite(c.in)||!Number.isFinite(c.out)||c.in<0||c.out-c.in<.05))throw new Error('Invalid source range.');
       end=Math.max(end,begin+seconds);
     }
     if(end<=0||end>LIMITS.seconds)throw new Error('Export supports timelines up to 120 seconds.');
     const times=clips.flatMap(c=>[compositor.start(c),compositor.start(c)+compositor.duration(c)]);
     for(const time of times){
-      const count=clips.filter(c=>c.kind!=='text'&&time>=compositor.start(c)&&time<compositor.start(c)+compositor.duration(c)).length;
+      const count=clips.filter(c=>!['text','shape'].includes(c.kind)&&time>=compositor.start(c)&&time<compositor.start(c)+compositor.duration(c)).length;
       if(count>LIMITS.simultaneous)throw new Error('Export supports at most 16 simultaneous media layers.');
     }
     return end;
@@ -66,7 +66,7 @@ window.VeyCutExporter = (() => {
     const abort=()=>{for(const item of prepared.values())item.element.pause?.();};signal.addEventListener('abort',abort,{once:true});
     const checkRun=()=>{check(signal);if(failure)throw failure;};
     function draw(time,startup=false){
-      compositor.render(ctx,startup?{...spec,clips:spec.clips.filter(c=>c.kind==='text')}:spec,time,sources);
+      compositor.render(ctx,startup?{...spec,clips:spec.clips.filter(c=>['text','shape'].includes(c.kind))}:spec,time,sources);
       for(const [id,item] of prepared){
         if(item.gain){
           const clip=spec.clips.find(c=>c.id===id),track=(spec.tracks||[]).find(t=>t.id===clip.trackId)||{};
@@ -87,7 +87,7 @@ window.VeyCutExporter = (() => {
       const wanted=new Set(active.map(c=>c.id));
       for(const id of [...prepared.keys()])if(!wanted.has(id))dispose(id);
       for(const clip of active){
-        if(clip.kind==='text')continue;
+        if(['text','shape'].includes(clip.kind))continue;
         let item=prepared.get(clip.id);
         if(!item){
           const element=document.createElement(clip.kind==='image'?'img':clip.kind==='audio'?'audio':'video');

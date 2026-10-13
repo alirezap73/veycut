@@ -63,3 +63,4 @@ button.primary:hover:not(:disabled){background:#a2f1ce}
 .speed-curve input{min-width:0}
 .speed-curve button{width:100%}
 .speed-curve small{display:block;margin-top:7px;line-height:1.5}
+#timeline .kind-shape{background:#4a375e;border-color:#9a74b4}

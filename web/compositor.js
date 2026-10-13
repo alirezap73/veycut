@@ -36,10 +36,12 @@ window.VeyCutCompositor = (() => {
     {id:'fade-black',name:'Dip to black'}, {id:'fade-white',name:'Dip to white'}
   ].map(Object.freeze));
   const transitionIDs=new Set(transitionCatalog.map(entry=>entry.id));
+  const shapeKinds=Object.freeze(['square','circle','triangle','parallelogram','trapezoid','line','arrow']);
   // These non-JSON symbols are renderer state, never project properties.
   const resolved=Symbol('resolvedTransitions'),lane=Symbol('renderLane'),hold=Symbol('transitionHold'),fade=Symbol('visualFade'),shades=Symbol('colourFades');
 
   const cache = new WeakMap();
+  const shapeCache = new WeakMap();
   const stillCache = new WeakMap();
   let blurScratch=null;
 
@@ -162,10 +164,17 @@ window.VeyCutCompositor = (() => {
     return Math.max(0,valueAt(clip,'volume',time))*Math.min(rampIn,rampOut);
   }
   function validateClip(clip) {
-    if (!['video','audio','image','text'].includes(clip.kind || 'video'))
+    if (!['video','audio','image','text','shape'].includes(clip.kind || 'video'))
       throw new Error('This clip kind is not rendered in the browser: '+clip.kind);
-    if (clip.cutout || clip.reversed || clip.reverse || clip.shape)
+    if (clip.cutout || clip.reversed || clip.reverse)
       throw new Error('This clip requires a native treatment that is not yet available in browser export.');
+    if(clip.kind==='shape'){
+      const style=clip.shape||{};
+      if(!shapeKinds.includes(style.kind||'square')||!Number.isFinite(style.size??.35)||(style.size??.35)<.01||(style.size??.35)>2||
+        !Number.isFinite(style.strokeWidth??.012)||(style.strokeWidth??.012)<0||(style.strokeWidth??.012)>.5||
+        [style.fill??'#ffffff',style.stroke??''].some(colour=>typeof colour!=='string'||colour!==''&&!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(colour)))
+        throw new Error('Invalid shape style.');
+    }else if(clip.shape)throw new Error('Shape styling requires a shape clip.');
     if(clip.speedCurve!=null){
       if(!Array.isArray(clip.speedCurve)||!clip.speedCurve.length||clip.speedCurve.length>1024||
         clip.speedCurve.some(p=>!p||!Number.isFinite(p.at)||p.at<0||p.at>1||!Number.isFinite(p.speed)||p.speed<.0625||p.speed>16))
@@ -335,6 +344,27 @@ window.VeyCutCompositor = (() => {
     if (constant) stored.set(clip.id,{canvas,source,signature});
     return canvas;
   }
+  function shape(ctx,clip,spec){
+    const style=clip.shape||{},kind=style.kind||'square';
+    if(!shapeKinds.includes(kind))throw new Error('Unsupported shape: '+kind);
+    const size=clamp(number(style.size,.35),.01,2)*spec.height;
+    const asked=Math.max(0,number(style.strokeWidth,.012))*spec.height,rule=asked>0?Math.max(1,asked):0;
+    const width=size,height=kind==='triangle'?size*.866:['parallelogram','trapezoid'].includes(kind)?size*.6:kind==='line'?rule:kind==='arrow'?Math.max(rule*4,size*.18):size;
+    const cx=spec.width/2,cy=spec.height/2,left=cx-width/2,right=cx+width/2,top=cy-height/2,bottom=cy+height/2;
+    ctx.beginPath();let closed=true;
+    if(kind==='square')ctx.rect(left,top,width,height);
+    else if(kind==='circle')ctx.arc(cx,cy,size/2,0,Math.PI*2);
+    else if(kind==='triangle'){ctx.moveTo(cx,top);ctx.lineTo(right,bottom);ctx.lineTo(left,bottom);ctx.closePath();}
+    else if(kind==='parallelogram'){ctx.moveTo(left+width*.2,top);ctx.lineTo(right,top);ctx.lineTo(right-width*.2,bottom);ctx.lineTo(left,bottom);ctx.closePath();}
+    else if(kind==='trapezoid'){ctx.moveTo(left+width*.2,top);ctx.lineTo(right-width*.2,top);ctx.lineTo(right,bottom);ctx.lineTo(left,bottom);ctx.closePath();}
+    else {closed=false;const tip=right-rule/2;ctx.moveTo(left+rule/2,cy);ctx.lineTo(tip,cy);
+      if(kind==='arrow'){const arm=height/2;ctx.moveTo(tip-arm,cy-arm);ctx.lineTo(tip,cy);ctx.lineTo(tip-arm,cy+arm);}}
+    const colour=value=>typeof value==='string'&&/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value)?value:null;
+    const fill=colour(style.fill??'#ffffff'),edge=colour(style.stroke??'');
+    ctx.lineWidth=rule;ctx.lineCap='round';ctx.lineJoin='round';
+    if(closed){if(fill){ctx.fillStyle=fill;ctx.fill();}if(rule>0&&edge){ctx.strokeStyle=edge;ctx.stroke();}}
+    else if(rule>0&&(edge||fill)){ctx.strokeStyle=edge||fill;ctx.stroke();}
+  }
   function text(ctx, clip, spec, time) {
     const style=clip.text || clip.textStyle;
     if (!style || !style.content) return;
@@ -404,7 +434,11 @@ window.VeyCutCompositor = (() => {
         ctx.translate(x,y);ctx.rotate(valueAt(clip,'rotation',time)*Math.PI/180);
         const scale=Math.max(.001,valueAt(clip,'scale',time));
         ctx.scale(scale*valueAt(clip,'stretchX',time)*(clip.flipH?-1:1),scale*valueAt(clip,'stretchY',time)*(clip.flipV?-1:1));
-        if (clip.kind==='text') {
+        if(clip.kind==='shape'){
+          let picture=shapeCache.get(ctx);if(!picture){picture=document.createElement('canvas');shapeCache.set(ctx,picture);}
+          picture.width=spec.width;picture.height=spec.height;shape(picture.getContext('2d'),clip,spec);
+          const canvas=layerCanvas(ctx,clip,picture,spec,time);ctx.drawImage(canvas,-canvas.width/2,-canvas.height/2);
+        }else if (clip.kind==='text') {
           if((clip.videoEffects||[]).some(e=>e.enabled!==false)||(clip[shades]||[]).length){
             let canvas=cache.get(ctx);if(!canvas){canvas=document.createElement('canvas');cache.set(ctx,canvas);}canvas.width=spec.width;canvas.height=spec.height;
             const paint=canvas.getContext('2d',{willReadFrequently:true});text(paint,clip,spec,time);
@@ -423,5 +457,5 @@ window.VeyCutCompositor = (() => {
     } finally {ctx.restore();}
   }
   return Object.freeze({render,validateClip,audioGain,valueAt,start,duration,ease,filterPixels,resolveTransitions,sourceTime,speedAt,timelineTime,isHold,transitionShading,opacityAt,effectCatalog,transitionCatalog,
-    supportedEffects:Object.freeze([...effects]),supportedBlends:Object.freeze(Object.keys(blend))});
+    supportedEffects:Object.freeze([...effects]),supportedBlends:Object.freeze(Object.keys(blend)),shapeKinds});
 })();

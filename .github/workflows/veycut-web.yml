@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js']
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js']
   workflow_dispatch:
   workflow_call:
 
@@ -80,6 +80,7 @@ jobs:
           node --check scripts/veycut_web_audio_tone_check.js
           node --check scripts/veycut_web_effects_check.js
           node --check scripts/veycut_web_speed_curve_check.js
+          node --check scripts/veycut_web_shapes_check.js
           node scripts/test_web_compositor.js
           node --check scripts/veycut_web_browser_check.js
           node --check scripts/veycut_web_parity_check.js
@@ -100,7 +101,7 @@ jobs:
           cleanup_browser() {
             result=$?
             if [ "$result" -ne 0 ]; then
-              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log; do
+              for log in output/playwright/edit.log output/playwright/check.log output/playwright/limit-check.log output/playwright/parity*.log output/playwright/legacy*.log output/playwright/transport-check.log output/playwright/native-*.log output/playwright/transition-check.log output/playwright/timelines-check.log output/playwright/audio-tone-check.log output/playwright/speed-curve-check.log output/playwright/shapes-check.log; do
                 if [ -f "$log" ]; then tail -c 18000 "$log"; fi
               done
               if [ -f output/playwright/parity-report.json ]; then
@@ -377,6 +378,19 @@ jobs:
           assert any(s['codec_type']=='video' for s in meta['streams'])
           assert any(s['codec_type']=='audio' for s in meta['streams'])
           PYSPEED
+          playwright-cli run-code --filename=scripts/veycut_web_shapes_check.js > output/playwright/shapes-check.log
+          ffmpeg -v error -xerror -i output/playwright/shapes-video.webm -f null -
+          python3 - <<'PYSHAPES'
+          import subprocess
+          frame=subprocess.check_output(['ffmpeg','-v','error','-ss','0.8','-i','output/playwright/shapes-video.webm','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'])
+          assert len(frame)==360*640*3
+          def pixel(x,y):
+              at=(y*360+x)*3
+              return frame[at:at+3]
+          centre=pixel(180,320)
+          assert centre[0]>210 and centre[1]<35 and centre[2]<35, list(centre)
+          assert max(pixel(10,10))<20 and max(pixel(40,320))<20
+          PYSHAPES
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Retain browser evidence
