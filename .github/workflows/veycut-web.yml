@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'scripts/veycut_web_mp4_input_check.js', 'scripts/verify_web_mp4_input.py', 'scripts/veycut_web_rate_check.js', 'scripts/verify_web_rates.py', 'scripts/veycut_web_codec_check.js', 'scripts/verify_web_codecs.py', 'scripts/veycut_web_audio_tone_check.js', 'scripts/verify_web_audio_tone.py', 'THIRD_PARTY_NOTICES.md']
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'scripts/veycut_web_mp4_input_check.js', 'scripts/verify_web_mp4_input.py', 'scripts/veycut_web_rate_check.js', 'scripts/verify_web_rates.py', 'scripts/veycut_web_codec_check.js', 'scripts/verify_web_codecs.py', 'scripts/veycut_web_pitch_prototype_check.js', 'scripts/verify_web_pitch_prototype.py', 'scripts/veycut_web_audio_tone_check.js', 'scripts/verify_web_audio_tone.py', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
     inputs:
       long_export:
@@ -111,6 +111,23 @@ jobs:
           tar -xOf "$RUNNER_TEMP/mediabunny.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny.txt
           tar -xOf "$RUNNER_TEMP/aac-encoder.tgz" package/dist/bundles/mediabunny-aac-encoder.min.mjs > web/vendor/mediabunny-aac-encoder.min.mjs
           tar -xOf "$RUNNER_TEMP/aac-encoder.tgz" package/LICENSE > web/vendor/LICENSE-mediabunny-aac-encoder.txt
+      - name: Bundle pinned experimental pitch DSP
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 --max-time 60 --max-filesize 1000000 https://registry.npmjs.org/@soundtouchjs/core/-/core-2.1.1.tgz -o "$RUNNER_TEMP/soundtouch-core.tgz"
+          curl --fail --location --retry 2 --max-time 60 --max-filesize 1000000 https://registry.npmjs.org/@soundtouchjs/interpolation-strategy-lanczos/-/interpolation-strategy-lanczos-2.1.1.tgz -o "$RUNNER_TEMP/soundtouch-lanczos.tgz"
+          python3 - <<'PYPITCH'
+          import base64,hashlib,os
+          from pathlib import Path
+          for name,expected in [('soundtouch-core','ccBiG9/zHdM1Sx1RUkXWBgRYFI1HCiUHHwRK8gAvVNgmcafBgUzRP6Czn7pUPcHgSQus+i3Eu3DlfBR24wqspA=='),('soundtouch-lanczos','EX4qVLnOJ9pKfL7iSPJSJDKDAoZ4d7JO7KTKMPVo2XIhlmT/2hTZC5dWL/R9Jv3XC7kyQeteeGcogWP6DPi47A==')]:
+              actual=base64.b64encode(hashlib.sha512((Path(os.environ['RUNNER_TEMP'])/(name+'.tgz')).read_bytes()).digest()).decode()
+              assert actual==expected,(name,actual)
+          PYPITCH
+          mkdir -p web/vendor/soundtouch-core web/vendor/soundtouch-lanczos
+          tar -xf "$RUNNER_TEMP/soundtouch-core.tgz" -C web/vendor/soundtouch-core --strip-components=2 package/.dist
+          tar -xf "$RUNNER_TEMP/soundtouch-lanczos.tgz" -C web/vendor/soundtouch-lanczos --strip-components=2 package/.dist
+          tar -xOf "$RUNNER_TEMP/soundtouch-core.tgz" package/LICENSE > web/vendor/soundtouch-core/LICENSE
+          tar -xOf "$RUNNER_TEMP/soundtouch-lanczos.tgz" package/LICENSE > web/vendor/soundtouch-lanczos/LICENSE
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -487,6 +504,8 @@ jobs:
           python3 scripts/verify_web_rates.py
           playwright-cli run-code --filename=scripts/veycut_web_codec_check.js > output/playwright/codec-check.log
           python3 scripts/verify_web_codecs.py
+          playwright-cli run-code --filename=scripts/veycut_web_pitch_prototype_check.js > output/playwright/pitch-prototype-check.log
+          python3 scripts/verify_web_pitch_prototype.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Five-minute source and real browser export
