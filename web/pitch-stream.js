@@ -4,7 +4,7 @@ export async function createPitchStream({sampleRate=48000,tempo,sourceFrames,out
   if(!Number.isInteger(sampleRate)||sampleRate<8000||sampleRate>96000||!Number.isFinite(tempo)||tempo<.25||tempo>4||!Number.isSafeInteger(sourceFrames)||sourceFrames<1||typeof feed!=='function')throw Error('Invalid pitch stream parameters.');
   const naturalFrames=Math.round(sourceFrames/tempo),targetFrames=outputFrames??naturalFrames;if(!Number.isInteger(targetFrames)||Math.abs(targetFrames-naturalFrames)>Math.ceil(1/tempo)+1)throw Error('Pitch output length does not match the requested tempo.');if(targetFrames<1)throw Error('Pitch output is too short.');if(targetFrames>sampleRate*600)throw Error('Pitch output exceeds ten minutes.');
   check();const {Stretch}=await import('./vendor/soundtouch-core/index.js');check();
-  const processor=new Stretch({sampleRate,createBuffers:true});processor.tempo=tempo;
+  const processor=new Stretch({sampleRate,createBuffers:true});processor.tempo=tempo;processor.quickSeek=false;
   let input=0,output=0,blocks=[],closed=false,busy=false,oldest=0,peakBufferedFrames=0,peakCachedBytes=0;
   const checkOpen=()=>{check();if(closed)throw Error('Pitch stream is closed.');};
   async function read(begin,end){
