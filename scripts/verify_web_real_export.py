@@ -8,7 +8,9 @@ from pathlib import Path
 
 root=Path('output/playwright')
 def run(args):
-    return subprocess.run(args,check=True,timeout=240,stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout
+    process=subprocess.run(args,timeout=240,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    if process.returncode:raise RuntimeError(process.stderr.decode(errors='replace'))
+    return process.stdout
 def probe(path):
     return json.loads(run(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(path)]))
 report=json.loads((root/'real-report.json').read_text());duration=report['seconds'];assert duration in [360,600]
@@ -45,5 +47,5 @@ errors=[]
 for at in [15,90,180,270,duration-30]:
     a,b=frame(source,at+30),frame(video,at);assert len(a)==len(b)==160*90*3
     mae=sum(abs(x-y) for x,y in zip(a,b))/len(a);assert mae<25,(at,mae);errors.append({'seconds':at,'meanPixelError':mae})
-result={'status':'passed','seconds':duration,'mode':report.get('mode','realtime'),'precision':report.get('precision','realtime'),'fullDecode':True,'videoFrames':len(times),'lastVideoPts':times[-1],'maxVideoGap':gap,'audioEnvelopeCorrelation':correlation,'pictureCheckpoints':errors,'streams':[{'type':s['codec_type'],'codec':s['codec_name']} for s in probe(video)['streams']],'sourceSHA256':hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),'fixture':report['fixture'],'scope':'One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers.'}
+result={'status':'passed','seconds':duration,'mode':report.get('mode','realtime'),'precision':report.get('precision','realtime'),'renderTiming':report['timing'],'fullDecode':True,'videoFrames':len(times),'lastVideoPts':times[-1],'maxVideoGap':gap,'audioEnvelopeCorrelation':correlation,'pictureCheckpoints':errors,'streams':[{'type':s['codec_type'],'codec':s['codec_name']} for s in probe(video)['streams']],'sourceSHA256':hashlib.file_digest(source.open('rb'),'sha256').hexdigest(),'fixture':report['fixture'],'scope':'One live-action/CGI film on Linux Chromium; not all camera codecs or other browsers.'}
 (root/'real-decoder-report.json').write_text(json.dumps(result,indent=2));print(json.dumps(result))

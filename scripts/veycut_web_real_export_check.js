@@ -24,14 +24,14 @@ async page=>{
   await page.locator('#export-size').selectOption('640x360');await page.locator('#export-fps').selectOption('24');if(mode==='frames')await page.locator('#export-mode').selectOption('frames');await page.locator('#export-format').selectOption('mp4');
   let profile=await page.evaluate(()=>{const p=window.VeyCutExporter.capability('mp4');return {mime:p.mime,audioCodec:p.audioCodec};});
   const maximum=mode==='frames'?seconds*2:seconds+90;
-  const download=page.waitForEvent('download',{timeout:(maximum+10)*1000});download.catch(()=>{});await page.locator('#video-export').click();
+  const download=page.waitForEvent('download',{predicate:item=>item.suggestedFilename()==='VeyCut-video.mp4',timeout:(maximum+10)*1000});download.catch(()=>{});await page.locator('#video-export').click();
   let lastProgress=-1,stalled=0;
   for(let elapsed=0;elapsed<maximum;elapsed+=20){
     try{await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:20000});break;}
     catch(error){if(!String(error).includes('Timeout'))throw error;}
     const diagnostic=await page.evaluate(()=>({state:document.querySelector('#export-status').dataset.state,progress:Number(document.querySelector('#export-progress').value),message:document.querySelector('#export-status').textContent,memoryBytes:performance.memory?.usedJSHeapSize}));
     diagnostic.elapsedSeconds=elapsed+20;
-    const saved=page.waitForEvent('download');await page.evaluate(value=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)])),a=document.createElement('a');a.href=url;a.download='real-progress.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},diagnostic);await(await saved).saveAs('output/playwright/real-progress.json');
+    const saved=page.waitForEvent('download',{predicate:item=>item.suggestedFilename()==='real-progress.json'});await page.evaluate(value=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)])),a=document.createElement('a');a.href=url;a.download='real-progress.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},diagnostic);await(await saved).saveAs('output/playwright/real-progress.json');
     stalled=diagnostic.progress===lastProgress?stalled+20:0;lastProgress=diagnostic.progress;
     if(stalled>=60)throw Error('Long export stopped progressing: '+JSON.stringify(diagnostic));
   }
