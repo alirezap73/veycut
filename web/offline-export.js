@@ -8,7 +8,7 @@ window.VeyCutOfflineExporter=(()=>{
     const compositor=window.VeyCutCompositor,spec=compositor.resolveTransitions(original),duration=window.VeyCutExporter.validate(spec),encoding=window.VeyCutExporter.budget(duration,spec.quality),fps=spec.fps||30;
     onState('preparing');const MB=await import('./vendor/mediabunny.min.mjs');check();
     const quality=new MB.Quality({bitrate:encoding.videoBitsPerSecond});
-    if(!await MB.canEncodeVideo('avc',{width:spec.width,height:spec.height,quality}))throw Error('H.264 frame encoding is unavailable on this device. Use real-time export.');
+    if(!await MB.canEncodeVideo('avc',{width:spec.width,height:spec.height,quality,frameRate:fps}))throw Error('H.264 frame encoding is unavailable on this device. Use real-time export.');
     const audioCodec=await MB.canEncodeAudio('aac',{numberOfChannels:2,sampleRate:48000})?'aac':await MB.canEncodeAudio('opus',{numberOfChannels:2,sampleRate:48000})?'opus':null;
     if(!audioCodec)throw Error('No supported frame-export audio encoder. Use real-time export.');
     const canvas=document.createElement('canvas');canvas.width=spec.width;canvas.height=spec.height;const context=canvas.getContext('2d',{alpha:false});if(!context)throw Error('Canvas rendering is unavailable.');
@@ -79,7 +79,7 @@ window.VeyCutOfflineExporter=(()=>{
       let fontTimer;try{await Promise.race([Promise.all(fonts),new Promise((_,reject)=>{fontTimer=setTimeout(()=>reject(Error('Fonts did not load for frame export.')),8000);})]);}finally{clearTimeout(fontTimer);}check();
       const target=new MB.StreamTarget(new WritableStream({write(value){check();writer.write(value);}}),{chunked:true,chunkSize:1024*1024});
       output=new MB.Output({format:new MB.Mp4OutputFormat({fastStart:false}),target});
-      const video=new MB.CanvasSource(canvas,{codec:'avc',quality}),audio=new MB.AudioBufferSource({codec:audioCodec,quality:new MB.Quality({bitrate:128000})});
+      const video=new MB.CanvasSource(canvas,{codec:'avc',quality,frameRate:fps}),audio=new MB.AudioBufferSource({codec:audioCodec,quality:new MB.Quality({bitrate:128000})});
       output.addVideoTrack(video,{frameRate:fps});output.addAudioTrack(audio);await output.start();check();onState('rendering');
       let audioEnd=0;
       for(let frame=0;frame<frames;frame++){
