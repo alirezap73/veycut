@@ -426,7 +426,7 @@ jobs:
           import math, struct, wave
           with wave.open('output/playwright/echo-pulse.wav','wb') as out:
               out.setnchannels(1);out.setsampwidth(2);out.setframerate(48000)
-              out.writeframes(b''.join(struct.pack('<h',int(22000*math.sin(2*math.pi*800*i/48000))) if 4800<=i<6720 else b'\0\0' for i in range(96000)))
+              out.writeframes(b''.join(struct.pack('<h',int(22000*math.sin(2*math.pi*800*i/48000))) if 4800<=i<6720 or 43200<=i<45120 else b'\0\0' for i in range(96000)))
           PYECHO
           playwright-cli run-code --filename=scripts/veycut_web_audio_tone_check.js > output/playwright/audio-tone-check.log
           python3 scripts/verify_web_audio_tone.py

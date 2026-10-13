@@ -1,8 +1,9 @@
 // Executed by playwright-cli on the GitHub runner.
 async page => {
   const assert=(condition,message)=>{if(!condition)throw Error(message);};
-  await page.goto('http://127.0.0.1:4173/');
-  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  for(const mode of ['realtime','frames']){
+  const fresh=async()=>{await page.goto('http://127.0.0.1:4173/');await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');await page.locator('#export-mode').selectOption(mode);};
+  await fresh();
   await page.locator('#media-input').setInputFiles('output/playwright/tone-bass.wav');
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
   assert((await page.evaluate(()=>window.VeyCutWeb.snapshot().clips[0].kind))==='audio','Audio source imported');
@@ -12,7 +13,7 @@ async page => {
     await page.locator('#video-export').click();
     await page.waitForFunction(()=>['done','error'].includes(document.querySelector('#export-status').dataset.state),null,{timeout:40000});
     assert(await page.locator('#export-status').getAttribute('data-state')==='done',await page.locator('#export-status').textContent());
-    await (await pending).saveAs('output/playwright/'+name);
+    await (await pending).saveAs('output/playwright/'+mode+'-'+name.replace('.webm',mode==='frames'?'.mp4':'.webm'));
   };
   await exportAudio('tone-baseline.webm');
   await page.locator('details:has(#audio-tone-select) summary').click();
@@ -29,8 +30,7 @@ async page => {
   await page.waitForFunction(()=>!window.VeyCutWeb.snapshot().clips[0].filters?.length);
   await page.locator('#undo').click();
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].filters?.some(f=>f.id==='concat.bass'));
-  await page.goto('http://127.0.0.1:4173/');
-  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await fresh();
   await page.locator('#media-input').setInputFiles('output/playwright/tone-bass.wav');
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
   await page.locator('#export-size').selectOption('360x640');
@@ -40,8 +40,7 @@ async page => {
   await page.locator('#audio-tone-apply').click();
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].filters?.some(f=>f.id==='concat.telephone'&&f.params.drive===5));
   await exportAudio('tone-telephone.webm');
-  await page.goto('http://127.0.0.1:4173/');
-  await page.waitForFunction(()=>document.querySelector('.badge')?.dataset.engine==='wasm');
+  await fresh();
   await page.locator('#media-input').setInputFiles('output/playwright/echo-pulse.wav');
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips.length===1);
   await page.locator('#export-size').selectOption('360x640');
@@ -53,4 +52,5 @@ async page => {
   await page.locator('#audio-tone-apply').click();
   await page.waitForFunction(()=>window.VeyCutWeb.snapshot().clips[0].filters?.some(f=>f.id==='concat.echo'&&f.params.decay===.7));
   await exportAudio('echo-filtered.webm');
+  }
 }
