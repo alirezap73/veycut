@@ -1,9 +1,9 @@
 'use strict';
-// Prototype only: not connected to production export until decoded signal checks pass.
-export async function createPitchStream({sampleRate=48000,tempo,sourceFrames,feed,check=()=>{}}){
+// Bounded constant-tempo stereo PCM; source data is never read past the declared trim.
+export async function createPitchStream({sampleRate=48000,tempo,sourceFrames,outputFrames,feed,check=()=>{}}){
   if(!Number.isInteger(sampleRate)||sampleRate<8000||sampleRate>96000||!Number.isFinite(tempo)||tempo<.25||tempo>4||!Number.isSafeInteger(sourceFrames)||sourceFrames<1||typeof feed!=='function')throw Error('Invalid pitch stream parameters.');
-  const targetFrames=Math.round(sourceFrames/tempo);if(targetFrames<1)throw Error('Pitch output is too short.');if(targetFrames>sampleRate*600)throw Error('Pitch output exceeds ten minutes.');
-  check();const {Stretch}=await import('../vendor/soundtouch-core/index.js');check();
+  const naturalFrames=Math.round(sourceFrames/tempo),targetFrames=outputFrames??naturalFrames;if(!Number.isInteger(targetFrames)||Math.abs(targetFrames-naturalFrames)>Math.ceil(1/tempo)+1)throw Error('Pitch output length does not match the requested tempo.');if(targetFrames<1)throw Error('Pitch output is too short.');if(targetFrames>sampleRate*600)throw Error('Pitch output exceeds ten minutes.');
+  check();const {Stretch}=await import('./vendor/soundtouch-core/index.js');check();
   const processor=new Stretch({sampleRate,createBuffers:true});processor.tempo=tempo;
   let input=0,output=0,blocks=[],closed=false,busy=false,oldest=0,peakBufferedFrames=0,peakCachedBytes=0;
   const checkOpen=()=>{check();if(closed)throw Error('Pitch stream is closed.');};

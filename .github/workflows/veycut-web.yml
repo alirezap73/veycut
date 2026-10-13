@@ -3,7 +3,7 @@ name: VeyCut Web
 on:
   push:
     branches: [main, development/0.3.0, development/web-editor-parity, development/web-parity-next, development/english-interface]
-    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'scripts/veycut_web_mp4_input_check.js', 'scripts/verify_web_mp4_input.py', 'scripts/veycut_web_rate_check.js', 'scripts/verify_web_rates.py', 'scripts/veycut_web_codec_check.js', 'scripts/verify_web_codecs.py', 'scripts/veycut_web_pitch_prototype_check.js', 'scripts/verify_web_pitch_prototype.py', 'scripts/veycut_web_audio_tone_check.js', 'scripts/verify_web_audio_tone.py', 'THIRD_PARTY_NOTICES.md']
+    paths: ['web/**', '!web/README.md', 'LICENSE', 'SOURCE-NOTICES.md', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARK.md', 'src/Cargo.toml', 'src/crates/concat-text/fonts/**', 'src/crates/veycut-web/**', 'src/crates/concat-project/**', 'src/crates/concat-core/**', 'src/Cargo.lock', '.github/workflows/veycut-web.yml', 'scripts/veycut_web_browser_check.js', 'scripts/test_web_compositor.js', 'scripts/veycut_web_parity_check.js', 'scripts/verify_web_parity.py', 'scripts/veycut_web_legacy_check.js', 'scripts/veycut_web_interop_check.js', 'scripts/veycut_web_transport_check.js', 'scripts/veycut_web_native_check.js', 'scripts/veycut_web_timelines_check.js', 'scripts/veycut_web_transition_check.js', 'scripts/veycut_web_shapes_check.js', 'scripts/veycut_web_speed_curve_check.js', 'scripts/test_webm_metadata.js', 'scripts/veycut_web_reliability_check.js', 'scripts/veycut_web_long_export_check.js', 'scripts/verify_web_long_export.py', 'scripts/veycut_web_mp4_check.js', 'scripts/veycut_web_real_export_check.js', 'scripts/verify_web_real_export.py', 'scripts/veycut_web_quality_check.js', 'scripts/test_project_bundle.js', 'scripts/veycut_web_bundle_check.js', 'scripts/test_blob_writer.js', 'scripts/veycut_web_offline_check.js', 'scripts/verify_web_offline.py', 'scripts/veycut_web_mp4_input_check.js', 'scripts/verify_web_mp4_input.py', 'scripts/veycut_web_rate_check.js', 'scripts/verify_web_rates.py', 'scripts/veycut_web_codec_check.js', 'scripts/verify_web_codecs.py', 'scripts/veycut_web_pitch_prototype_check.js', 'scripts/verify_web_pitch_prototype.py', 'scripts/veycut_web_pitch_export_check.js', 'scripts/verify_web_pitch_export.py', 'scripts/veycut_web_audio_tone_check.js', 'scripts/verify_web_audio_tone.py', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
     inputs:
       long_export:
@@ -128,6 +128,22 @@ jobs:
           tar -xf "$RUNNER_TEMP/soundtouch-lanczos.tgz" -C web/vendor/soundtouch-lanczos --strip-components=2 package/.dist
           tar -xOf "$RUNNER_TEMP/soundtouch-core.tgz" package/LICENSE > web/vendor/soundtouch-core/LICENSE
           tar -xOf "$RUNNER_TEMP/soundtouch-lanczos.tgz" package/LICENSE > web/vendor/soundtouch-lanczos/LICENSE
+          curl --fail --location --retry 2 --max-time 120 --max-filesize 80000000 https://github.com/cutterbl/SoundTouchJS/archive/d9e39a7ddcf74c7a145bbba45856f30068c82b79.tar.gz -o "$RUNNER_TEMP/soundtouch-source.tgz"
+          mkdir -p "$RUNNER_TEMP/soundtouch-source" web/vendor/soundtouch-source
+          tar -xf "$RUNNER_TEMP/soundtouch-source.tgz" -C "$RUNNER_TEMP/soundtouch-source" --strip-components=1 --wildcards '*/packages/core/*' '*/packages/interpolation-strategy-lanczos/*' '*/LICENSE' '*/package.json' '*/tsconfig*.json' '*/pnpm-lock.yaml'
+          cp -R "$RUNNER_TEMP/soundtouch-source/packages" web/vendor/soundtouch-source/
+          cp "$RUNNER_TEMP/soundtouch-source/LICENSE" "$RUNNER_TEMP/soundtouch-source/package.json" "$RUNNER_TEMP/soundtouch-source/pnpm-lock.yaml" web/vendor/soundtouch-source/
+          cp "$RUNNER_TEMP/soundtouch-source"/tsconfig*.json web/vendor/soundtouch-source/
+          python3 - <<'PYSOURCE'
+          import json
+          from pathlib import Path
+          root=Path('web/vendor/soundtouch-source')
+          for name in ['core','interpolation-strategy-lanczos']:
+              package=json.loads((root/'packages'/name/'package.json').read_text())
+              assert package['version']=='2.1.1' and package['license']=='MPL-2.0'
+              assert list((root/'packages'/name/'src').rglob('*.ts'))
+          (root/'SOURCE.txt').write_text('Preferred TypeScript source: SoundTouchJS v2.1.1, commit d9e39a7ddcf74c7a145bbba45856f30068c82b79. Full source/build repository: https://github.com/cutterbl/SoundTouchJS/tree/d9e39a7ddcf74c7a145bbba45856f30068c82b79 . npm provenance points at 8d19a91524c578f9ac414c7e7db2a5a1a605ff12; the release commit changes version/changelog files, not these DSP sources. Bundled npm modules are unmodified and checked separately by SHA-512.\n')
+          PYSOURCE
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -506,6 +522,9 @@ jobs:
           python3 scripts/verify_web_codecs.py
           playwright-cli run-code --filename=scripts/veycut_web_pitch_prototype_check.js > output/playwright/pitch-prototype-check.log
           python3 scripts/verify_web_pitch_prototype.py
+          ffmpeg -v error -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=8" -f lavfi -i "sine=frequency=660:sample_rate=48000:duration=8" -filter_complex "[0:a][1:a]amerge=inputs=2[a]" -map "[a]" -c:a pcm_s16le -y output/playwright/pitch-tone.wav
+          playwright-cli run-code --filename=scripts/veycut_web_pitch_export_check.js > output/playwright/pitch-export-check.log
+          python3 scripts/verify_web_pitch_export.py
           playwright-cli snapshot --filename=output/playwright/final.yml
           playwright-cli console > output/playwright/console.log
       - name: Five-minute source and real browser export
