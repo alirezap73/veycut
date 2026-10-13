@@ -1,0 +1,145 @@
+{
+  "sourceCommit": "798e73aee6bb015c42c2a698259d8fb65469f59e",
+  "run": "https://github.com/alirezap73/veycut/actions/runs/38333079698",
+  "browser": "Chromium",
+  "fixture": "Synthetic 300-second 160x90 source with colour/audio markers; 360x640 24 fps output; late Persian caption",
+  "longBrowser": {
+    "status": "passed",
+    "seconds": 300,
+    "requestedFps": 24,
+    "verification": {
+      "duration": 300.038,
+      "decodedEnd": 299.855,
+      "frameCallbacks": true,
+      "checkpoints": 3
+    },
+    "timing": {
+      "recordedSeconds": 300.0133333333333,
+      "maxSourceDrift": 0.008005000000025575,
+      "maxRenderGap": 0.03200000000000003,
+      "drawnFrames": 7208,
+      "captureMode": "manual"
+    },
+    "cancellationDownloaded": false,
+    "source": "Synthetic five-minute colour/audio markers and a late Persian caption; not a real-camera or cross-browser test."
+  },
+  "fullDecode": {
+    "status": "passed",
+    "seconds": 300,
+    "fullDecode": true,
+    "videoFrames": 7205,
+    "lastVideoPts": 300.022,
+    "maxVideoGap": 0.06700000000000728,
+    "declaredDuration": 300.013333,
+    "audioMarkersRms": {
+      "0": 0.08826530874045388,
+      "60": 0.08823239612987989,
+      "120": 0.08823840389387151,
+      "180": 0.08826756596335147,
+      "240": 0.08843048399358125
+    },
+    "lateAudioRms": 0.08847779067347043,
+    "colourMarkers": [
+      {
+        "seconds": 30,
+        "rgb": [
+          246,
+          0,
+          0
+        ]
+      },
+      {
+        "seconds": 90,
+        "rgb": [
+          0,
+          154,
+          0
+        ]
+      },
+      {
+        "seconds": 150,
+        "rgb": [
+          0,
+          0,
+          255
+        ]
+      },
+      {
+        "seconds": 210,
+        "rgb": [
+          255,
+          255,
+          0
+        ]
+      },
+      {
+        "seconds": 270,
+        "rgb": [
+          249,
+          0,
+          255
+        ]
+      }
+    ],
+    "lateCaptionBrightPixels": 2144,
+    "scope": "Five-minute synthetic Chromium recording; not frame-exact native rendering or a camera-file stress test."
+  },
+  "reliability": {
+    "status": "passed",
+    "verification": {
+      "duration": 2.042,
+      "decodedEnd": 1.892,
+      "frameCallbacks": true,
+      "checkpoints": 3
+    },
+    "timing": {
+      "recordedSeconds": 2.013333333333333,
+      "maxSourceDrift": 0.0026816666666665823,
+      "maxRenderGap": 0.02133333333333365,
+      "drawnFrames": 67,
+      "captureMode": "manual"
+    },
+    "minimumClip": {
+      "duration": 0.052,
+      "decodedEnd": 0.021,
+      "frameCallbacks": true,
+      "checkpoints": 1
+    },
+    "fallback": {
+      "recordedSeconds": 2.013333333333333,
+      "maxSourceDrift": 0.002590333333333361,
+      "maxRenderGap": 0.02133333333333365,
+      "drawnFrames": 67,
+      "captureMode": "automatic"
+    },
+    "denseCaptions": {
+      "recordedSeconds": 2.013333333333333,
+      "maxSourceDrift": 0.0026696666666665703,
+      "maxRenderGap": 0.02133333333333365,
+      "drawnFrames": 68,
+      "captureMode": "manual"
+    },
+    "failures": [
+      {
+        "kind": "truncated-encoder",
+        "message": "Export failed: The recorded video is missing frames near 1.00 seconds.",
+        "downloaded": false
+      },
+      {
+        "kind": "audio-clock-interruption",
+        "message": "Export failed: The audio clock stopped; export was cancelled to protect timing.",
+        "downloaded": false
+      },
+      {
+        "kind": "blocked-renderer",
+        "message": "Export failed: Rendering stalled; export was cancelled to protect timing.",
+        "downloaded": false
+      },
+      {
+        "kind": "ended-capture-track",
+        "message": "Export failed: An output media track ended before export completed.",
+        "downloaded": false
+      }
+    ]
+  }
+}
