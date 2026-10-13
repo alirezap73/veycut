@@ -54,12 +54,12 @@ async (page) => {
   if (await page.locator('body').getAttribute('data-check-stage') === 'limit') {
     phase = 'limit-media-reconnect';
     await page.waitForFunction(() => !document.querySelector('#play').disabled);
-    await count(151);
-    await rejectExport('120 seconds');
-    await count(151);
+    await count(376);
+    await rejectExport('300 seconds');
+    await count(376);
     const report = JSON.parse(await page.locator('body').getAttribute('data-check-report'));
     report.checks.push('duration-limit-refusal');
-    report.durationLimit = {timelineSeconds: 121, limitSeconds: 120, downloaded: false};
+    report.durationLimit = {timelineSeconds: 301, limitSeconds: 300, downloaded: false};
     await page.screenshot({path: 'output/playwright/export-limit.png', fullPage: true});
     await emitReport(report);
     return;
@@ -202,7 +202,7 @@ async (page) => {
   await page.setViewportSize({width: 1440, height: 1100});
   phase = 'duration-limit-project-open';
   await page.locator('#project-input').setInputFiles('output/playwright/limit-project.json');
-  await count(151);
+  await count(376);
   await page.locator('#reselect').waitFor({state: 'visible'});
   } catch (error) {
     let diagnostic = {phase, recentErrors};
